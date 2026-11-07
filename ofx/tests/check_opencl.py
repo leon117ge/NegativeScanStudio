@@ -69,5 +69,5 @@ try:
  last_success=lib.nss_test_gpu_status().decode();assert lib.nss_test_gpu(None,src.int_ptr,dest.int_ptr,48,8,0,b'{}')==1002
  print('PASS OpenCL actual OFX entry:',len(cases),'cases',count,'channel comparisons','max_abs',maximum,'scaled',scaled,last_success)
  report=dict(cases=len(cases),viewer_pick_cases=4,missing_queue_status=1002,multi_context_program_kernel_cache=True,passed=True,channel_comparisons=count,max_absolute_error=maximum,max_scaled_error=scaled,tolerance='2e-5 * max(1, abs(CPU))',platform=ctx.devices[0].platform.name,device=ctx.devices[0].name,device_type=str(cl.device_type.to_string(ctx.devices[0].type)),path='Actual OFX Render action + runtime-loaded CL bridge + host buffers/queue',real_resolve_tested=False,physical_gpu_tested=False)
- (root/'docs/data/ofx_0902_opencl_result.json').write_text(json.dumps(report,indent=2)+'\n')
+ (root/'docs/data/ofx_0903_opencl_result.json').write_text(json.dumps(report,indent=2)+'\n')
 finally:queue.finish();lib.nss_test_gpu_close()

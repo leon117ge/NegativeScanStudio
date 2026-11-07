@@ -1,24 +1,28 @@
-# NegativeScan Studio OFX 0.90.2
+# NegativeScan Studio OFX 0.90.3
 
-这是 **插件独立版本**（tag `ofx-v0.90.2`）；NSS Go app 仍为 v0.90，exe 未重建/改动。v0.90 已由用户在 Windows Resolve 加载试用；**0.90.2 CUDA/OpenCL 路径、viewer 控件尚未在真实 Resolve/物理 GPU 验收**。安装与双语说明：[ofx/README](../ofx/README.md)。
+这是 **插件独立版本**（tag `ofx-v0.90.3`）；NSS Go app 仍为 v0.90，exe 未重建/改动。v0.90 已由用户在 Windows Resolve 加载试用；**0.90.3 CUDA/OpenCL 路径、viewer 控件尚未在真实 Resolve/物理 GPU 验收**。安装与双语说明：[ofx/README](../ofx/README.md)。
+
+## 0.90.3：仅更新500T Base
+
+用户眼调指定 **R +1.07 / G 0 / B +0.67 stops**（上版+1.40/0/+0.80），同时作为loader和新实例可见balance默认值。不是新测量。已有工程由宿主保存的slider值不自动覆写；重选500T Base可加载新值。Gamma scale1.15、Exposure0.90、stock gamma、T5600表、GPU/CPU算法和扫描app均未变。
 
 ## 0.90.2：默认观感与实际 GPU 路径
 
 - 胶片 gamma **预设数值保持0.90.1原值**，没有统一×1.25。Positive Out 的 Gamma R/G/B 后紧接 **Gamma scale**，默认 **1.15**，范围.25–2。有效 gamma = 可见 R/G/B ×可见 scale，保持通道比例。Exposure 默认 **0.90 stops**（原1.00）。这两个新默认是用户选择的扫描观感/对比调整，不是 Kodak 实测 gamma 的更正。
 - 因此0.90.2新实例默认输出有意不同于0.90.1。纯公式/DCTL对照需 scale=1、Exposure=1，或把对应有效 gamma/exposure显式送入参考。旧项目请备份；若宿主恢复旧Exposure1但新增scale取1.15，观感仍会变化。设scale1可回到旧gamma。
-- 例如500T LED预设仍显示 .45/.54/.53，scale1.15时有效值 .5175/.621/.6095。旧500T Base实测于scale1。0.90.2当前Base按用户在新默认下眼调，从1.57/0/1.00改为1.40/0/0.80；已取消重测，不把眼调值视为通用stock校准。
+- 例如500T LED预设仍显示 .45/.54/.53，scale1.15时有效值 .5175/.621/.6095。旧500T Base实测于scale1。0.90.2当时Base按用户在新默认下眼调，从1.57/0/1.00改为1.40/0/0.80；已取消重测，不把眼调值视为通用stock校准。
 - Windows NVIDIA/Resolve若采用CUDA，只有OpenCL的插件可能退回CPU，带来整帧GPU↔CPU搬运。这是本次排查的**可验证假设，不是已测出的用户机根因**。本版新增CUDA Driver API/PTX路径，让宿主可直接提供CUDA device pointers和stream。
 - 播放/改变画面后点 **Show render engine**：应看到实际 `CUDA PTX (host stream)`、`OpenCL buffers (host queue)` 或 `CPU N threads`，并列出驱动/runtime可用性。仅“有CUDA驱动”不代表Resolve已协商CUDA；仍显示CPU时应先查宿主GPU模式、驱动、旧bundle/插件缓存，而不是据此承诺FPS。
 
 ## 处理链与交互
 
-线性 camera calibration → Density In → Positive Out。按反馈移除整个 mask/crosstalk 参数组和计算阶段；camera calibration 保留。原独立 DCTL/Go Develop 不改。新 OFX Film base 默认 **0.5/0.5/0.5**；Positive gamma sliders 默认 .55/.635/.62，Gamma scale默认1.15，500T Base 默认加载到可见balance（1.40/0/0.80）、曝光 +0.90、Cineon 输出不变。旧项目请先备份：被移除的 stage 不再生效，不承诺与旧项目完全同观感。
+线性 camera calibration → Density In → Positive Out。按反馈移除整个 mask/crosstalk 参数组和计算阶段；camera calibration 保留。原独立 DCTL/Go Develop 不改。新 OFX Film base 默认 **0.5/0.5/0.5**；Positive gamma sliders 默认 .55/.635/.62，Gamma scale默认1.15，500T Base 默认加载到可见balance（1.07/0/0.67）、曝光 +0.90、Cineon 输出不变。旧项目请先备份：被移除的 stage 不再生效，不承诺与旧项目完全同观感。
 
 Film base and balance 合并片种 gamma、T/D、3200/3800/4400/5000/5600K、片基sliders；Gamma R/G/B和紧随Gamma B的Gamma scale位于Positive Out。选择 stock 立即填 gamma 并建议 T/D；选择类型/色温立即填片基，无 Apply/cast 字段。手动微调保留。科学模型和完整片基表见 [WB](data/ofx_wb.md)，gamma 来源/不确定度见 [stock gamma](data/ofx_stock_gamma.md)。
 
 `base = baseline × 10^(+offset)`：正号与 Density_In `−log10(pixel/base)` 一致。新实例 baseline .5；Load metadata 后用导入的 camera-corrected base 作 baseline。baseline 单独持久保存，切换预设或反复 Load 不累乘；手动 base 微调在下一次选预设时重置。自动 source metadata 模式在 render 副本套同一补偿，不写 UI。手改 base / 选预设 / Load 将退出 Auto，以允许手动覆盖。
 
-Positive Out 保留 **Film white balance (None / 500T Base)**，是 loader，不是额外隐藏gain。500T Base 当前用户眼调R+1.40/G0/B+0.80 stops，立即写 Red/Green/Blue balance；None 将三条复位0。旧 white_code 0.0013 slope 已删除。T/D/stock选择只更新各自base/gamma，不清空手动balance，两者可显式叠加。每stock将来只有一个实测Base，其他片种未测不编数。[表、条件、测量记录](data/ofx_film_bases.md)。
+Positive Out 保留 **Film white balance (None / 500T Base)**，是 loader，不是额外隐藏gain。500T Base 当前用户眼调R+1.07/G0/B+0.67 stops，立即写 Red/Green/Blue balance；None 将三条复位0。旧 white_code 0.0013 slope 已删除。T/D/stock选择只更新各自base/gamma，不清空手动balance，两者可显式叠加。每stock将来只有一个实测Base，其他片种未测不编数。[表、条件、测量记录](data/ofx_film_bases.md)。
 
 ## Viewer 灰/白点
 
@@ -94,15 +98,15 @@ Auto 有效时 metadata 只覆盖 render 副本，UI 不跳动；没有/损坏 m
 
 - Go v0.90 writer fixture 真实写 TIFF，当前插件导入；classic/BigTIFF LE/BE、稀疏 >4GiB metadata offset、Unicode/quoted/file URL/BOM、实际旧156MB TIFF、坏 metadata 均测试。
 - 最小 OFX suite host 调用真实 Load/Describe/Create/Render/Changed/ROI/Destroy：负 row stride、非零 origin、alpha/premult、自动 metadata、立即 stock/gamma/base、反复 Load/切换不累乘、WB 正号、picker 中性化及越界 fallback。原生 viewer handle 外观未测。
-- CPU 对独立 Go DCTL port：100组合×360像素×RGB =108000；旧Go隐藏WB关闭，用相同可见manual gains等效比较。最大绝对差 **9.16e-5**（HDR），实际 scan patch 最大 **6.10e-5**，scaled max **1.50e-6**。通过 `1e-5*max(1,abs(reference))`，不声称 HDR 绝对差均≤1e-5。[结果](data/ofx_0902_parity_result.json)。
-- 真实 OpenCL Render：164组合 +4个二维 picker/prepass 组合（0.90.2另验证双context program/kernel缓存），193536通道比较，最大绝对差 **2.10e-5**、scaled **9.93e-7**（相对 CPU）。[结果](data/ofx_0902_opencl_result.json)。不同 GPU 驱动仍需验收。
+- CPU 对独立 Go DCTL port：100组合×360像素×RGB =108000；旧Go隐藏WB关闭，用相同可见manual gains等效比较。最大绝对差 **9.16e-5**（HDR），实际 scan patch 最大 **6.10e-5**，scaled max **1.50e-6**。通过 `1e-5*max(1,abs(reference))`，不声称 HDR 绝对差均≤1e-5。[结果](data/ofx_0903_parity_result.json)。
+- 真实 OpenCL Render：164组合 +4个二维 picker/prepass 组合（0.90.2另验证双context program/kernel缓存），193536通道比较，最大绝对差 **2.10e-5**、scaled **9.93e-7**（相对 CPU）。[结果](data/ofx_0903_opencl_result.json)。不同 GPU 驱动仍需验收。
 - Windows x64 MinGW 静态 C++/gcc DLL 导出2个 OFX 入口，仅系统 KERNEL32/msvcrt imports；OpenCL.dll 是运行时加载，不是硬依赖。
 
 ## 0.90.2实际Render CPU对照（不是CUDA/Resolve FPS）
 
 结论：**没有额外CPU加速**。本轮新版大帧median慢约2.8%（五组范围重叠），16×16微tile单次慢约1.9%（约0.74µs），不将缓存改动包装成CPU吞吐提升。主要改进目标是让NVIDIA宿主可协商CUDA、避免CPU回退及不必要全图请求，真实收益必须在用户机确认。
 
-同一minimal OFX host实际调用旧tag `ofx-v0.90.1` 与当前Render，不是只测一个数学函数。双方有效参数匹配新默认：raw gamma .55/.635/.62×1.15、Exposure.90、balance1.40/0/.80、相同pending camera/base metadata、Cineon、picker off。旧版用手调gamma/balance匹配，不把观感变化算作优化。
+同一minimal OFX host实际调用旧tag `ofx-v0.90.1` 与0.90.2 Render，不是只测一个数学函数。双方有效参数匹配0.90.2默认：raw gamma .55/.635/.62×1.15、Exposure.90、balance1.40/0/.80、相同pending camera/base metadata、Cineon、picker off。旧版用手调gamma/balance匹配，不把观感变化算作优化。
 
 Linux8-vCPU Xeon/KVM，同-O3/no-math-errno/no-trapping-math。每process预热一次，五组old/new交替，实际0206全帧6246×4170，计时包含参数、metadata、image fetch、prep及内部线程启动；不含TIFF decode/process启动/真实宿主调度与GPU↔CPU搬运。
 

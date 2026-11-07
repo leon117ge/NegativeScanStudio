@@ -1,8 +1,13 @@
 # NegativeScan Studio OFX — Changelog
 
-Current plugin: **0.90.2** · [Plugin release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/ofx-v0.90.2) · [Scanning app changelog](../docs/CHANGELOG.md) · [Versioning policy](../docs/VERSIONING.md)
+Current plugin: **0.90.3** · [Plugin release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/ofx-v0.90.3) · [Scanning app changelog](../docs/CHANGELOG.md) · [Versioning policy](../docs/VERSIONING.md)
 
 Plugin releases are independent from the Windows scanning app. / 插件与扫描软件独立发版。
+
+## 0.90.3 — 500T Base eye-tuned patch
+
+- Change only 500T Base loader and new-instance visible balance defaults to **R +1.07 / G 0 / B +0.67 stops** (was +1.40/0/+0.80), as specified by the user. No new measurement is claimed. Existing saved slider values remain; reselect the preset to load the update.
+- Gamma presets, Gamma scale1.15, Exposure0.90, T/D tables, CPU/GPU algorithms and app v0.90 EXE are unchanged. CUDA/real Resolve validation limits remain.
 
 ## 0.90.2 — CUDA and render setup prerelease
 

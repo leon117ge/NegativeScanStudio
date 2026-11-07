@@ -3,9 +3,9 @@
     "stock": "5219",
     "label": "500T Base",
     "stops": [
-      1.4,
+      1.07,
       0,
-      0.8
+      0.67
     ],
     "conditions": {
       "frame": "0206.tiff",
@@ -14,13 +14,33 @@
       "gamma_scale": 1.15,
       "exposure": 0.9
     },
-    "source": "User eye-tuned decision for OFX0.90.2; no new re-measurement performed",
-    "note": "User eye-tuned under new Gamma scale1.15/Exposure0.90 defaults. Not a universal stock calibration.",
+    "source": "User eye-tuned decision for OFX0.90.3; no new re-measurement performed",
+    "note": "User-specified visible balance values. Gamma scale1.15/Exposure0.90 defaults remain unchanged. Not a universal stock calibration.",
     "previous_stops": [
-      1.57,
+      1.4,
       0,
-      1.0
+      0.8
     ],
-    "previous_measurement": "ofx_500t_base_measurements.json"
+    "history": [
+      {
+        "version": "0.90.1",
+        "stops": [
+          1.57,
+          0,
+          1.0
+        ],
+        "source": "Historical neutral-patch measurement; see historical_measurement"
+      },
+      {
+        "version": "0.90.2",
+        "stops": [
+          1.4,
+          0,
+          0.8
+        ],
+        "source": "User eye-tuned"
+      }
+    ],
+    "historical_measurement": "ofx_500t_base_measurements.json"
   }
 ]

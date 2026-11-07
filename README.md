@@ -5,7 +5,7 @@
 | Product | Current version | Download / release | Documentation |
 |---|---|---|---|
 | **NegativeScan Studio** — scanning app | **v0.90** | [App release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/v0.90) · [Windows x64 EXE](https://github.com/leon117ge/NegativeScanStudio/releases/download/v0.90/NegativeScanStudio_v0.90.exe) | [Hardware](docs/HARDWARE.md) · [App changelog](docs/CHANGELOG.md) · [App roadmap](docs/ROADMAP.md) |
-| **NegativeScan Studio OFX** — Resolve plugin | **0.90.2** | [Plugin release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/ofx-v0.90.2) · [Windows x64 ZIP](https://github.com/leon117ge/NegativeScanStudio/releases/download/ofx-v0.90.2/NegativeScanStudio_OFX_v0.90.2_Win64.zip) | [Install / usage](ofx/README.md) · [Plugin changelog](ofx/CHANGELOG.md) · [Plugin roadmap](ofx/ROADMAP.md) |
+| **NegativeScan Studio OFX** — Resolve plugin | **0.90.3** | [Plugin release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/ofx-v0.90.3) · [Windows x64 ZIP](https://github.com/leon117ge/NegativeScanStudio/releases/download/ofx-v0.90.3/NegativeScanStudio_OFX_v0.90.3_Win64.zip) | [Install / usage](ofx/README.md) · [Plugin changelog](ofx/CHANGELOG.md) · [Plugin roadmap](ofx/ROADMAP.md) |
 
 Both current releases are **prereleases**. Download the EXE for scanning, the OFX ZIP for Resolve, or both. The old OFX ZIP on the app v0.90 release is retained as history; use the separate plugin release above for the current plugin.
 
@@ -29,7 +29,7 @@ A separate C++/OpenFX product for developing linear negative scans inside Resolv
 
 - Camera calibration → Density In → Positive Out in one effect. The current plugin has **no mask/crosstalk stage**.
 - Unchanged film stock gamma presets, visible Gamma scale default1.15 and Exposure default0.90; T/D film balance and 3200/3800/4400/5000/5600K presets that immediately fill visible film-base sliders.
-- A visible RGB balance loader: **500T Base** loads **+1.40 / 0 / +0.80 stops**; manual adjustment remains. These current values are user eye-tuned under Gamma scale1.15/Exposure0.90 defaults, not a universal Kodak constant. [Calibration conditions](docs/data/ofx_film_bases.md).
+- A visible RGB balance loader: **500T Base** loads **+1.07 / 0 / +0.67 stops**; manual adjustment remains. These current values are user eye-tuned under Gamma scale1.15/Exposure0.90 defaults, not a universal Kodak constant. [Calibration conditions](docs/data/ofx_film_bases.md).
 - Viewer gray/white-point sampling through a host-native 2D point parameter and patch radius; TIFF/JSON metadata loading with manual override.
 - Runtime CUDA/PTX or OpenCL buffer rendering when offered by the host, plus an optimized multithreaded CPU fallback.
 
@@ -39,9 +39,9 @@ A separate C++/OpenFX product for developing linear negative scans inside Resolv
 C:\Program Files\Common Files\OFX\Plugins\
 ```
 
-Restart Resolve and find **NegativeScan Studio OFX 0.90.2** under OpenFX → NegativeScan Studio. Back up projects and remove duplicate/older bundles before replacing them. See the [bilingual installation guide](ofx/README.md).
+Restart Resolve and find **NegativeScan Studio OFX 0.90.3** under OpenFX → NegativeScan Studio. Back up projects and remove duplicate/older bundles before replacing them. See the [bilingual installation guide](ofx/README.md).
 
-**Validation limits:** 0.90.2 has CPU/host-free and actual PoCL CPU OpenCL tests, plus offline PTX assembly and mocked CUDA contracts, but its new path has not been verified in real Windows Resolve or on a physical GPU. Native viewer-handle appearance and host GPU negotiation remain to be checked. CPU mode is available. [Implementation, tests and limitations](docs/OFX.md).
+**Validation limits:** 0.90.3 has CPU/host-free and actual PoCL CPU OpenCL tests, plus offline PTX assembly and mocked CUDA contracts, but its new path has not been verified in real Windows Resolve or on a physical GPU. Native viewer-handle appearance and host GPU negotiation remain to be checked. CPU mode is available. [Implementation, tests and limitations](docs/OFX.md).
 
 ## How the two products connect
 
@@ -95,9 +95,9 @@ Plugin dependencies and optional OpenCL tests are documented in [ofx/README.md](
 本仓库现在是两个独立产品：
 
 - **NegativeScan Studio 扫描软件 v0.90**：Windows 相机联机、RGB灯调平、HDR/三色扫描合成、裁切去尘等。下载上方 App release 的 EXE。
-- **NegativeScan Studio OFX 插件 0.90.2**：Resolve 内转正、片基/色温/片种gamma预设、500T Base可见balance、灰白点与metadata加载。下载独立 Plugin release 的 ZIP，退出Resolve后将完整bundle放入上方OFX目录。
+- **NegativeScan Studio OFX 插件 0.90.3**：Resolve 内转正、片基/色温/片种gamma预设、500T Base可见balance、灰白点与metadata加载。下载独立 Plugin release 的 ZIP，退出Resolve后将完整bundle放入上方OFX目录。
 - 扫描TIFF内的 `nss.scan/1` JSON 可由插件 Load 读取；旧图无metadata时手填，不编造RGB。DCTL保留为旧工作流/参考，不是第三个独立发版产品。
-- app 与插件独立版本/日志/路线图；插件更新不等于app升级。0.90.2的新GPU与viewer交互尚待真实Resolve验收。
+- app 与插件独立版本/日志/路线图；插件更新不等于app升级。0.90.3的新GPU与viewer交互尚待真实Resolve验收。
 
 ## License
 

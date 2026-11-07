@@ -43,7 +43,7 @@ void init(){props.propSetInt=si;props.propSetDouble=sd;props.propSetString=ss;pr
 }
 int main(int argc,char **argv){require(argc==3);mock::init();OfxHost h{nullptr,mock::fetch};OfxGetPlugin(0)->setHost(&h);require(OfxGetNumberOfPlugins()==1&&OfxGetPlugin(1)==nullptr);auto call=OfxGetPlugin(0)->mainEntry;mock::Effect fx;auto e=reinterpret_cast<OfxImageEffectHandle>(&fx);auto bag=[](mock::Bag &b){return reinterpret_cast<OfxPropertySetHandle>(&b);};
 require(call(kOfxActionLoad,nullptr,nullptr,nullptr)==kOfxStatOK);require(call(kOfxActionDescribe,e,nullptr,nullptr)==kOfxStatOK);require(call(kOfxImageEffectActionDescribeInContext,e,nullptr,nullptr)==kOfxStatOK);require(fx.params.values.count("cross")==0);require(fx.params.values.count("cross_strength")==0);require(fx.params.values.count("density_cast_on")==0);require(fx.params.values.count("apply_wb")==0);require(fx.params.values.count("positive_film_wb")==1);require(call(kOfxActionCreateInstance,e,nullptr,nullptr)==kOfxStatOK);
-auto s=reinterpret_cast<OfxParamSetHandle>(&fx.params);require(number(s,"gamma_scale",0)==1.15);require(number(s,"positive_expo",0)==.9);require(fx.params.values["gamma_scale"].strings[kOfxParamPropParent][0]=="positive");setI(s,"auto_metadata",0);require(number(s,"positive_gam_r",0)==.55);require(number(s,"density_base_r",0)==.5);require(number(s,"density_base_g",0)==.5);require(number(s,"density_base_b",0)==.5);require(integer(s,"positive_film_wb",0)==1);
+auto s=reinterpret_cast<OfxParamSetHandle>(&fx.params);require(std::abs(number(s,"positive_bal_r",0)-1.07)<1e-9&&number(s,"positive_bal_g",0)==0&&std::abs(number(s,"positive_bal_b",0)-.67)<1e-9);require(OfxGetPlugin(0)->pluginVersionMinor==9003);require(number(s,"gamma_scale",0)==1.15);require(number(s,"positive_expo",0)==.9);require(fx.params.values["gamma_scale"].strings[kOfxParamPropParent][0]=="positive");setI(s,"auto_metadata",0);require(number(s,"positive_gam_r",0)==.55);require(number(s,"density_base_r",0)==.5);require(number(s,"density_base_g",0)==.5);require(number(s,"density_base_b",0)==.5);require(integer(s,"positive_film_wb",0)==1);
 float in[16]={.03,.04,.05,1,.1,.2,.3,1,.4,.3,.2,1,.5,.5,.5,1},out[16]{};
 for(auto *b:{&fx.source.image,&fx.output.image}){auto p=bag(*b);mock::ss(p,kOfxImageEffectPropPixelDepth,0,kOfxBitDepthFloat);mock::ss(p,kOfxImageEffectPropComponents,0,kOfxImageComponentRGBA);mock::ss(p,kOfxImageEffectPropPreMultiplication,0,kOfxImageUnPreMultiplied);mock::si(p,kOfxImagePropRowBytes,0,-32);for(int j=0;j<4;j++)mock::si(p,kOfxImagePropBounds,j,(int[]){10,20,12,22}[j]);}
 mock::sp(bag(fx.source.image),kOfxImagePropData,0,in+8);mock::sp(bag(fx.output.image),kOfxImagePropData,0,out+8);
@@ -80,13 +80,13 @@ require(fx.params.values["positive_film_wb"].strings[kOfxParamPropChoiceOption][
 // Base gains are constant at different white points; old 0.0013 slope is gone.
 for(float white:{600.f,696.f,800.f}){
  nss::Pipeline measured,manual;measured.positive.white_code=manual.positive.white_code=white;
- manual.positive.film_wb=0;manual.positive.bal_r=1.40f;manual.positive.bal_b=.8f;
+ manual.positive.film_wb=0;manual.positive.bal_r=1.07f;manual.positive.bal_b=.67f;
  nss::Prepared a(measured),b(manual);require(a.values[22]==b.values[22]);require(a.values[24]==b.values[24]);
 }
 // Base dropdown is a visible loader, never a second hidden gain.
 mock::ss(bag(changed),kOfxPropName,0,"positive_film_wb");
 require(call(kOfxActionInstanceChanged,e,bag(changed),nullptr)==kOfxStatOK);
-require(std::abs(number(s,"positive_bal_r",0)-1.4)<1e-6&&std::abs(number(s,"positive_bal_b",0)-.8)<1e-6);
+require(std::abs(number(s,"positive_bal_r",0)-1.07)<1e-6&&std::abs(number(s,"positive_bal_b",0)-.67)<1e-6);
 require(readParams(s,0).positive.film_wb==0);
 setD(s,"positive_bal_r",1.25);require(number(s,"positive_bal_r",0)==1.25);
 setI(s,"positive_film_wb",0);require(call(kOfxActionInstanceChanged,e,bag(changed),nullptr)==kOfxStatOK);

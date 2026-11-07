@@ -1,6 +1,6 @@
 # NegativeScan Studio OFX — Roadmap
 
-Current plugin: **0.90.2** · [Plugin changelog](CHANGELOG.md) · [Scanning app roadmap](../docs/ROADMAP.md) · [Versioning](../docs/VERSIONING.md)
+Current plugin: **0.90.3** · [Plugin changelog](CHANGELOG.md) · [Scanning app roadmap](../docs/ROADMAP.md) · [Versioning](../docs/VERSIONING.md)
 
 ## Implemented experimentally in 0.90.2
 
@@ -26,7 +26,7 @@ Current plugin: **0.90.2** · [Plugin changelog](CHANGELOG.md) · [Scanning app 
 
 Each stock will have exactly one `<Stock> Base` loader, independently of its gamma or illuminant choices. Add entries only after measurement, retaining source, conditions and uncertainty.
 
-- **500T Base — implemented:** current R **+1.40**, G **0**, B **+0.80 stops**, user eye-tuned under Gamma scale1.15/Exposure0.90 defaults. The old +1.57/0/+1.00 measurement from 0206 with T5600 and raw gamma .45/.54/.53 is retained as history. No new measurement was performed; T5600 offsets remain unchanged. [Record and table](../docs/data/ofx_film_bases.md).
+- **500T Base — implemented:** current R **+1.07**, G **0**, B **+0.67 stops**, user eye-tuned under Gamma scale1.15/Exposure0.90 defaults. The old +1.57/0/+1.00 measurement from 0206 with T5600 and raw gamma .45/.54/.53 is retained as history. No new measurement was performed; T5600 offsets remain unchanged. [Record and table](../docs/data/ofx_film_bases.md).
 - **250D / UltraMax400 / Portra400 / Gold200 Base — pending:** no invented or duplicate variants. Existing gamma presets are not evidence of a measured Base calibration.
 - Cross-check with same-roll neutral references, multiple exposures/scanner configurations and processed film batches before generalizing calibrations.
 
