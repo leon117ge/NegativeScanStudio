@@ -1,0 +1,16 @@
+*.exe
+*.bak
+*.bak_*
+*.bak_v*
+*.png
+userlogs/
+*.RAF
+*.raf
+*.tif
+*.tiff
+*.dng
+*.DNG
+*.tmp
+*~
+/out/
+/build/

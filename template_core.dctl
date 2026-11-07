@@ -1,0 +1,109 @@
+DEFINE_UI_PARAMS(out_mode, Output, DCTLUI_COMBO_BOX, 2, {OUT_709, OUT_DI, OUT_CINEON, OUT_ACESCCT, OUT_LIN}, {Rec709, DaVinci Intermediate, Cineon, ACEScct, Linear})
+DEFINE_UI_PARAMS(contrast, Contrast, DCTLUI_COMBO_BOX, 0, {C_OFF, C_LOW, C_MID, C_HIGH}, {Off, Low, Medium, High})
+DEFINE_UI_PARAMS(white_code, White point code, DCTLUI_SLIDER_FLOAT, 696.0, 200.0, 1023.0, 1.0)
+DEFINE_UI_PARAMS(gam_r, Gamma R, DCTLUI_SLIDER_FLOAT, 0.55, 0.2, 2.0, 0.01)
+DEFINE_UI_PARAMS(gam_g, Gamma G, DCTLUI_SLIDER_FLOAT, 0.635, 0.2, 2.0, 0.01)
+DEFINE_UI_PARAMS(gam_b, Gamma B, DCTLUI_SLIDER_FLOAT, 0.62, 0.2, 2.0, 0.01)
+DEFINE_UI_PARAMS(expo, Exposure, DCTLUI_SLIDER_FLOAT, 1.0, -6.0, 6.0, 0.01)
+DEFINE_UI_PARAMS(bal_r, Red balance, DCTLUI_SLIDER_FLOAT, 0.0, -5.0, 5.0, 0.01)
+DEFINE_UI_PARAMS(bal_g, Green balance, DCTLUI_SLIDER_FLOAT, 0.0, -5.0, 5.0, 0.01)
+DEFINE_UI_PARAMS(bal_b, Blue balance, DCTLUI_SLIDER_FLOAT, 0.0, -5.0, 5.0, 0.01)
+@@WB_HEADER@@
+DEFINE_UI_PARAMS(gray_on, Use gray point, DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(gray_r, Gray point R code, DCTLUI_SLIDER_FLOAT, 470.0, 100.0, 1023.0, 0.5)
+DEFINE_UI_PARAMS(gray_g, Gray point G code, DCTLUI_SLIDER_FLOAT, 470.0, 100.0, 1023.0, 0.5)
+DEFINE_UI_PARAMS(gray_b, Gray point B code, DCTLUI_SLIDER_FLOAT, 470.0, 100.0, 1023.0, 0.5)
+
+@@WB_FUNC@@
+
+__DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p_R, float p_G, float p_B)
+{
+    float dw = (white_code - 95.0f) * 0.002f;
+    float ar = 0.0f;
+    float ag = 0.0f;
+    float ab = 0.0f;
+    if (film_wb == 1)
+    {
+        ag = 0.0f;
+        ar = 1.56f + (white_code - 696.0f) * 0.0013f;
+        ab = -0.20f;
+    }
+    float gr_c = gray_r;
+    float gg_c = gray_g;
+    float gb_c = gray_b;
+    int use_gray = (gray_on != 0) ? 1 : 0;
+    if (use_gray == 0 && film_wb >= 2)
+    {
+        float3 gp = wb_gray(film_wb);
+        gr_c = gp.x;
+        gg_c = gp.y;
+        gb_c = gp.z;
+        use_gray = 1;
+    }
+    if (use_gray != 0)
+    {
+        float sr = (_expf(_fminf(_fmaxf(2.302585f * ((gr_c - 95.0f) * 0.002f - dw) / gam_r, -30.0f), 20.0f)) - _expf(-2.302585f * dw / gam_r)) / (1.0f - _expf(-2.302585f * dw / gam_r));
+        float sg = (_expf(_fminf(_fmaxf(2.302585f * ((gg_c - 95.0f) * 0.002f - dw) / gam_g, -30.0f), 20.0f)) - _expf(-2.302585f * dw / gam_g)) / (1.0f - _expf(-2.302585f * dw / gam_g));
+        float sb = (_expf(_fminf(_fmaxf(2.302585f * ((gb_c - 95.0f) * 0.002f - dw) / gam_b, -30.0f), 20.0f)) - _expf(-2.302585f * dw / gam_b)) / (1.0f - _expf(-2.302585f * dw / gam_b));
+        sr = _fmaxf(sr, 0.0001f);
+        sg = _fmaxf(sg, 0.0001f);
+        sb = _fmaxf(sb, 0.0001f);
+        ar = _log2f(sg / sr);
+        ab = _log2f(sg / sb);
+    }
+    float dr = (p_R * 1023.0f - 95.0f) * 0.002f;
+    float dg = (p_G * 1023.0f - 95.0f) * 0.002f;
+    float db = (p_B * 1023.0f - 95.0f) * 0.002f;
+    float lr = _exp2f(expo + bal_r + ar) * (_expf(_fminf(_fmaxf(2.302585f * (dr - dw) / gam_r, -30.0f), 20.0f)) - _expf(-2.302585f * dw / gam_r)) / (1.0f - _expf(-2.302585f * dw / gam_r));
+    float lg = _exp2f(expo + bal_g + ag) * (_expf(_fminf(_fmaxf(2.302585f * (dg - dw) / gam_g, -30.0f), 20.0f)) - _expf(-2.302585f * dw / gam_g)) / (1.0f - _expf(-2.302585f * dw / gam_g));
+    float lb = _exp2f(expo + bal_b + ab) * (_expf(_fminf(_fmaxf(2.302585f * (db - dw) / gam_b, -30.0f), 20.0f)) - _expf(-2.302585f * dw / gam_b)) / (1.0f - _expf(-2.302585f * dw / gam_b));
+    lr = _fminf(_fmaxf(lr, 0.0f), 64.0f);
+    lg = _fminf(_fmaxf(lg, 0.0f), 64.0f);
+    lb = _fminf(_fmaxf(lb, 0.0f), 64.0f);
+    if (contrast != 0)
+    {
+        float cc = (contrast == 1) ? 1.10f : ((contrast == 2) ? 1.25f : 1.40f);
+        float kk = (contrast == 1) ? 0.70f : ((contrast == 2) ? 0.55f : 0.45f);
+        float yr = 0.18f * _powf(lr / 0.18f, cc);
+        float yg = 0.18f * _powf(lg / 0.18f, cc);
+        float yb = 0.18f * _powf(lb / 0.18f, cc);
+        lr = (yr > kk) ? (kk + (1.0f - kk) * _tanhf((yr - kk) / (1.0f - kk))) : yr;
+        lg = (yg > kk) ? (kk + (1.0f - kk) * _tanhf((yg - kk) / (1.0f - kk))) : yg;
+        lb = (yb > kk) ? (kk + (1.0f - kk) * _tanhf((yb - kk) / (1.0f - kk))) : yb;
+    }
+    float r = 1.099f * _powf(lr, 0.45f) - 0.099f;
+    float g = 1.099f * _powf(lg, 0.45f) - 0.099f;
+    float b = 1.099f * _powf(lb, 0.45f) - 0.099f;
+    if (out_mode != 0)
+    {
+        if (out_mode == 1)
+        {
+            r = (lr > 0.00262409f) ? ((_log2f(lr + 0.0075f) + 7.0f) * 0.07329248f) : (lr * 10.44426855f);
+            g = (lg > 0.00262409f) ? ((_log2f(lg + 0.0075f) + 7.0f) * 0.07329248f) : (lg * 10.44426855f);
+            b = (lb > 0.00262409f) ? ((_log2f(lb + 0.0075f) + 7.0f) * 0.07329248f) : (lb * 10.44426855f);
+        }
+        else if (out_mode == 2)
+        {
+            r = _fmaxf((685.0f + 300.0f * 0.4342944819f * _logf(lr * 0.98921f + 0.01079f)) / 1023.0f, 0.0f);
+            g = _fmaxf((685.0f + 300.0f * 0.4342944819f * _logf(lg * 0.98921f + 0.01079f)) / 1023.0f, 0.0f);
+            b = _fmaxf((685.0f + 300.0f * 0.4342944819f * _logf(lb * 0.98921f + 0.01079f)) / 1023.0f, 0.0f);
+        }
+        else if (out_mode == 3)
+        {
+            r = (lr > 0.0078125f) ? ((_log2f(lr) + 9.72f) / 17.52f) : (10.5402377417f * lr + 0.0729055342f);
+            g = (lg > 0.0078125f) ? ((_log2f(lg) + 9.72f) / 17.52f) : (10.5402377417f * lg + 0.0729055342f);
+            b = (lb > 0.0078125f) ? ((_log2f(lb) + 9.72f) / 17.52f) : (10.5402377417f * lb + 0.0729055342f);
+        }
+        else
+        {
+            r = lr;
+            g = lg;
+            b = lb;
+        }
+        return make_float3(r, g, b);
+    }
+    if (lr < 0.018f) r = 4.5f * lr;
+    if (lg < 0.018f) g = 4.5f * lg;
+    if (lb < 0.018f) b = 4.5f * lb;
+    return make_float3(r, g, b);
+}

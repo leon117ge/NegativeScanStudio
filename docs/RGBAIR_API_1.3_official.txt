@@ -1,0 +1,317 @@
+RGBAIR API
+Customer USB CDC Integration Reference — Protocol 1.3
+English edition | 2026-10-28
+
+1. SCOPE
+
+This reference covers RGB lighting control, capture configuration, capture
+requests, device identification and operational status. Use only the commands
+listed here. Unlisted commands and undocumented fields are outside this API.
+
+This document describes the supplied protocol specification. It is not a
+certification of a particular device's behavior. Read the protocol version
+through command 0x21 and observe the compatibility notes in Section 11.
+
+Command IDs and byte sequences below are hexadecimal. Lengths, offsets,
+durations and numeric ranges are decimal unless prefixed with 0x.
+u8/u16/u32 are unsigned integers; i16 is a signed integer.
+Multi-byte application fields use little-endian byte order (LE).
+
+2. DEVICE DISCOVERY AND TRANSPORT
+
+USB VID:             0x0483
+USB PID:             0x5740
+USB product string:  CUTENEW_RGB_AIR
+USB manufacturer:    STMicroelectronics
+Transport:           USB CDC virtual serial port
+
+The documented device imposes no baud-rate restriction on this CDC connection.
+If several matching devices are connected, read their identification using
+command 21 to distinguish them.
+
+CDC is a byte stream: one read may contain part of a frame, a complete frame,
+or multiple frames. Do not rely on USB packet or serial-read boundaries.
+
+3. FRAME FORMAT AND CRC
+
+AA 55 | TYPE:u8 | SEQ:u8 | LEN:u16 LE | PAYLOAD:LEN bytes | CRC16:u16 LE
+
+Field    Bytes   Description
+SOF      2       Fixed AA 55
+TYPE     1       01 command; 81 response; 82 telemetry; 83 event
+SEQ      1       Request sequence; response copies it; unsolicited reports = 00
+LEN      2       Payload length, at most 64 bytes
+PAYLOAD  LEN     Request, response or report
+CRC16    2       CRC low byte followed by high byte
+
+Total frame length is LEN + 8 bytes. The header including SOF is 6 bytes.
+CRC-16/CCITT-FALSE parameters: polynomial 0x1021, initial value 0xFFFF,
+no reflection, final XOR 0x0000. Calculate over TYPE, SEQ, the two LEN bytes
+and PAYLOAD. Do not include SOF or the CRC field itself.
+
+Receiver: find AA 55, collect the header, validate LEN, collect the remaining
+bytes and validate CRC. Reject invalid frames and resynchronize. Bound all
+parsing to the received payload length.
+
+4. CUSTOMER COMMANDS
+
+Commands use TYPE=01. PAYLOAD begins with CMD. Fields in the table follow CMD.
+Request LEN includes the command byte.
+
+CMD  LEN  Operation                  Fields
+01   3    Set channel brightness     channel:u8, value:u8
+02   3    Set channel enable         channel:u8, on:u8
+03   7    Set all RGB channels       R_on, R_value, G_on, G_value,
+                                    B_on, B_value (all u8)
+10   2    Set capture mode           mode:u8
+11   2    Set speed mode             speed:u8
+12   17   Set custom timing          focus_ms, stable_ms, shot_ms,
+                                    exposure_ms (four u32 LE values)
+13   1    Read effective timing      No additional fields
+14   2    Set focus illumination     focus:u8
+15   1    Read focus illumination    No additional fields
+20   1    Read RGB/capture state     No additional fields
+21   1    Read device identification No additional fields
+22   1    Start capture              No additional fields
+
+Channel: 0 = R, 1 = G, 2 = B. No other channels are defined in this reference.
+Enable: 0 = off, 1 = on.
+Brightness: 1..100. To turn a channel off, use its enable flag, not brightness 0.
+For command 03, send valid brightness values even for disabled channels.
+Capture mode: 0 = sequential channels, 1 = direct/single capture.
+Speed mode: 0 = fast, 1 = compatibility, 2 = custom.
+Focus illumination: 0 = mixed light, 1 = green; see Section 6.
+
+Custom timing fields are in milliseconds and must be nonzero. Hosts should
+validate these ranges before sending command 12:
+  focus_ms:     1..10000
+  stable_ms:    1..10000
+  shot_ms:      1..1000
+  exposure_ms:  1..60000
+Select speed mode 2 to use custom timing. Command 13 reads the values actually
+effective in the current speed mode.
+
+5. RESPONSES AND REQUEST CONFIRMATION
+
+TYPE=81; response SEQ matches request SEQ.
+Payload: CMD:u8 | RESULT:u8 | optional response data.
+
+RESULT  Meaning
+00      Success
+01      Unknown command; may also indicate invalid length (see Section 11)
+02      Invalid length
+03      Invalid parameter
+04      Busy
+05      Not implemented
+
+Match both SEQ and CMD when correlating a response. A nonzero RESULT is not
+success. Ordinarily, confirm a change using its matching successful response.
+Command 10 has an acknowledgement compatibility caveat in Section 11.
+Responses and unsolicited reports must be parsed independently; do not assume
+that they arrive in a particular order. Events with SEQ=00 are not correlated
+acknowledgements for individual requests.
+
+Command-specific successful responses:
+
+13: 13 00 followed by four u32 LE fields:
+    focus_ms, stable_ms, shot_ms, exposure_ms. Total payload length: 18 bytes.
+
+14: 14 00. Requesting green focus in direct mode returns 14 03 instead.
+    Changing focus while capturing returns 14 04.
+
+15: 15 00 00 for mixed light, or 15 00 01 for green.
+
+20: Acknowledgement plus a separate state event 01.
+
+21: 21 00 followed by five consecutive NUL-terminated ASCII strings:
+    product model, serial number, hardware version, firmware version,
+    protocol version. The serial number is read-only in this customer API.
+    Do not treat CMD/RESULT as strings. Validate each string terminator within
+    the payload. Protocol version for this reference is 1.3.
+
+6. CAPTURE AND FOCUS BEHAVIOR
+
+6.1 Sequential capture (mode 0)
+
+Capture only the channels enabled when capture starts, in R -> G -> B order.
+Skip disabled channels. Save the original light combination and brightness;
+restore them when the sequence finishes.
+
+Mixed-light focus uses the original light combination for focusing.
+Green focus temporarily lights only G for focusing. It does NOT enable G for
+capture, add a G exposure or change the configured exposure brightness.
+For example, R and B enabled with G disabled produces R and B exposures only,
+even when green focus is selected.
+
+If the stored green brightness is zero, the documented focus-only fallback is
+1%. This does not make brightness 0 a valid command 01 value.
+
+If all RGB channels are off, sequential capture does not start. Command 22
+may still return success, so the host should ensure at least one channel is
+enabled before sending a sequential-capture request.
+
+6.2 Direct capture (mode 1)
+
+Keep the initial light combination and brightness and trigger one exposure.
+Direct capture still performs one focus/shutter sequence when all RGB is off.
+
+Switching to direct mode forces mixed-light focus. A request to select green
+focus is rejected with parameter error. Reading focus returns mixed light.
+Switching back to sequential mode does not restore an earlier green setting.
+Disable focus-illumination editing in the host UI while in direct mode.
+
+6.3 Timing semantics
+
+FOCK is the device's name for its focus signal; SHOT is its shutter signal.
+
+Sequence:
+  Focus begins -> wait focus_ms
+  -> select exposure illumination -> wait stable_ms
+  -> assert SHOT -> wait shot_ms -> deassert SHOT -> wait exposure_ms
+  -> repeat stabilization/shutter/exposure for remaining enabled channels
+     in sequential mode
+  -> restore original illumination and release focus -> complete.
+
+Focus occurs once per complete capture and remains active through the
+sequence. Direct mode does not switch the light combination.
+
+focus_ms:    Focus start to first channel selection, or entry to stabilization
+             in direct mode.
+stable_ms:   Channel selection complete (focus wait complete in direct mode)
+             to shutter assertion.
+shot_ms:     Shutter assertion to shutter release.
+exposure_ms: Shutter release to next channel selection or final restoration.
+
+Configured waits are minimum durations, not precision timing guarantees.
+Exposure wait is a configured delay, not a camera exposure-complete signal.
+Allow sufficient time for the connected camera's trigger latency and exposure.
+
+Preset timings in milliseconds:
+Mode                focus  stable  shot  exposure
+Fast (0)            400    60      100   150
+Compatibility (1)   1000   60      100   450
+Custom (2)          Values supplied through command 12
+
+Preset timings cannot be changed through this API. Read command 13 to obtain
+the current mode's effective values.
+
+7. TELEMETRY
+
+TYPE=82, SEQ=00; documented reporting interval: 500 ms.
+Payload length: 9 bytes. Keep the full layout even when ignoring a field.
+
+Offset  Type    Meaning
+0       i16 LE  Temperature multiplied by 10
+2       u16 LE  Voltage multiplied by 100
+4       u16 LE  Diagnostic field; ignore in customer applications
+6       u16 LE  Diagnostic field; ignore in customer applications
+8       u8      Capture active: 0 idle, 1 capturing
+
+Examples: temperature value 303 means 30.3 degrees C; voltage value 1886 means
+18.86 V. Ignoring diagnostic fields does not remove their bytes from the frame.
+
+8. STATE, CAPTURE PROGRESS AND FAULTS
+
+Events use TYPE=83, SEQ=00. Payload byte 0 identifies the event.
+
+8.1 State event 01
+
+Protocol 1.3 payload length: 10 bytes.
+Offset  Field
+0       Event ID = 01
+1       R enable
+2       R brightness
+3       G enable
+4       G brightness
+5       B enable
+6       B brightness
+7       Capture mode
+8       Speed mode
+9       Focus illumination
+
+Use the complete event to refresh cached configuration. In direct mode,
+capture mode=1 and focus illumination=0.
+Legacy state events may contain only 9 bytes and have no focus field. Never
+read beyond LEN; do not invent a focus value from missing data.
+
+8.2 Progress event 02
+
+Payload (6 bytes): event, phase, channel, step, total, active (all u8).
+Phase: 0 idle, 1 focus, 2 stabilization, 3 shutter trigger,
+       4 exposure wait, 5 complete.
+Channel: 0 R, 1 G, 2 B.
+Non-idle phases are reported during capture. Telemetry active=0 reports idle.
+Step-number origin and the channel value for phases without an individual
+RGB exposure are unspecified; do not assume an undocumented interpretation.
+
+8.3 Fault event 03
+
+Payload (6 bytes): event:u8, fault:u8, active:u8, value:u16 LE, severity:u8.
+Fault: 1 overtemperature, 2 undervoltage, 3 LED-driver fault.
+Value: temperature x10, voltage x100, or 0 respectively.
+Severity is currently 1.
+Occurrence and clearance are reported. The numeric polarity of this event's
+active field is not established by the supplied specification; confirm with
+the device supplier before labeling a report as cleared or active.
+The device handles protection and recovery; the host displays or logs faults.
+
+9. BUSY HANDLING, RETRIES AND DISCONNECTION
+
+During capture:
+  01, 02, 03, 10, 11, 12, 14: return BUSY.
+  13, 20, 21: allowed.
+  22: returns BUSY; does not start an overlapping capture.
+  15: acceptance while busy is unspecified; read when idle unless confirmed
+      for the connected device.
+
+There is no capture-cancel operation in this customer API.
+USB disconnection does not turn off lights, change settings or stop capture.
+Capture continues locally and restores the original lights on normal finish.
+For planned shutdown, wait for idle, explicitly disable RGB and confirm the
+state before closing the connection. Unexpected disconnection is not a
+guaranteed safe-output-off mechanism.
+
+SEQ is a correlation value, NOT a deduplication token. Repeating a request
+with the same SEQ can execute it again. Retrying command 22 after a previous
+capture has finished can start another capture.
+Do not blindly retry side-effecting commands on timeout. Read current state
+and use application logic. Current state cannot prove that a capture did not
+start and finish during a communication gap.
+
+Events have no acknowledgements, retransmission or replay. Lost capture/fault
+events cannot be recovered with command 20. State event 01 is configuration,
+not capture history, current phase or a record of the most recent fault.
+After reconnection, telemetry reports current busy/idle state, not history.
+
+10. STARTUP AND SETTINGS RETENTION
+
+The documented device starts in its local off state. Loading saved settings
+does not itself illuminate outputs before the device leaves that state.
+No remote wake operation is defined in this customer reference.
+
+RGB settings, capture mode, speed, custom timing and focus selection are
+retained. Ordinary changes use a delayed save, approximately 1000 ms after
+the last change. A command acknowledgement is not a guarantee that a setting
+has already been saved across power loss.
+
+Old or invalid focus settings fall back to mixed light. A saved direct-mode
+and green-focus combination is normalized to direct mode with mixed light.
+
+11. COMPATIBILITY NOTES
+
+The supplied protocol descriptions leave the following client-visible details
+unresolved. These notes must not be mistaken for additional commands:
+
+- Invalid request length may be reported as RESULT=01 or RESULT=02. Handle
+  either as failure, not success.
+- The explicit acknowledgement behavior of command 10 is not consistently
+  specified. Do not blindly retransmit on timeout. Query state with command 20
+  and check the resulting capture/focus settings; a state event confirms the
+  observed configuration, not the execution history of an individual request.
+- Read-focus behavior while busy and the progress/fault details noted above
+  require confirmation for the connected device.
+
+Preserve these limitations in client implementations. Unknown commands,
+unrecognized event layouts and malformed payloads should not be interpreted
+as successful operations. This reference is documentation-only; no device
+validation was performed as part of preparing this edition.

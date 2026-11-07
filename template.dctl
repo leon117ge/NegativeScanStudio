@@ -1,0 +1,53 @@
+// FilmScan_Density_In (Node 1)
+
+@@PRESET_HEADER@@
+DEFINE_UI_PARAMS(in_di, Input is DaVinci Intermediate timeline, DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(out_trans, Output transmittance instead of density, DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(base_r, Film base R, DCTLUI_SLIDER_FLOAT, 0.1933, 0.0001, 16.0, 0.00001)
+DEFINE_UI_PARAMS(base_g, Film base G, DCTLUI_SLIDER_FLOAT, 0.1883, 0.0001, 16.0, 0.00001)
+DEFINE_UI_PARAMS(base_b, Film base B, DCTLUI_SLIDER_FLOAT, 0.0593, 0.0001, 16.0, 0.00001)
+DEFINE_UI_PARAMS(dmin_code, Film base code, DCTLUI_SLIDER_FLOAT, 95.0, 0.0, 300.0, 0.5)
+DEFINE_UI_PARAMS(dens_step, Density per code, DCTLUI_SLIDER_FLOAT, 0.002, 0.0005, 0.005, 0.0001)
+DEFINE_UI_PARAMS(full_code, Full scale code, DCTLUI_SLIDER_FLOAT, 1023.0, 255.0, 4095.0, 1.0)
+DEFINE_UI_PARAMS(ev_stops, Backlight exposure offset, DCTLUI_SLIDER_FLOAT, 0.0, -5.0, 5.0, 0.01)
+DEFINE_UI_PARAMS(blk_r, Black subtract R, DCTLUI_SLIDER_FLOAT, 0.0, -0.05, 0.2, 0.00001)
+DEFINE_UI_PARAMS(blk_g, Black subtract G, DCTLUI_SLIDER_FLOAT, 0.0, -0.05, 0.2, 0.00001)
+DEFINE_UI_PARAMS(blk_b, Black subtract B, DCTLUI_SLIDER_FLOAT, 0.0, -0.05, 0.2, 0.00001)
+DEFINE_UI_PARAMS(clamp01, Clamp output to 0 to 1, DCTLUI_CHECK_BOX, 1)
+
+@@PRESET_FUNC@@
+
+__DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p_R, float p_G, float p_B)
+{
+    float3 bs = preset_base(preset, make_float3(base_r, base_g, base_b));
+    float use_r = bs.x;
+    float use_g = bs.y;
+    float use_b = bs.z;
+    float gain = _exp2f(ev_stops);
+    if (in_di != 0)
+    {
+        p_R = (p_R > 0.02740668f) ? (_exp2f(p_R / 0.07329248f - 7.0f) - 0.0075f) : (p_R / 10.44426855f);
+        p_G = (p_G > 0.02740668f) ? (_exp2f(p_G / 0.07329248f - 7.0f) - 0.0075f) : (p_G / 10.44426855f);
+        p_B = (p_B > 0.02740668f) ? (_exp2f(p_B / 0.07329248f - 7.0f) - 0.0075f) : (p_B / 10.44426855f);
+    }
+    float tr = _fmaxf((p_R - blk_r) * gain / _fmaxf(use_r, 0.000001f), 0.000001f);
+    float tg = _fmaxf((p_G - blk_g) * gain / _fmaxf(use_g, 0.000001f), 0.000001f);
+    float tb = _fmaxf((p_B - blk_b) * gain / _fmaxf(use_b, 0.000001f), 0.000001f);
+    float k = -1.0f / (2.302585093f * dens_step * full_code);
+    float r = dmin_code / full_code + _logf(tr) * k;
+    float g = dmin_code / full_code + _logf(tg) * k;
+    float b = dmin_code / full_code + _logf(tb) * k;
+    if (out_trans != 0)
+    {
+        r = tr;
+        g = tg;
+        b = tb;
+    }
+    if (clamp01 != 0)
+    {
+        r = _fminf(_fmaxf(r, 0.0f), 1.0f);
+        g = _fminf(_fmaxf(g, 0.0f), 1.0f);
+        b = _fminf(_fmaxf(b, 0.0f), 1.0f);
+    }
+    return make_float3(r, g, b);
+}

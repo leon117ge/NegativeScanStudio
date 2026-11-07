@@ -1,0 +1,27 @@
+NegativeScan Studio v0.88
+
+用法：
+1. 在 Camera 连接相机，然后进入 Camera & Light > Light。
+2. 灯光页现有共享实时画面；点 Start live view（若尚未启动），直接拖橙色小框选干净片基。Camera/Light/White light/Trichrome 共用框。
+3. Rectangle 模式未真正画框时会阻止调平；Reset to Auto 会清除共用框并恢复自动检测。旧 v0.87 的框需重画一次，以免把原默认中心框误认作手选。
+4. 调平结束显示片基线性 R/G/B（启用相机 profile 时为矩阵后）及灯的 R/G/B 亮度。
+5. 点「写入 DCTL」保存 FilmScan_Density_In 的 Film base R/G/B 默认值及 Light leveling 预设，下次导出即使用；DCTL 页读数/预设同步更新。已有 Resolve 节点不会被远程改动，需重新载入 DCTL/选 Light leveling 预设；CameraCal 必须使用调平时相同 profile 与 strength。
+6. Copy 复制时间/片基/灯值/框/来源。成功记录追加到 %APPDATA%\NegativeScanStudio\leveling_log.csv，时间带 +08:00。Auto 的 normalized box 为全零，表示无手选框。
+7. 真相机 TIFF 复核失败时只显示估算读数，「写入 DCTL」不可用；停止、失败或不收敛不会写入旧数据。
+
+实现：
+修改 hdrpage.go、lightpage.go、main.go、presets.go；四个原文件已先备份为 .bak_v087。
+新增 levelingrecord.go、levelingdefaults.go、levelingexport.go、levelingrecord_test.go、levelingdefaults_test.go。
+Light 是 HDRUI.liveView(3)，只增加显示控件，复用同一 dev/sess/worker/bmp/roi；没有第二个相机连接。离开所有带相机预览的页面停止轮询，返回按原意愿恢复；调平沿用 pause/resume。旧三通道采样图保留在 Last leveling captures (not live) 折叠区。
+写入对象是 Density_In 的 base_r/base_g/base_b 默认值与 preset_base 的 Light leveling 条目，而不是 Mask/Crosstalk 的密度参数。数值为实际 trichrome TIFF/65535 的片基统计，经当次相机矩阵（若启用），非 JPEG 预览读数、非灯百分比。
+
+验证：
+Windows amd64 CGO release cross-build 成功，PE x86-64。
+Linux 包测试全部通过：hdrscan、lightlevel、rgblight、scanconfig、camera、colorsci、cropper、develop、filmdb、rawconv；basestat 无测试。
+初次 Linux 链接缺少 libstdc++.so 开发链接；QA 目录链接到已有 libstdc++.so.6 并设置 CGO_LDFLAGS 后全通过，未改生产源码/系统库。
+五项新行为测试通过：CSV 追加/转义/时区/测量空间、参数合法性、DCTL slider/预设生成、不改变旧导出、保存重载。DCTL/配置测试通过 ./testdata/v088qa 中隔离 Linux harness 执行（从 presets.go AST 抽取原始纯函数，省略 Walk UI）；Windows 完整测试程序亦已交叉编译。
+Windows go vet ./... 报告原有 theme.go:268、270 两条 unsafe.Pointer 告警（该文件未改）；go vet -unsafeptr=false ./... 通过。
+尚未在 Windows GUI 或真实 X-T3/RGB Light Air 硬件上验收；不声称已完成硬件实测。
+
+文件：./testdata/NegativeScanStudio_v0.88.exe
+SHA256: 2615325d4a08699a57bce7f74af34367ec4cf7d68688e8d521a5e72ff60be84b
