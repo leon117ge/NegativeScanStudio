@@ -10,12 +10,18 @@ def run(p,good):
  if good:assert abs(json.loads(r.stdout)['base'][0]-.48)<1e-6
 # Big-endian classic TIFF, UTF-8 path, uncompressed/LZW independence.
 p=build/'元数据.tiff';tifffile.imwrite(p,np.zeros((2,2,3),dtype=np.uint16),photometric='rgb',byteorder='>',description=json.dumps(base));run(p,True)
-for key,value in [('film_base',[1,2]),('film_base',[.5,.5,-1]),('film_base',[1,2,3,4]),('encoding','cineon'),('schema','other'),('processing','mask already applied'),('camera_matrix',[1,2]),('camera_strength',2)]:
+for key,value in [('film_base',[1,2]),('film_base',[.5,.5,-1]),('film_base',[1,2,3,4]),('encoding','cineon'),('schema','other'),('processing','mask already applied'),('camera_matrix',[1,2]),('camera_strength',2),('film_base_space','unknown')]:
  m=base.copy();m[key]=value
  if key=='camera_strength':m['camera_matrix']=[1,0,0,0,1,0,0,0,1]
  p=build/'invalid.json';p.write_text(json.dumps(m));run(p,False)
 p=build/'truncated.tiff';p.write_bytes(b'II*\x00\xff\xff\xff\xff');run(p,False)
 p=build/'sidecar.json';p.write_text(json.dumps(base));run(p,True)
+# An after-profile reference stays unchanged even with a pending camera matrix.
+p=build/'after-profile.json'
+m=dict(base,film_base_space='after_profile',camera_matrix=[.8,0,0,0,1.2,0,0,0,1],camera_strength=1)
+p.write_text(json.dumps(m));run(p,True)
+r=subprocess.run([str(exe),str(p)],capture_output=True,text=True,check=True)
+assert np.allclose(json.loads(r.stdout)['base'],[.48,.5,.46])
 # Classic and BigTIFF, both byte orders; quoted paths and file:// URL decoding.
 for big in (False,True):
  for order in ('<','>'):

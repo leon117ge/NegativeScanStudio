@@ -1,4 +1,4 @@
-# NegativeScan Studio OFX 0.90.4 · Windows x64
+# NegativeScan Studio OFX 0.90.5 · Windows x64
 
 插件独立更新；NSS app 仍为 **v0.90**，本 ZIP 不包含/不更新 exe。
 
@@ -7,12 +7,12 @@
 1. **退出 Resolve**，备份工程，移除旧 bundle，避免同时装两个相同插件。
 2. 解压 ZIP，把整个 `NegativeScanStudio.ofx.bundle` 复制到：
    `C:\Program Files\Common Files\OFX\Plugins\`（可能需要管理员权限）。
-3. 重启 Resolve，在 OpenFX → NegativeScan Studio 找 **NegativeScan Studio OFX 0.90.4**。
+3. 重启 Resolve，在 OpenFX → NegativeScan Studio 找 **NegativeScan Studio OFX 0.90.5**。
 4. Render engine 默认 Auto（按宿主提供的CUDA device pointer / OpenCL buffer使用）；不支持时 CPU（可检查Resolve GPU processing mode/驱动OpenCL支持；CUDA路径已实现但真机协商待测）。Show render engine 可查看最近实际路径；异常可切 CPU。
 
-Quit Resolve, back up your project and remove the previous bundle. Unzip and copy the **entire** `NegativeScanStudio.ofx.bundle` to `C:\Program Files\Common Files\OFX\Plugins\` (administrator access may be needed). Restart Resolve and add **NegativeScan Studio OFX 0.90.4**. Do not install two copies. Auto uses CUDA or OpenCL buffers when offered by the host; CPU fallback is available. No extra C++/OpenCL DLLs are bundled or required for CPU use. This plugin update leaves the v0.90 app unchanged.
+Quit Resolve, back up your project and remove the previous bundle. Unzip and copy the **entire** `NegativeScanStudio.ofx.bundle` to `C:\Program Files\Common Files\OFX\Plugins\` (administrator access may be needed). Restart Resolve and add **NegativeScan Studio OFX 0.90.5**. Do not install two copies. Auto uses CUDA or OpenCL buffers when offered by the host; CPU fallback is available. No extra C++/OpenCL DLLs are bundled or required for CPU use. This plugin patch supports app v0.91 after-profile leveling metadata and remains compatible with older scans.
 
-**0.90.4 未在真实 Windows Resolve/物理 GPU 验收**；已测native CPU、PoCL CPU OpenCL、CUDA PTX离线组装和Driver契约mock；没有真实CUDA执行。custom viewer overlay 的绘制与鼠标分发亦待 Resolve 测试。
+**0.90.5 validation:** native CPU, mock OFX loader/render/overlay, offline PTX assembly, and CUDA Driver contract tests pass. No real Windows Resolve, physical GPU, or PTX execution was tested for this patch. Rendering kernels are unchanged from 0.90.4. Actual viewer appearance and host GPU negotiation still need acceptance testing.
 
 ## 处理链 / Pipeline
 
@@ -98,3 +98,16 @@ MinGW-w64 g++、Python3、native C++17、Go/LibRaw 开发环境；parity用numpy
 CUDA PTX仅开发者改kernel时重建：安装固定NVRTC12.0.140后运行 `python3 ofx/tools/compile_cuda.py`；普通build校验已提交PTX的source/hash，不需要CUDA toolkit。NVIDIA工具/驱动各有自己的许可，不随ZIP分发。
 
 完整 schema、科学近似和验证结果：[docs/OFX.md](https://github.com/leon117ge/NegativeScanStudio/blob/main/docs/OFX.md)。
+
+
+## 0.90.5 metadata compatibility
+
+App v0.91 stores the accepted Light-page leveling result in `film_base`, with
+`film_base_space: "after_profile"` and `base_source: "light leveling (after profile)"`.
+The loader copies that reference without another camera-matrix multiplication;
+the pending matrix still applies to image pixels. Older scans without the marker
+retain their original pre-profile interpretation. Light drive is never a base.
+Visible Film base sliders show the reference times the selected T/D preset's
+`10^offset`; choose T at 3200 K or D at 5600 K to see the exact recorded reference.
+No leveling result means no `film_base`; re-level and capture instead of using
+a scene-content estimate. Existing v0.90 files are not rewritten or repaired.

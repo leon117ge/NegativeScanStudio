@@ -5,7 +5,7 @@
 | Product | Current version | Download / release | Documentation |
 |---|---|---|---|
 | **NegativeScan Studio** — scanning app | **v0.91** | [App release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/v0.91) · [Windows x64 EXE](https://github.com/leon117ge/NegativeScanStudio/releases/download/v0.91/NegativeScanStudio_v0.91.exe) | [Hardware](docs/HARDWARE.md) · [App changelog](docs/CHANGELOG.md) · [App roadmap](docs/ROADMAP.md) |
-| **NegativeScan Studio OFX** — Resolve plugin | **0.90.4** | [Plugin release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/ofx-v0.90.4) · [Windows x64 ZIP](https://github.com/leon117ge/NegativeScanStudio/releases/download/ofx-v0.90.4/NegativeScanStudio_OFX_v0.90.4_Win64.zip) | [Install / usage](ofx/README.md) · [Plugin changelog](ofx/CHANGELOG.md) · [Plugin roadmap](ofx/ROADMAP.md) |
+| **NegativeScan Studio OFX** — Resolve plugin | **0.90.5** | [Plugin release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/ofx-v0.90.5) · [Windows x64 ZIP](https://github.com/leon117ge/NegativeScanStudio/releases/download/ofx-v0.90.5/NegativeScanStudio_OFX_v0.90.5_Win64.zip) | [Install / usage](ofx/README.md) · [Plugin changelog](ofx/CHANGELOG.md) · [Plugin roadmap](ofx/ROADMAP.md) |
 
 Both current releases are **prereleases**. Download the EXE for scanning, the OFX ZIP for Resolve, or both. The old OFX ZIP on the app v0.90 release is retained as history; use the separate plugin release above for the current plugin.
 
@@ -40,9 +40,9 @@ A separate C++/OpenFX product for developing linear negative scans inside Resolv
 C:\Program Files\Common Files\OFX\Plugins\
 ```
 
-Restart Resolve and find **NegativeScan Studio OFX 0.90.4** under OpenFX → NegativeScan Studio. Back up projects and remove duplicate/older bundles before replacing them. See the [bilingual installation guide](ofx/README.md).
+Restart Resolve and find **NegativeScan Studio OFX 0.90.5** under OpenFX → NegativeScan Studio. Back up projects and remove duplicate/older bundles before replacing them. See the [bilingual installation guide](ofx/README.md).
 
-**Validation limits:** 0.90.4 has CPU/host-free and actual PoCL CPU OpenCL tests, plus offline PTX assembly and mocked CUDA contracts, but its new path has not been verified in real Windows Resolve or on a physical GPU. Actual overlay appearance/input and host GPU negotiation remain to be checked. CPU mode is available. [Implementation, tests and limitations](docs/OFX.md).
+**Validation limits:** 0.90.5 passes native CPU, mock-host loader/render/overlay, offline PTX assembly, and mocked CUDA contract tests. Real Windows Resolve, physical GPU execution, overlay appearance/input, and host GPU negotiation remain untested for this patch. Rendering kernels are unchanged from 0.90.4. CPU mode is available. [Implementation, tests and limitations](docs/OFX.md).
 
 ## How the two products connect
 

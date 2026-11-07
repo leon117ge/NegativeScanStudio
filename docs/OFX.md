@@ -1,6 +1,13 @@
-# NegativeScan Studio OFX 0.90.4
+# NegativeScan Studio OFX 0.90.5
 
-这是 **插件独立版本**（tag `ofx-v0.90.4`）；NSS Go app 仍为 v0.90，exe 未重建/改动。v0.90 已由用户在 Windows Resolve 加载试用；**0.90.4 CUDA/OpenCL 路径、viewer 控件尚未在真实 Resolve/物理 GPU 验收**。安装与双语说明：[ofx/README](../ofx/README.md)。
+This independently versioned plugin patch uses tag `ofx-v0.90.5`. App v0.91 has its own executable and tag. The metadata patch passes native CPU and mock-host tests. Real Windows Resolve and physical GPU acceptance remain outstanding. [Installation](../ofx/README.md).
+
+## 0.90.5 after-profile metadata
+
+The app writes its last accepted Light-page leveling base, not a new image
+measurement. The plugin recognizes the explicit coordinate marker and loads the
+reference without applying the camera matrix twice. Older unmarked metadata is
+unchanged. Rendering kernels and film presets are unchanged.
 
 ## 0.90.4：在画面直接点选灰白点
 
@@ -55,7 +62,9 @@ TIFF IFD0，tag270（ImageDescription），ASCII、NUL 结尾 JSON；中文/非 
   "mode": "trichrome",
   "light_model": "CuteNewDesign RGB Light Air",
   "light_rgb": [1200, 2300, 3400],
-  "film_base": [0.48, 0.50, 0.46],
+  "film_base": [0.49844, 0.49639, 0.50210],
+  "film_base_space": "after_profile",
+  "base_source": "light leveling (after profile)",
   "base_source": "measured RGB TIFF clear base",
   "encoding": "linear",
   "camera_matrix": [1,0,0,0,1,0,0,0,1],
@@ -65,7 +74,20 @@ TIFF IFD0，tag270（ImageDescription），ASCII、NUL 结尾 JSON；中文/非 
 }
 ```
 
-上面是格式示例，不是用户实际扫描值。`light_rgb` 是原设备 drive 数；`film_base` 才是线性 TIFF/65535。未知 light/base/matrix 省略；自动处理必须有有效 `film_base`。快照在扫描开始时从 GUI 取一次，三色用 ChannelSwitch 实际传入的 R/G/B；最终 TIFF 写入时用该图实际测到的片基覆盖。白光使用锁定时已知灯值，无设备/无锁定记录则不声称已知。三色 profile 为待应用相机矩阵，NSS 并未把它烘焙到 TIFF；片基仍是矩阵前，导入时对影像和片基应用同一矩阵。原 HDR colour processing 若已写入则记 `encoding=processed` 和 `processing` 描述，不让 OFX 再自动转换。
+The example shows app v0.91 coordinates, not a universal film base. `light_rgb`
+is lamp drive, never the reference. `film_base` is the accepted Light-page
+leveling result after profile, unchanged by capture or merge. The app's default-on
+capture option displays that result and timestamp. Off or no matching accepted
+result omits the base instead of estimating it from image content. Light state
+and scan presets persist the result.
+
+OFX 0.90.5 recognizes `film_base_space: after_profile` and does not multiply
+that base by the pending camera matrix again. TIFF pixels still receive their
+pending matrix. Older unmarked files retain their original pre-profile behavior.
+Visible base sliders equal the reference times `10^offset` for the current T/D
+selection. T at 3200 K or D at 5600 K displays the exact loaded reference. Files with
+`encoding=processed` or nonempty `processing` remain ineligible for automatic
+linear conversion. Existing v0.90 TIFFs are not automatically repaired.
 
 `created` 是写入时间（Asia/Shanghai UTC+8），不是胶片拍摄时间。当前无 EXIF 原始拍摄日期恢复，也没有宣称根据 Kelvin 可以推导设备 RGB PWM。扫描 TIFF 与照片场景色温是两个独立概念。
 

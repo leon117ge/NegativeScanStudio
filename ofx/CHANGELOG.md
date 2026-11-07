@@ -1,8 +1,20 @@
 # NegativeScan Studio OFX — Changelog
 
-Current plugin: **0.90.4** · [Plugin release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/ofx-v0.90.4) · [Scanning app changelog](../docs/CHANGELOG.md) · [Versioning policy](../docs/VERSIONING.md)
+Current plugin: **0.90.5** · [Plugin release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/ofx-v0.90.5) · [Scanning app changelog](../docs/CHANGELOG.md) · [Versioning policy](../docs/VERSIONING.md)
 
 Plugin releases are independent from the Windows scanning app. / 插件与扫描软件独立发版。
+
+## 0.90.5 — app leveling metadata coordinates
+
+- Support app v0.91 `film_base_space: "after_profile"`: load the saved Light-page
+  result without applying the camera matrix to it again. TIFF pixels still get
+  their pending camera correction. Unmarked v0.90 metadata keeps its old meaning.
+- Keep lamp drive separate from Film base. Visible T/D presets continue to fold
+  once into the loaded reference (`base * 10^offset`), never a hard-coded 0.5.
+- Regression: actual loader actions with mock OFX suites, all ten T/D presets,
+  repeated loads, app-produced white/trichrome TIFFs, and legacy metadata.
+- No rendering algorithm or GPU kernel changes. Real Windows Resolve/GPU and
+  the owner's historical TIFF were not available for acceptance testing.
 
 ## 0.90.4 — direct viewer gray picking
 

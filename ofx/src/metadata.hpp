@@ -70,13 +70,16 @@ inline std::string readDescription(const std::string &input) {
 }
 struct Metadata {
  std::array<float,3> base{};std::optional<std::array<int,3>> light;
- std::optional<std::array<float,9>> camera;float strength=1;bool cameraApplied=false;
+ std::optional<std::array<float,9>> camera;float strength=1;bool cameraApplied=false,baseAfterProfile=false;
 };
 inline Metadata parseMetadata(const std::string &text) {
  JSON j;try{j=JSON::parse(text);}catch(...){throw std::runtime_error("Bad NSS JSON");}
  if(j.value("schema","")!="nss.scan/1")throw std::runtime_error("No NSS info (old scan)");
  if(j.value("encoding","")!="linear" || !j.value("processing","").empty())throw std::runtime_error("Not a linear NSS scan");
  Metadata m;
+ auto baseSpace=j.value("film_base_space","");
+ if(!baseSpace.empty()&&baseSpace!="after_profile")throw std::runtime_error("Unknown film base coordinate space");
+ m.baseAfterProfile=baseSpace=="after_profile";
  if(!j.contains("film_base"))throw std::runtime_error("No film base in file");
  if(!j.at("film_base").is_array()||j.at("film_base").size()!=3)throw std::runtime_error("Film base must have 3 elements");
  m.base=j.at("film_base").get<std::array<float,3>>();
@@ -93,7 +96,10 @@ inline void applyMetadata(Pipeline &p,const Metadata &m) {
  // A new file never inherits a previous roll's camera profile.
  p.cameraOn=m.camera.has_value()&&!m.cameraApplied;p.neutralise=0;
  if(m.camera){p.camera=*m.camera;p.cameraStrength=m.strength;}
- Vec3 b=p.cameraPixel({m.base[0],m.base[1],m.base[2]});
+ // v0.91 app leveling is already in camera-profile coordinates. Keep the
+ // camera enabled for TIFF pixels, but never transform this baseline twice.
+ Vec3 b={m.base[0],m.base[1],m.base[2]};
+ if(!m.baseAfterProfile)b=p.cameraPixel(b);
  if(b.x<.0001f||b.y<.0001f||b.z<.0001f)throw std::runtime_error("Camera-corrected base is not positive");
  p.density.base_r=b.x;p.density.base_g=b.y;p.density.base_b=b.z;
 }

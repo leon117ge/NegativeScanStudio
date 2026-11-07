@@ -1,6 +1,13 @@
 # NegativeScan Studio OFX — Roadmap
 
-Current plugin: **0.90.4** · [Plugin changelog](CHANGELOG.md) · [Scanning app roadmap](../docs/ROADMAP.md) · [Versioning](../docs/VERSIONING.md)
+Current plugin: **0.90.5** · [Plugin changelog](CHANGELOG.md) · [Scanning app roadmap](../docs/ROADMAP.md) · [Versioning](../docs/VERSIONING.md)
+
+## Implemented in 0.90.5
+
+- Load app v0.91 accepted after-profile leveling references without another
+  camera transform. Keep the matrix enabled for pending image pixels.
+- Preserve unmarked metadata and noncompounding visible T/D base presets.
+- Test both app capture paths and saved references with the actual loader actions.
 
 ## Implemented in 0.90.4 (host-tested, Resolve pending)
 
