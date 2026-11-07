@@ -24,5 +24,9 @@
 
 - **v0.90** – 首个 Windows x64 CPU OpenFX 一体插件：线性 CameraCal → Density In → Mask/Crosstalk → Positive Out，保留模板默认值；T/D 两套3200/3800/4400/5000/5600K signed density-offset presets、手动微调；500T/250D/UltraMax400/Portra400/Gold200官方曲线中段gamma预设与500T LED估计；片种默认T/D可覆盖。HDR/三色TIFF tag270写入versioned scan JSON，hair/dust/crop保留；OFX尝试Resolve20源路径扩展，另有TIFF/JSON选择+Load并保留manual override。最小OFX host与独立Go DCTL parity已测，静态链接DLL及NSS exe交叉编译；未在真实Resolve/Windows GUI/硬件验收。科学模型/完整精度/误差见 `docs/OFX.md` 和 `docs/data/ofx_*`。400K WIP stash未应用。
 
+## OFX 插件独立版本
+
+- **OFX 0.90.1**（`ofx-v0.90.1`；NSS app 保持 v0.90）– 移除整个 mask/crosstalk 组与阶段，保留 camera calibration；合并 stock/gamma/T-D/色温/Film base，base 默认0.5，预设立即按 `baseline × 10^(+offset)` 更新，无独立cast/Apply。metadata base 作未补偿baseline，防反复选择累乘；Positive WB保留并改None/500T Base loader：实测+1.57/0/+1.00立即写可见balance，无隐藏双倍gain/旧white-code slope；None复位0、可手改，各stock将来仅一个实测Base，T5600不改。文件加载短状态、引号/fileURL/Unicode、classic/BigTIFF LE/BE、64-bit seek、只读IFD/description；确认旧0206无tag270。新增viewer原生2D灰/白点+半径，SOURCE→Density采样逐帧gray correction，OpenCL仅下载小patch。Windows动态OpenCL buffer kernel/CPU fallback、逐帧预计算和最多8线程。全帧CPU benchmark 3779.94→331.55ms（Linux8vCPU、同O3、5组median、非ResolveFPS）；实际PoCL OpenCL/CPU/metadata/WB回归通过。新插件尚未在真实Resolve/物理GPU验收，见 `docs/OFX.md`。
+
 ## 仓库说明
 仓库已通过 git 上传完整源码和构建所需的图标、资源与 LibRaw 静态库。Windows 可执行文件放在 GitHub Releases，不随源码重复提交。

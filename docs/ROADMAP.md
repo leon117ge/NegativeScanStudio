@@ -1,5 +1,12 @@
 # 路线图 / Roadmap
 
+## OFX 0.90.1 已实现（app 保持 v0.90）
+
+- 移除 mask/crosstalk，WB预设直接改片基；metadata baseline防累乘、短错误状态、BigTIFF/Unicode路径。
+- 原生2D灰/白点逐帧SOURCE→Density采样；OpenCL小patch readback。
+- Windows运行时OpenCL buffer路径、预计算/CPU8线程；PoCL真执行/host-free验证与全帧CPU benchmark通过。
+- 待真实Resolve/Windows GPU/原生viewer handle验收；详见 [OFX](OFX.md)。
+
 ## v0.90 已实现（待真实宿主验收）
 
 - Windows CPU OFX一体链、T/D 600K档位、Kodak官方曲线片种gamma预设。
@@ -15,8 +22,8 @@
 
 ## 下一步
 
-1. 先在真实 Resolve 20 / Windows GUI / 相机+灯中验收 v0.90，确认OFX加载、参数UI、源路径扩展、metadata与手动覆盖；GPU路径和自动序列路径后续。
-2. 灰点实测。为中性参考增加独立选框，用同一线性图上的片基和灰点求密度偏移。
+1. 真实 Resolve / Windows GPU 验收 OFX0.90.1：OpenCL协商/性能、CPU fallback、2D point viewer操作、参数UI、Unicode文件加载、源路径扩展。自动序列路径后续。
+2. 同卷灰卡验收 viewer 灰点；目前固定2D点+半径已实现，后续考虑独立选框/手动Bake/跟踪。用同一线性图上的片基和灰点求密度偏移。
    保持灯光、曝光和相机 WB 不变，把偏移写进 DCTL。
 3. 灰阶拟合。用拍在该卷上的多个中性灰阶拟合每层斜率，修正交叉偏色。
    透射色卡本身不是经过该胶片曝光冲洗的灰阶，不能直接拿来测乳剂 gamma。

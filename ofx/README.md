@@ -1,57 +1,77 @@
-# NegativeScan Studio OFX v0.90 . Windows x64 CPU preview
+# NegativeScan Studio OFX 0.90.1 · Windows x64
+
+插件独立更新；NSS app 仍为 **v0.90**，本 ZIP 不包含/不更新 exe。
 
 ## 安装 / Installation
 
-1. 退出 DaVinci Resolve。解压 ZIP，把 **整个** `NegativeScanStudio.ofx.bundle` 文件夹复制到：
+1. **退出 Resolve**，备份工程，移除旧 bundle，避免同时装两个相同插件。
+2. 解压 ZIP，把整个 `NegativeScanStudio.ofx.bundle` 复制到：
    `C:\Program Files\Common Files\OFX\Plugins\`（可能需要管理员权限）。
-2. 重启 Resolve，在 OpenFX → NegativeScan Studio 中找 **NegativeScan Studio**。
-3. 这是 CPU float RGBA 版本，无需额外 libstdc++/libgcc DLL。尚未在真实 Resolve 中验收；建议先在工程副本测试。
+3. 重启 Resolve，在 OpenFX → NegativeScan Studio 找 **NegativeScan Studio OFX 0.90.1**。
+4. Render engine 默认 Auto（宿主提供 OpenCL buffer 时使用）；不支持时 CPU（可检查Resolve GPU processing mode/驱动OpenCL支持；CUDA模式协商待测）。Show render engine 可查看最近实际路径；异常可切 CPU。
 
-Quit Resolve, unzip, copy the entire bundle to `C:\Program Files\Common Files\OFX\Plugins\`, restart Resolve, then add **NegativeScan Studio** from OpenFX. Windows x64 only, CPU float RGBA; no extra C++ runtime DLLs. Real Resolve validation is still pending.
+Quit Resolve, back up your project and remove the previous bundle. Unzip and copy the **entire** `NegativeScanStudio.ofx.bundle` to `C:\Program Files\Common Files\OFX\Plugins\` (administrator access may be needed). Restart Resolve and add **NegativeScan Studio OFX 0.90.1**. Do not install two copies. Auto uses OpenCL buffers when offered by the host; CPU fallback is available. No extra C++/OpenCL DLLs are bundled or required for CPU use. This plugin update leaves the v0.90 app unchanged.
 
-## 输入与节点 / Input and processing
+**0.90.1 未在真实 Windows Resolve/物理 GPU 验收**；已测 native CPU、PoCL CPU OpenCL 真正执行和交叉编译。viewer 2D handle 的呈现亦待 Resolve 测试。
 
-一体链：**线性相机矩阵 → Density In → 密度域 Mask/Crosstalk → Positive Out**。可单独输出 Density/Crosstalk 检查；勾选 Output transmittance 时直接输出透射率，不把它误送给密度域后级。
+## 处理链 / Pipeline
 
-- 输入应是 NSS 的未转正线性 TIFF。避免 Resolve 在插件前自动套入不匹配的输入色彩转换；DI timeline 输入必须明确勾选 Density In 的 Input is DaVinci Intermediate。此选项只解码 DI 传递函数，**不转换色域**。
-- 保留原 DCTL 参数/默认值：片基 `.1933/.1883/.0593`、gamma `.55/.635/.62`、legacy Film WB=1、Cineon 输出、mask off、crosstalk strength=0。相机校准默认为开启的单位矩阵，与导出的 CameraCal DCTL 一致。
-- Positive Out 的 Cineon/DI/ACEScct/Linear 是原模板的编码公式，不是完整的色域变换或打印模拟；Rec709 是原模板的传递函数。没有把 2383 LUT 合入本版本。
-- Density/Crosstalk 各有自己的 code/step/full/clamp 参数，默认相容；若手动改了，必须保持两段一致。Positive Out 保留模板硬编码 95/0.002/1023；没有偷偷“修正”原公式。
-- 用户保存的片基/灰点数据库未自动导入 OFX；可填入 base sliders、gray code sliders。六套固定 Crosstalk 矩阵与 DCTL 相同；光谱研究中的 forward Jacobian **不是**这里的反串扰预设。
+**线性 camera calibration → Density In → Positive Out**。按反馈删除 mask/crosstalk 全组与阶段，保留 camera calibration。输入应为未转正的线性 NSS TIFF；不要重复套旧 DCTL 链。Input is DaVinci Intermediate 只解码 DI 传递函数，不做 gamut 转换。Cineon/DI/ACEScct/Linear/Rec709 是原 DCTL 编码公式，不是完整色彩管理/打印模拟。
 
-Use unconverted linear negatives. Match Resolve input transforms to the plugin, and do not apply the old DCTL chain again. Select output encoding deliberately; these are the original transfer functions, not gamut conversions. All DCTL defaults remain unchanged. Saved per-user base/gray databases are entered manually, not embedded in the binary.
+新实例 Film base 改为 **0.5/0.5/0.5**；Positive gamma 默认 .55/.635/.62、500T Base默认加载可见balance1.57/0/1.00、曝光+1、Cineon 输出保留。旧项目中的 base 值可由宿主恢复，但被移除的 crosstalk 不再生效；请先在工程副本测试。
 
-## 片种 gamma / Film stock gamma presets
+## Film base and balance
 
-`Film stock gamma preset`：Legacy/manual、500T Status M、500T LED estimate、250D、UltraMax 400、Portra 400、Gold 200。选择后填入 Gamma R/G/B，仍可手改。数据/方法/误差见 [`docs/data/ofx_stock_gamma.md`](../docs/data/ofx_stock_gamma.md)。
+- 同一组包含 stock gamma preset、T/D、3200/3800/4400/5000/5600K、Film base 与 Gamma R/G/B。
+- 选择 stock **立即**填 gamma；500T→T，其他→D，可覆盖。保留 Legacy/manual、500T Status M、500T LED .45/.54/.53、250D、UltraMax400、Portra400、Gold200。
+- 选择 T/D/色温 **立即**填 Film base，无 cast sliders / Apply。`base = baseline × 10^(+offset)`，与 Density_In 的 signed additive density offset 同号等价。
+- baseline 新实例 .5/.5/.5；Load 后是文件片基（pending camera 处理后、场景 WB 前）。单独保存 baseline，切换不累乘；手动微调保留，下一次选预设从 baseline 重置微调。
+- **保留** Positive Out 的 Film white balance，下拉为 **None / 500T Base**。500T Base **立即写可见** Red/Green/Blue balance = +1.57/0/+1.00 stops，可手改；None复位三条为0。render不再加额外隐藏ar/ab，没有双重应用/旧white-code slope。
+- T/D、stock gamma、Base balance独立，切换前两者不清空balance，可显式叠加。500T Base为0206在T5600+LED gamma(.45/.54/.53)+white696下实测残差，不是通用Kodak常数。将来每stock仅一个实测Base，其他待测。
+- T=5219/3200K、D=5207/5600K，其他 daylight stocks 共用5207模型；全为 Planck 近似，非实测 scanner/LED 校准。不改物理调平灯值。
 
-- 500T 自动选 T，其余片种自动选 D；Film balance 仍可覆盖。
-- 场景温度：3200/3800/4400/5000/5600K。切换 T/D 或温度会填入 Density In 的 signed additive `cast_r/g/b` 并启用 cast；手动精调直接改这三个值，按钮可恢复预设。
-- 选择新 WB/片种时关闭旧 Positive Out legacy Film WB，避免叠加两套色偏校正；灰点开关仍由用户控制。默认未选择新预设时，legacy 行为不变。
-- T=5219/3200K，D=代表性 5207/5600K；Portra/Gold/UltraMax 的 D 色温偏移暂共用 5207 模型，不是假称各自实测。全部用 Planck 近似，非 CIE D 光源，非 LED 场景校准。灯光调平后不改灯。
+Stock/type/temperature changes immediately populate controls. Manual fine tuning stays available. WB changes the effective film base, not lamp drive. Repeated selection uses the original loaded/default baseline, not the previously compensated result. The Positive WB dropdown is a loader: 500T Base writes +1.57/0/+1.00 into visible RGB balance sliders, with no hidden extra gain. None resets them to zero. Type/temperature and balance are independent and can explicitly stack.
 
-Stock selection fills gamma and suggests T/D, which remains overridable. Temperature/type changes fill signed density offsets; manual tuning remains. Applying new WB disables the legacy tungsten Positive Out balance to avoid stacking. The D illuminant model uses representative 250D sensitivity for all daylight stocks. All are nominal models, not roll/scanner calibration.
+数值、来源与误差：[片基表](https://github.com/leon117ge/NegativeScanStudio/blob/main/docs/data/ofx_wb.md)、[gamma](https://github.com/leon117ge/NegativeScanStudio/blob/main/docs/data/ofx_stock_gamma.md)。
 
-## TIFF 元数据 / Metadata auto-read
+Base校准：[测量条件与可见loader规则](https://github.com/leon117ge/NegativeScanStudio/blob/main/docs/data/ofx_film_bases.md)。
 
-NSS v0.90 的 HDR/三色扫描 TIFF 在标准 **ImageDescription/tag 270** 内写 `nss.scan/1` JSON：实际扫描灯 RGB drive（不是片基！）、成品线性 TIFF 片基、相机矩阵/强度/是否已烘焙、灯型号、卷名、版本、时间、处理状态。未知值不编造、不写假零。裁切工具原有 tag270 保留；去毛发/去灰尘写回也保留。
+## Viewer gray / white point
 
-1. **Resolve 20 source auto-read** 默认启用：探测宿主扩展 `OfxImageEffectPropSrcFilePath`，取得路径后读取 TIFF，按文件路径与修改时间缓存。元数据实际作用在每次 render 的参数副本上，不在 render 中写宿主参数。**所以 UI sliders 不会随自动模式实时跳动。**
-2. 标准 OFX 不保证给源路径；Resolve 20 扩展存在性的公开来源见 [ASWF #142](https://github.com/AcademySoftwareFoundation/openfx/issues/142)。不同版本、复合片段、代理、序列、Fusion/Color 节点位置可能不暴露正确路径，真实 Resolve 内仍待验收。本版不解析序列 `%04d` 路径，也不追踪其它中间节点的像素变换。仅在插件前没有改变扫描线性 RGB 的路径中使用自动片基。
-3. 通用/可靠方法：选择 `Scan TIFF or sidecar JSON` → **Load from file**；会填入 base、pending camera matrix 和强度、显示 light drive RGB，并自动关闭 Auto，成为可手改的快照。没填路径时该按钮尝试宿主源路径。
-4. 要手动覆盖，关闭 Auto 或先 Load；Auto 开启且元数据有效时，自动片基/相机矩阵优先。温度/cast/positive 参数不被 TIFF 覆盖。PWM 灯值只显示为 provenance，**绝不当成归一化片基值**。
-5. 老 TIFF 没有元数据或宿主不暴露源路径时，自动模式保留手动值。显式选择的坏文件会报错而非悄悄套错参数；Load 失败不应当作加载成功。带 baked colour processing 的 TIFF 拒绝自动套用，以免重复转换。Classic TIFF LE/BE 支持；BigTIFF 请导出 JSON。
-6. 导出 sidecar（有 Python 时，无第三方依赖）：`python export_metadata.py scan.tiff`，生成 `scan.tiff.nss.json`，不覆盖已存在文件。该文件可跨 Resolve 使用；也可用 ExifTool 读取 ImageDescription。
+开启 **Auto gray from point**（Base下拉置None、balance可见复位0，开始新中性校正），用 viewer 原生 2D point handle 拖到中性灰/白区域，或手填 canonical X/Y。Sample radius=0–32（当前 render 像素）。逐帧从 SOURCE patch 经 camera/Density In 后取平均 code，使用原 Positive gray-point 算法中性化 R/B 相对 G；不写 UI/key、不锁曝光。关闭后恢复手动 gray 参数。
 
-Resolve 20's optional source-path extension is probed, never assumed. When available, valid metadata overrides a render-local base/camera snapshot; UI values stay unchanged. For portable use, choose a TIFF/JSON and click **Load from file**: controls are populated and Auto is switched off so manual edits persist. Old scans retain manual values. Explicit invalid/processed metadata is rejected. Pending matrices also transform the imported base; already-baked matrices are not applied again. No firmware/light changes are made.
+GPU 开启 picker 时只下载小 patch（有一次同步），默认关闭不增加该开销。不是运动追踪；避免饱和白/纯黑/有色区域。点越界/透明时回退手动 gray，Show render engine 显示 pick unavailable。无 bake 按钮/自绘 overlay，原生 handle 需宿主支持；之后手动balance可在灰点上继续微调；关闭Auto不自动恢复Base。
+
+Enable **Auto gray from point**, move the host's 2D on-screen handle onto a neutral patch, or enter canonical X/Y. Sampling happens on source pixels after camera/Density In, before Positive gain. It updates render-local gray codes each frame, not slider/keyframe values. This is a fixed point, not a tracker; GPU sampling downloads only the small patch. Native overlay availability depends on the host.
+
+## TIFF / JSON 加载
+
+NSS v0.90 HDR/三色扫描将 `nss.scan/1` JSON 写入 **ImageDescription/tag270**：扫描灯 RGB drive、线性片基、相机矩阵及是否已烘焙、灯型号、版本等。`light_rgb` 是设备 drive，**不是** `film_base`。旧文件不追溯补写未知值。
+
+1. 选 Scan TIFF or sidecar JSON → **Load from file (or Resolve source)**。填 base/camera 并关闭 Auto，可以手动覆盖。所选温度补偿以文件片基为 baseline 套一次。
+2. 状态短且明确：Loaded: … / No NSS info (old scan) / File not found。用户的旧0206.tiff实际没有 tag270，无法从无信息的旧图恢复 RGB。
+3. 路径支持引号、UTF-8/Windows Unicode、file://；classic TIFF/BigTIFF LE/BE、64-bit offset。只读 header/IFD/≤1MiB metadata，不加载156MB像素。
+4. Auto-read Resolve20 source metadata 是可选源路径扩展探测，不保证每个 Resolve 版本/代理/复合/序列可用。有效 metadata 只改 render 副本，UI 不随帧跳动。手改 base/选 WB/Load 会关闭 Auto。
+5. 已处理/无效 metadata 拒绝加载，失败不改 base；Auto 缺信息保留 manual。源像素必须仍是同一扫描的线性 RGB，不追踪上游节点色彩变化。
+6. `python export_metadata.py scan.tiff` 按需导出 `.tiff.nss.json`，不覆盖现有 sidecar；该辅助脚本目前限 classic TIFF，插件本体支持 BigTIFF。
+
+Use a TIFF/JSON path and **Load** for portable operation. Resolve's optional source-filename extension is probed, not assumed. Old scans without metadata need manual values; no values are invented. Pending camera matrices transform both image and imported base; baked matrices are not reapplied.
+
+## 性能与限制 / Performance
+
+OpenCL 1.2 buffer kernel runtime compile，动态使用系统 `OpenCL.dll`，宿主提供 queue/buffer；无 CUDA/Metal 路径。失败返回 GPU render failure 允许 host retry，必要时手动 CPU。CPU 逐帧预计算、最多8线程；不用不安全 fast-math 或近似 LUT。
+
+在 Linux 8-vCPU box、6246×4170 内存 RGBA、同O3、预热后5组对照：旧单线程 median **3779.94ms** → 新单线程 **1796.09ms** → 新8线程 **331.55ms**（11.40×；该默认路径输出 bit-exact）。**不是 Resolve FPS/Windows 端到端速度保证**，不含 decode/宿主/UI，也不含默认关闭的 picker；实际 GPU性能待验收。实测 PoCL 执行 OpenCL 并通过 CPU parity，不代表物理 GPU/Resolve 已测。
 
 ## Build / test
 
-```
+```sh
 ./ofx/build.sh /absolute/output/directory
-CGO_LDFLAGS=... NATIVE_CXX=c++ ./ofx/test.sh /absolute/test/directory /path/to/0206.tiff
+NATIVE_CXX=c++ ./ofx/test.sh /absolute/test/directory /path/to/0206.tiff
+NSS_TEST_OPENCL=1 NATIVE_CXX=c++ ./ofx/test.sh /absolute/test/directory /path/to/0206.tiff
+NATIVE_CXX=c++ ./ofx/tests/benchmark.sh /absolute/test/directory /path/to/0206.tiff
 ```
 
-Requires MinGW-w64 g++, Python 3, native C++17 compiler, Go + NSS LibRaw development dependencies; parity check uses numpy/tifffile. Official OpenFX headers are vendored with upstream commit in `vendor/openfx/REVISION`; BSD license retained. JSON parser: nlohmann/json v3.12.0 (MIT). `tools/generate.py` mechanically ports committed DCTL templates, controls/defaults and regenerates WB tables. Gamma digitizer is `tools/digitize_still_gamma.py` (requires pymupdf/numpy and official PDFs, not redistributed).
+MinGW-w64 g++、Python3、native C++17、Go/LibRaw 开发环境；parity用numpy/tifffile，可选OpenCL测试需pyopencl和ICD（例如PoCL）。官方 ASWF OpenFX headers revision见 vendor/openfx/REVISION；新增 ofxGPURender.h 同revision。Khronos OpenCL-Headers v2025.07.22（Apache2）、nlohmann/json3.12（MIT），许可证随ZIP提供。构建静态libstdc++/libgcc，DLL import仅系统KERNEL32/msvcrt。
 
-See [`docs/OFX.md`](../docs/OFX.md) for schema, scientific limits and verification. No CUDA/OpenCL/Metal path in v0.90.
+完整 schema、科学近似和验证结果：[docs/OFX.md](https://github.com/leon117ge/NegativeScanStudio/blob/main/docs/OFX.md)。

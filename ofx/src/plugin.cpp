@@ -2,6 +2,11 @@
 #include "ofxProperty.h"
 #include "metadata.hpp"
 #include "wb_presets.hpp"
+#include "ofxGPURender.h"
+#include "opencl.hpp"
+#include "cpu_render.hpp"
+#include "gray_pick.hpp"
+#include <cstdio>
 #include <cstring>
 #include <map>
 #include <memory>
@@ -14,6 +19,7 @@ OfxPropertySuiteV1 *prop=nullptr;
 OfxImageEffectSuiteV1 *effect=nullptr;
 OfxParameterSuiteV1 *param=nullptr;
 OfxMessageSuiteV1 *message=nullptr;
+OfxMultiThreadSuiteV1 *multithread=nullptr;
 using nss::Pipeline;
 enum class Kind {Number,Boolean,Choice};
 struct Def {const char *key,*label;Kind kind;double def,lo,hi,step;const char *options,*group;};
@@ -41,6 +47,7 @@ struct Instance {
  std::mutex mutex;
  // One bounded cache entry; no stale metadata reused for another clip.
  std::string path;std::filesystem::file_time_type stamp{};std::optional<nss::Metadata> meta;
+ std::string metadataError,lastRender="No render yet";nss::CLRender opencl;
 };
 Instance *instance(OfxImageEffectHandle e){void *p=nullptr;check(prop->propGetPointer(properties(e),kOfxPropInstanceData,0,&p));if(!p)throw kOfxStatErrBadHandle;return static_cast<Instance*>(p);}
 std::string sourcePath(OfxImageEffectHandle e,Instance *i,OfxPropertySetHandle args=nullptr,OfxPropertySetHandle image=nullptr) {
@@ -48,16 +55,21 @@ std::string sourcePath(OfxImageEffectHandle e,Instance *i,OfxPropertySetHandle a
  for(auto p:{args,image,properties(e)}){auto s=str(p,"OfxImageEffectPropSrcFilePath");if(!s.empty())return s;}
  OfxPropertySetHandle p=nullptr;effect->clipGetPropertySet(i->src,&p);return str(p,"OfxImageEffectPropSrcFilePath");
 }
-nss::Metadata load(Instance *i,const std::string &path) {
- if(path.empty())throw std::runtime_error("No source filename: select a TIFF/JSON and press Load from file");
- std::lock_guard<std::mutex> lock(i->mutex);
- auto stamp=std::filesystem::last_write_time(std::filesystem::u8path(path));
- if(i->path==path&&i->meta&&i->stamp==stamp)return *i->meta;
- auto m=nss::parseMetadata(nss::readDescription(path));i->path=path;i->stamp=stamp;i->meta=m;return m;
+nss::Metadata load(Instance *i,const std::string &input) {
+ auto path=nss::normalizePath(input);if(path.empty())throw std::runtime_error("Choose TIFF or JSON");
+ std::lock_guard<std::mutex> lock(i->mutex);std::error_code error;
+ auto stamp=std::filesystem::last_write_time(std::filesystem::u8path(path),error);
+ if(!error&&i->path==path&&i->stamp==stamp){if(i->meta)return *i->meta;if(!i->metadataError.empty())throw std::runtime_error(i->metadataError);}
+ i->path=path;i->stamp=stamp;i->meta.reset();i->metadataError.clear();
+ try{auto m=nss::parseMetadata(nss::readDescription(path));i->meta=m;return m;}
+ catch(const std::exception &x){i->metadataError=x.what();throw;}
 }
+std::string shortError(const std::exception &x){std::string text=x.what();return text.size()<=40?text:"Invalid NSS info";}
+void setLastRender(Instance *i,const std::string &text){std::lock_guard<std::mutex> lock(i->mutex);i->lastRender=text;}
 Pipeline readParams(OfxParamSetHandle set,double time) {
  Pipeline p;
 #include "read_params.inc"
+ p.positive.film_wb=0; // Dropdown is a loader, never an extra hidden render gain.
  p.stage=integer(set,"stage",time);p.cameraOn=integer(set,"camera_on",time);p.neutralise=integer(set,"neutralise",time);p.cameraStrength=number(set,"camera_strength",time);
  for(int a=0;a<9;a++){auto k="camera_"+std::to_string(a);p.camera[a]=number(set,k.c_str(),time);k="neutral_"+std::to_string(a);p.neutral[a]=number(set,k.c_str(),time);}
  return p;
@@ -74,73 +86,111 @@ void choiceDef(OfxParamSetHandle s,const char *key,const char *label,const char 
 }
 void boolDef(OfxParamSetHandle s,const char *key,const char *label,int d,const char *group="") {auto p=define(s,key,label,kOfxParamTypeBoolean,group);prop->propSetInt(p,kOfxParamPropDefault,0,d);}
 OfxStatus describe(OfxImageEffectHandle e) {
- auto p=properties(e);prop->propSetString(p,kOfxPropLabel,0,"NegativeScan Studio");prop->propSetString(p,kOfxImageEffectPluginPropGrouping,0,"NegativeScan Studio");prop->propSetString(p,kOfxImageEffectPropSupportedContexts,0,kOfxImageEffectContextFilter);prop->propSetString(p,kOfxImageEffectPropSupportedPixelDepths,0,kOfxBitDepthFloat);prop->propSetString(p,kOfxImageEffectPluginRenderThreadSafety,0,kOfxImageEffectRenderFullySafe);prop->propSetInt(p,kOfxImageEffectPropSupportsTiles,0,1);prop->propSetInt(p,kOfxImageEffectPropSupportsMultiResolution,0,1);return kOfxStatOK;
+ auto p=properties(e);prop->propSetString(p,kOfxPropLabel,0,"NegativeScan Studio OFX 0.90.1");prop->propSetString(p,kOfxImageEffectPluginPropGrouping,0,"NegativeScan Studio");prop->propSetString(p,kOfxImageEffectPropSupportedContexts,0,kOfxImageEffectContextFilter);prop->propSetString(p,kOfxImageEffectPropSupportedPixelDepths,0,kOfxBitDepthFloat);prop->propSetString(p,kOfxImageEffectPluginRenderThreadSafety,0,kOfxImageEffectRenderFullySafe);prop->propSetInt(p,kOfxImageEffectPropSupportsTiles,0,1);prop->propSetInt(p,kOfxImageEffectPropSupportsMultiResolution,0,1);
+ prop->propSetString(p,kOfxImageEffectPropOpenCLRenderSupported,0,nss::CLApi::get().available?"true":"false");
+ prop->propSetString(p,kOfxImageEffectPropOpenCLSupported,0,"false");return kOfxStatOK;
 }
 OfxStatus describeContext(OfxImageEffectHandle e) {
  for(auto name:{kOfxImageEffectSimpleSourceClipName,kOfxImageEffectOutputClipName}) {
   OfxPropertySetHandle p;check(effect->clipDefine(e,name,&p));prop->propSetString(p,kOfxImageEffectPropSupportedComponents,0,kOfxImageComponentRGBA);prop->propSetInt(p,kOfxImageEffectPropSupportsTiles,0,1);
  }
  auto s=params(e);
- for(auto g:{"metadata","camera","density","cross","positive","balance"})define(s,g,g,kOfxParamTypeGroup);
- choiceDef(s,"stage","Pipeline output","Density In|Crosstalk|Positive Out",2);
+ const char *groups[][2]={{"balance","Film base and balance"},{"metadata","Scan metadata"},{"camera","Camera calibration"},{"density","Density In"},{"positive","Positive Out"},{"render","Rendering"},{"graypick","Viewer gray / white pick"}};
+ for(auto &g:groups)define(s,g[0],g[1],kOfxParamTypeGroup);
+ boolDef(s,"pick_auto","Auto gray from point",0,"graypick");
+ auto point=define(s,"pick_point","Gray / white point",kOfxParamTypeDouble2D,"graypick");
+ prop->propSetString(point,kOfxParamPropDoubleType,0,kOfxParamDoubleTypeXYAbsolute);
+ prop->propSetString(point,kOfxParamPropDefaultCoordinateSystem,0,kOfxParamCoordinatesNormalised);
+ prop->propSetInt(point,kOfxParamPropUseHostOverlayHandle,0,1);
+ for(int c=0;c<2;c++)prop->propSetDouble(point,kOfxParamPropDefault,c,.5);
+ numberDef(s,"pick_radius","Sample radius (pixels)",3,0,32,"graypick");
+ choiceDef(s,"stage","Pipeline output","Density In|Positive Out",1);
+ choiceDef(s,"render_device","Render engine","Auto (OpenCL if offered)|CPU",0,"render");
+ define(s,"render_info","Show render engine",kOfxParamTypePushButton,"render");
  boolDef(s,"auto_metadata","Auto-read Resolve 20 source metadata",1,"metadata");
  auto p=define(s,"metadata_file","Scan TIFF or sidecar JSON",kOfxParamTypeString,"metadata");prop->propSetString(p,kOfxParamPropStringMode,0,kOfxParamStringIsFilePath);prop->propSetString(p,kOfxParamPropDefault,0,"");prop->propSetInt(p,kOfxParamPropAnimates,0,0);
  define(s,"load_metadata","Load from file (or Resolve source)",kOfxParamTypePushButton,"metadata");
- p=define(s,"metadata_status","Metadata status / light drive RGB",kOfxParamTypeString,"metadata");prop->propSetString(p,kOfxParamPropDefault,0,"Manual base until valid NSS metadata is available");prop->propSetInt(p,kOfxParamPropEnabled,0,0);prop->propSetInt(p,kOfxParamPropAnimates,0,0);prop->propSetInt(p,kOfxParamPropEvaluateOnChange,0,0);
+ p=define(s,"metadata_status","File status",kOfxParamTypeString,"metadata");prop->propSetString(p,kOfxParamPropDefault,0,"Choose TIFF or JSON");prop->propSetInt(p,kOfxParamPropEnabled,0,0);prop->propSetInt(p,kOfxParamPropAnimates,0,0);prop->propSetInt(p,kOfxParamPropEvaluateOnChange,0,0);
  boolDef(s,"camera_on","Enable camera calibration",1,"camera");boolDef(s,"neutralise","Neutralise grey - bake white balance",0,"camera");numberDef(s,"camera_strength","Camera strength",1,0,1,"camera");
  for(int i=0;i<9;i++)for(auto prefix:{"camera_","neutral_"}) {auto k=std::string(prefix)+std::to_string(i);numberDef(s,k.c_str(),k.c_str(),i%4==0?1:0,-16,16,"camera");}
  choiceDef(s,"stock","Film stock gamma preset","Legacy defaults / manual|Vision3 500T 5219 Status M|Vision3 500T LED estimate|Vision3 250D 5207|UltraMax 400|Portra 400|Gold 200",0,"balance");
  choiceDef(s,"film_type","Film balance (overridable)","T - tungsten|D - daylight",0,"balance");choiceDef(s,"temperature","Scene illuminant (Planck approx.)","3200 K|3800 K|4400 K|5000 K|5600 K",0,"balance");
- define(s,"apply_wb","Apply T/D + temperature preset",kOfxParamTypePushButton,"balance");
+ for(auto key:{"reference_base_r","reference_base_g","reference_base_b"}){
+  auto hidden=define(s,key,key,kOfxParamTypeDouble,"balance");prop->propSetDouble(hidden,kOfxParamPropDefault,0,.5);prop->propSetInt(hidden,kOfxParamPropSecret,0,1);prop->propSetInt(hidden,kOfxParamPropAnimates,0,0);
+ }
  for(auto &d:defs) {
   if(d.kind==Kind::Number)numberDef(s,d.key,d.label,d.def,d.lo,d.hi,d.group);
   else if(d.kind==Kind::Choice)choiceDef(s,d.key,d.label,d.options,int(d.def),d.group);
   else boolDef(s,d.key,d.label,int(d.def),d.group);
  }
  auto page=define(s,"controls","Controls",kOfxParamTypePage);
- std::vector<std::string> children={"stage","auto_metadata","metadata_file","load_metadata","metadata_status","camera_on","neutralise","camera_strength"};
+ std::vector<std::string> children={"pick_auto","pick_point","pick_radius","stage","render_device","render_info","auto_metadata","metadata_file","load_metadata","metadata_status","camera_on","neutralise","camera_strength"};
  for(int i=0;i<9;i++)for(auto prefix:{"camera_","neutral_"})children.push_back(std::string(prefix)+std::to_string(i));
- for(auto key:{"stock","film_type","temperature","apply_wb"})children.push_back(key);
+ for(auto key:{"stock","film_type","temperature"})children.push_back(key);
  for(auto &d:defs)children.push_back(d.key);
  for(size_t i=0;i<children.size();i++)prop->propSetString(page,kOfxParamPropPageChild,int(i),children[i].c_str());
  return kOfxStatOK;
 }
+nss::Vec3 referenceBase(OfxParamSetHandle s,double t){return {float(number(s,"reference_base_r",t)),float(number(s,"reference_base_g",t)),float(number(s,"reference_base_b",t))};}
+void writeBase(OfxParamSetHandle s,nss::Vec3 b){
+ for(float v:{b.x,b.y,b.z})if(!std::isfinite(v)||v<.0001f||v>16.f)throw std::runtime_error("WB base out of range");
+ setD(s,"density_base_r",b.x);setD(s,"density_base_g",b.y);setD(s,"density_base_b",b.z);
+}
+void updateBase(OfxParamSetHandle s,double t){writeBase(s,nss::balancedBase(referenceBase(s,t),integer(s,"film_type",t),integer(s,"temperature",t)));}
 void applyWB(OfxParamSetHandle s,double t) {
  int film=integer(s,"film_type",t),k=integer(s,"temperature",t);if(film<0||film>1||k<0||k>4)throw kOfxStatErrValue;
- for(int c=0;c<3;c++){auto key=std::string("density_cast_")+"rgb"[c];setD(s,key.c_str(),nss::wbOffsets[film][k][c]);}
- setI(s,"density_cast_on",1);
- // Do not accidentally stack legacy tungsten Positive Out WB with new offsets.
- setI(s,"positive_film_wb",0);
+ updateBase(s,t);setI(s,"auto_metadata",0);
+ // Film-base, gamma and visible balance loaders are independent; no hidden stack.
 }
-void fillMetadata(OfxParamSetHandle s,const nss::Metadata &m) {
+void fillMetadata(OfxParamSetHandle s,const nss::Metadata &m,double t) {
  Pipeline p;nss::applyMetadata(p,m);
- setD(s,"density_base_r",p.density.base_r);setD(s,"density_base_g",p.density.base_g);setD(s,"density_base_b",p.density.base_b);
- setI(s,"camera_on",p.cameraOn);setI(s,"neutralise",0);setD(s,"camera_strength",p.cameraStrength);
+ setD(s,"reference_base_r",p.density.base_r);setD(s,"reference_base_g",p.density.base_g);setD(s,"reference_base_b",p.density.base_b);
+ updateBase(s,t);setI(s,"camera_on",p.cameraOn);setI(s,"neutralise",0);setD(s,"camera_strength",p.cameraStrength);
  if(m.camera)for(int a=0;a<9;a++){auto k="camera_"+std::to_string(a);setD(s,k.c_str(),p.camera[a]);}
- std::string text="Loaded measured film base; light drive RGB is provenance only";
- if(m.light)text+=": "+std::to_string((*m.light)[0])+" / "+std::to_string((*m.light)[1])+" / "+std::to_string((*m.light)[2]);
- setS(s,"metadata_status",text);
- // Loaded controls are now an editable snapshot. Re-enable Auto for per-file reads.
+ auto b=nss::balancedBase({p.density.base_r,p.density.base_g,p.density.base_b},integer(s,"film_type",t),integer(s,"temperature",t));
+ char text[80];std::snprintf(text,sizeof(text),"Loaded: %.2f/%.2f/%.2f",b.x,b.y,b.z);setS(s,"metadata_status",text);
  setI(s,"auto_metadata",0);
+}
+// A preset can start from newly available source metadata, then remains editable.
+void syncReference(OfxImageEffectHandle e,OfxParamSetHandle s,double t){
+ if(!integer(s,"auto_metadata",t))return;
+ try{auto i=instance(e);auto path=stringParam(s,"metadata_file");if(path.empty())path=sourcePath(e,i);if(path.empty())return;Pipeline p;nss::applyMetadata(p,load(i,path));setD(s,"reference_base_r",p.density.base_r);setD(s,"reference_base_g",p.density.base_g);setD(s,"reference_base_b",p.density.base_b);setI(s,"camera_on",p.cameraOn);setD(s,"camera_strength",p.cameraStrength);setI(s,"neutralise",0);if(p.cameraOn)for(int a=0;a<9;a++){auto k="camera_"+std::to_string(a);setD(s,k.c_str(),p.camera[a]);}}
+ catch(const std::exception &x){setS(s,"metadata_status",shortError(x));}
 }
 OfxStatus changed(OfxImageEffectHandle e,OfxPropertySetHandle a) {
  if(str(a,kOfxPropChangeReason)!=kOfxChangeUserEdited)return kOfxStatReplyDefault;
  auto s=params(e);auto key=str(a,kOfxPropName);double time=0;prop->propGetDouble(a,kOfxPropTime,0,&time);
  if(key=="load_metadata") {
-  try {auto i=instance(e);auto p=stringParam(s,"metadata_file");if(p.empty())p=sourcePath(e,i,a);auto m=load(i,p);Edit edit(s,"Load scan metadata");fillMetadata(s,m);}
-  catch(const std::exception &x){setS(s,"metadata_status",x.what());if(message)message->message(e,kOfxMessageError,"nss.metadata","%s",x.what());return kOfxStatOK;}
- } else if(key=="apply_wb"||key=="film_type"||key=="temperature") {
-  Edit edit(s,"Illuminant density compensation");applyWB(s,time);
- } else if(key=="stock") {
+  try{auto i=instance(e);auto path=stringParam(s,"metadata_file");if(path.empty())path=sourcePath(e,i,a);auto m=load(i,path);Edit edit(s,"Load scan metadata");fillMetadata(s,m,time);}
+  catch(const std::exception &x){setS(s,"metadata_status",shortError(x));return kOfxStatOK;}
+  catch(...){setS(s,"metadata_status","Cannot read file path");return kOfxStatOK;}
+ }else if(key=="positive_film_wb"){
+  int selected=integer(s,"positive_film_wb",time);
+  if(selected<0||selected>=int(sizeof(nss::filmBases)/sizeof(nss::filmBases[0])))throw kOfxStatErrValue;
+  auto base=nss::filmBaseGains(selected);Edit edit(s,"Load film Base balance");
+  setD(s,"positive_bal_r",base.r);setD(s,"positive_bal_g",base.g);setD(s,"positive_bal_b",base.b);
+ }else if(key=="pick_auto"&&integer(s,"pick_auto",time)){
+  // A fresh neutral pick replaces Base balance, visibly; subsequent manual tweaks remain.
+  Edit edit(s,"Start picked gray balance");setI(s,"positive_film_wb",0);
+  setD(s,"positive_bal_r",0);setD(s,"positive_bal_g",0);setD(s,"positive_bal_b",0);
+ }else if(key=="film_type"||key=="temperature"){
+  Edit edit(s,"Film-base WB preset");syncReference(e,s,time);applyWB(s,time);
+ }else if(key=="stock"){
   int stock=integer(s,"stock",time);
-  // Generated from official-curve readings (see docs/data/ofx_stock_gamma.md).
   static const float gammas[][3]={{.55f,.635f,.62f},{.4482f,.5266f,.5096f},{.45f,.54f,.53f},{.48148148f,.56018519f,.54166667f},
 #include "still_gammas.inc"
   };
   if(stock<0||stock>6)throw kOfxStatErrValue;
   Edit edit(s,"Film stock gamma");
   for(int c=0;c<3;c++){auto k=std::string("positive_gam_")+"rgb"[c];setD(s,k.c_str(),gammas[stock][c]);}
-  if(stock){setI(s,"film_type",stock<=2?0:1);applyWB(s,time);}
+  if(stock){syncReference(e,s,time);setI(s,"film_type",stock<=2?0:1);applyWB(s,time);}
+ }else if(key=="density_base_r"||key=="density_base_g"||key=="density_base_b"){
+  setI(s,"auto_metadata",0);
+ }else if(key=="render_device"){
+  prop->propSetString(properties(e),kOfxImageEffectPropOpenCLRenderSupported,0,integer(s,"render_device",time)==0&&nss::CLApi::get().available?"true":"false");
+ }else if(key=="render_info"){
+  auto i=instance(e);std::string text;{std::lock_guard<std::mutex> lock(i->mutex);text=i->lastRender;}
+  if(message)message->message(e,kOfxMessageMessage,"nss.render","%s",text.c_str());
  }
  return kOfxStatOK;
 }
@@ -153,34 +203,69 @@ struct Image {
  }
  float *at(int x,int y){if(x<bounds[0]||x>=bounds[2]||y<bounds[1]||y>=bounds[3])return nullptr;return reinterpret_cast<float*>(reinterpret_cast<char*>(data)+ptrdiff_t(y-bounds[1])*row)+4*(x-bounds[0]);}
 };
+void cpuThread(unsigned int index,unsigned int count,void *arg){static_cast<nss::CpuJob*>(arg)->rows(index,count);}
 OfxStatus render(OfxImageEffectHandle e,OfxPropertySetHandle a) {
  double time=0;check(prop->propGetDouble(a,kOfxPropTime,0,&time));int win[4];check(prop->propGetIntN(a,kOfxImageEffectPropRenderWindow,4,win));
+ int gpu=0;prop->propGetInt(a,kOfxImageEffectPropOpenCLEnabled,0,&gpu);
  auto i=instance(e);Image src,dst;src.get(i->src,time);dst.get(i->dst,time);auto s=params(e);auto p=readParams(s,time);
- if(integer(s,"auto_metadata",time)) {
-  auto path=stringParam(s,"metadata_file");bool explicitFile=!path.empty();if(path.empty())path=sourcePath(e,i,a,src.p);
-  if(!path.empty()) {try {nss::applyMetadata(p,load(i,path));}catch(const std::exception &x){if(explicitFile){if(message)message->message(e,kOfxMessageError,"nss.metadata","%s",x.what());return kOfxStatFailed;} /* Old/no-metadata source: retain manual values. */}}
+ if(integer(s,"auto_metadata",time)){
+  auto path=stringParam(s,"metadata_file");if(path.empty())path=sourcePath(e,i,a,src.p);
+  if(!path.empty())try{nss::applyMetadata(p,load(i,path));auto b=nss::balancedBase({p.density.base_r,p.density.base_g,p.density.base_b},integer(s,"film_type",time),integer(s,"temperature",time));p.density.base_r=b.x;p.density.base_g=b.y;p.density.base_b=b.z;}catch(const std::exception &){/* Old/no-info scans retain manual controls. Load reports the reason. */}
  }
  bool premult=str(src.p,kOfxImageEffectPropPreMultiplication)==kOfxImagePreMultiplied;
- for(int y=win[1];y<win[3];y++){
-  if(effect->abort(e))break;
-  for(int x=win[0];x<win[2];x++){
-   float *o=dst.at(x,y),*v=src.at(x,y);if(!o)continue;if(!v){for(int c=0;c<4;c++)o[c]=0;continue;}
-   float alpha=v[3];nss::Vec3 rgb{v[0],v[1],v[2]};
-   if(premult&&alpha!=0){rgb.x/=alpha;rgb.y/=alpha;rgb.z/=alpha;}
-   rgb=p.pixel(rgb);if(premult){rgb.x*=alpha;rgb.y*=alpha;rgb.z*=alpha;}
-   o[0]=rgb.x;o[1]=rgb.y;o[2]=rgb.z;o[3]=alpha;
-  }
+ void *queue=nullptr;if(gpu)prop->propGetPointer(a,kOfxImageEffectPropOpenCLCommandQueue,0,&queue);
+ if(gpu&&integer(s,"render_device",time)!=0)return kOfxStatGPURenderFailed;
+ bool pickUnavailable=false;
+ if(integer(s,"pick_auto",time)){
+  double x=0,y=0,scaleX=1,scaleY=1,aspect=1;
+  check(param->paramGetValueAtTime(handle(s,"pick_point"),time,&x,&y));
+  prop->propGetDouble(a,kOfxImageEffectPropRenderScale,0,&scaleX);prop->propGetDouble(a,kOfxImageEffectPropRenderScale,1,&scaleY);
+  prop->propGetDouble(src.p,kOfxImagePropPixelAspectRatio,0,&aspect);if(!(aspect>0))aspect=1;
+  int rect[4],radius=int(std::clamp(number(s,"pick_radius",time),0.,32.));
+  double px=std::floor(x*scaleX/aspect),py=std::floor(y*scaleY);
+  if(!std::isfinite(px)||!std::isfinite(py)||px<INT32_MIN+64.||px>INT32_MAX-64.||py<INT32_MIN+64.||py>INT32_MAX-64.||!nss::pickRect(src.bounds,int(px),int(py),radius,rect))pickUnavailable=true;
+  else if(gpu){
+   try{auto patch=i->opencl.readPatch(queue,src.data,src.bounds,src.row,rect);nss::FrameView view{patch.data(),{rect[0],rect[1],rect[2],rect[3]},(rect[2]-rect[0])*4*int(sizeof(float))};pickUnavailable=!nss::grayFromPatch(p,view,rect,premult);}
+   catch(const std::exception &x){setLastRender(i,x.what());return kOfxStatGPURenderFailed;}
+  }else{nss::FrameView view{src.data,{src.bounds[0],src.bounds[1],src.bounds[2],src.bounds[3]},src.row};pickUnavailable=!nss::grayFromPatch(p,view,rect,premult);}
  }
+ nss::Prepared prepared(p);
+ if(gpu){
+  try{if(integer(s,"render_device",time)!=0)throw std::runtime_error("CPU requested");i->opencl.enqueue(queue,src.data,dst.data,src.bounds,dst.bounds,src.row,dst.row,win,premult,prepared);setLastRender(i,std::string("OpenCL buffers (host queue)")+(pickUnavailable?"; pick unavailable":""));return kOfxStatOK;}
+  catch(const std::exception &x){setLastRender(i,std::string("OpenCL failed; select CPU. ")+x.what());return kOfxStatGPURenderFailed;}
+ }
+ nss::FrameView source{src.data,{src.bounds[0],src.bounds[1],src.bounds[2],src.bounds[3]},src.row};
+ nss::FrameView dest{dst.data,{dst.bounds[0],dst.bounds[1],dst.bounds[2],dst.bounds[3]},dst.row};
+ nss::CpuJob job{prepared,source,dest,win,premult,[](void *e){return effect->abort(static_cast<OfxImageEffectHandle>(e));},e};
+ unsigned count=nss::cpuThreads(win[3]-win[1]);bool done=false;
+ if(multithread){unsigned available=1;if(multithread->multiThreadNumCPUs(&available)==kOfxStatOK)count=std::min(count,std::max(available,1u));done=multithread->multiThread(cpuThread,count,&job)==kOfxStatOK;}
+ if(!done)nss::parallelCpu(job,count);
+ setLastRender(i,"CPU "+std::to_string(count)+" threads"+(pickUnavailable?"; pick unavailable":""));return kOfxStatOK;
+}
+OfxStatus regionsOfInterest(OfxImageEffectHandle e,OfxPropertySetHandle in,OfxPropertySetHandle out){
+ double time=0;prop->propGetDouble(in,kOfxPropTime,0,&time);auto s=params(e);
+ if(!integer(s,"pick_auto",time))return kOfxStatReplyDefault;
+ double roi[4]{},x=0,y=0,sx=1,sy=1;for(int c=0;c<4;c++)check(prop->propGetDouble(in,kOfxImageEffectPropRegionOfInterest,c,roi+c));
+ check(param->paramGetValueAtTime(handle(s,"pick_point"),time,&x,&y));
+ prop->propGetDouble(in,kOfxImageEffectPropRenderScale,0,&sx);prop->propGetDouble(in,kOfxImageEffectPropRenderScale,1,&sy);
+ if(!std::isfinite(x)||!std::isfinite(y)||!(sx>0)||!(sy>0))return kOfxStatReplyDefault;
+ double radius=std::clamp(number(s,"pick_radius",time),0.,32.)+2,aspect=1;
+ OfxPropertySetHandle clip=nullptr;if(effect->clipGetPropertySet(instance(e)->src,&clip)==kOfxStatOK)prop->propGetDouble(clip,kOfxImagePropPixelAspectRatio,0,&aspect);
+ if(!(aspect>0))aspect=1;
+ double rx=radius*aspect/sx,ry=radius/sy;
+ roi[0]=std::min(roi[0],x-rx);roi[1]=std::min(roi[1],y-ry);roi[2]=std::max(roi[2],x+rx);roi[3]=std::max(roi[3],y+ry);
+ for(int c=0;c<4;c++)prop->propSetDouble(out,"OfxImageClipPropRoI_Source",c,roi[c]);
  return kOfxStatOK;
 }
 void setHost(OfxHost *h){host=h;}
-OfxStatus entry(const char *action,const void *handle_,OfxPropertySetHandle in,OfxPropertySetHandle) {
+OfxStatus entry(const char *action,const void *handle_,OfxPropertySetHandle in,OfxPropertySetHandle out) {
  auto e=const_cast<OfxImageEffectStruct*>(static_cast<const OfxImageEffectStruct*>(handle_));
  try {
   if(!std::strcmp(action,kOfxActionLoad)) {
    prop=static_cast<OfxPropertySuiteV1*>(const_cast<void*>(host->fetchSuite(host->host,kOfxPropertySuite,1)));
    effect=static_cast<OfxImageEffectSuiteV1*>(const_cast<void*>(host->fetchSuite(host->host,kOfxImageEffectSuite,1)));
    param=static_cast<OfxParameterSuiteV1*>(const_cast<void*>(host->fetchSuite(host->host,kOfxParameterSuite,1)));
+   multithread=static_cast<OfxMultiThreadSuiteV1*>(const_cast<void*>(host->fetchSuite(host->host,kOfxMultiThreadSuite,1)));
    message=static_cast<OfxMessageSuiteV1*>(const_cast<void*>(host->fetchSuite(host->host,kOfxMessageSuite,1)));
    return prop&&effect&&param?kOfxStatOK:kOfxStatErrMissingHostFeature;
   }
@@ -190,13 +275,14 @@ OfxStatus entry(const char *action,const void *handle_,OfxPropertySetHandle in,O
    auto i=std::make_unique<Instance>();check(effect->clipGetHandle(e,kOfxImageEffectSimpleSourceClipName,&i->src,nullptr));check(effect->clipGetHandle(e,kOfxImageEffectOutputClipName,&i->dst,nullptr));check(prop->propSetPointer(properties(e),kOfxPropInstanceData,0,i.get()));i.release();return kOfxStatOK;
   }
   if(!std::strcmp(action,kOfxActionDestroyInstance)){delete instance(e);prop->propSetPointer(properties(e),kOfxPropInstanceData,0,nullptr);return kOfxStatOK;}
+  if(!std::strcmp(action,kOfxImageEffectActionGetRegionsOfInterest))return regionsOfInterest(e,in,out);
   if(!std::strcmp(action,kOfxImageEffectActionRender))return render(e,in);
   if(!std::strcmp(action,kOfxActionInstanceChanged))return changed(e,in);
   if(!std::strcmp(action,kOfxActionUnload))return kOfxStatOK;
   return kOfxStatReplyDefault;
  }catch(OfxStatus s){return s;}catch(const std::bad_alloc &){return kOfxStatErrMemory;}catch(...){return kOfxStatFailed;}
 }
-OfxPlugin plugin={kOfxImageEffectPluginApi,1,"org.negativescanstudio.complete",0,90,setHost,entry};
+OfxPlugin plugin={kOfxImageEffectPluginApi,1,"org.negativescanstudio.complete",0,9001,setHost,entry};
 }
 extern "C" {
 #ifdef _WIN32

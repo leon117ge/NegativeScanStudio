@@ -1,0 +1,61 @@
+{
+  "before": {
+    "max_ms": 3808.072343,
+    "median_ms": 3779.93986,
+    "min_ms": 3757.329733
+  },
+  "before_ms": [
+    3757.329733,
+    3779.93986,
+    3790.70284,
+    3761.943246,
+    3808.072343
+  ],
+  "checksum": 63711485.88405266,
+  "failures": 0,
+  "height": 4170,
+  "max_absolute_error": 0.0,
+  "max_scaled_error": 0.0,
+  "pixels": 26045820,
+  "prepared_1thread": {
+    "max_ms": 1822.018603,
+    "median_ms": 1796.088247,
+    "min_ms": 1780.715272
+  },
+  "prepared_1thread_ms": [
+    1796.088247,
+    1784.048968,
+    1780.715272,
+    1822.018603,
+    1810.02894
+  ],
+  "prepared_parallel": {
+    "max_ms": 336.799163,
+    "median_ms": 331.549732,
+    "min_ms": 283.901926
+  },
+  "prepared_parallel_ms": [
+    331.549732,
+    336.780761,
+    283.901926,
+    336.799163,
+    293.811808
+  ],
+  "runs": 5,
+  "scope": "CPU full-frame in-memory RGBA render only; no decode, UI, metadata I/O, GPU or Resolve overhead",
+  "threads": 8,
+  "width": 6246,
+  "settings": "Both .5 film base, original gamma/exposure/Cineon, identity camera; new measured 500T Base emulated on old reference with WB=None and manual R+1.57/B+1.00",
+  "cpu": "x86_64",
+  "hardware": {
+    "CPU(s)": "8",
+    "Model name": "Intel(R) Xeon(R) Processor",
+    "Model": "207",
+    "Hypervisor vendor": "KVM"
+  },
+  "compiler": "clang version 22.1.8",
+  "warmup": "One full frame for each of old / prepared single / prepared parallel",
+  "compiler_flags": "-O3 -fno-math-errno -fno-trapping-math (both sides)",
+  "baseline_commit": "fc8dd261eff65732360ab177fa3f37439c1e4719",
+  "speedup": 11.400823150114928
+}
