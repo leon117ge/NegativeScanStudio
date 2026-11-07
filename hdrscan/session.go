@@ -16,6 +16,7 @@ import (
 	"basetool/basestat"
 	"basetool/camera"
 	"basetool/rawconv"
+	"basetool/scanmeta"
 )
 
 // DialPrompt is called when the camera refuses USB exposure changes: the user
@@ -354,7 +355,8 @@ func (s *Session) CaptureBracketEVCtx(ctx context.Context, dir string, evs []int
 
 // ProcessOptions control conversion + merge.
 type ProcessOptions struct {
-	Merge Options
+	Metadata scanmeta.Metadata // frozen at scan start; no GUI state read by workers
+	Merge    Options
 	// Ctx (v0.83) stops the processing (Stop button); on cancel every file
 	// this call wrote is removed and ctx.Err() is returned.
 	Ctx       context.Context
@@ -660,7 +662,7 @@ func ProcessN(srcs []string, o ProcessOptions) (retRes *Result, retErr error) {
 			b := filepath.Base(p.Source)
 			t := uniqueFile(filepath.Join(dir, strings.TrimSuffix(b, filepath.Ext(b))+".tiff"))
 			wrote = append(wrote, t)
-			if err := rawconv.WriteTIFF16(t, p.W, p.H, p.Pix, o.LZW, p.Make, p.Model, sw); err != nil {
+			if err := writeScanTIFF(t, p.W, p.H, p.Pix, o.LZW, p.Make, p.Model, sw, o.Metadata); err != nil {
 				return nil, err
 			}
 			res.TIFFs = append(res.TIFFs, t)
@@ -762,7 +764,17 @@ func ProcessN(srcs []string, o ProcessOptions) (retRes *Result, retErr error) {
 	hdr := uniqueFile(HDRPath(dir, src0))
 	say("Writing %s ...", filepath.Base(hdr))
 	wrote = append(wrote, hdr)
-	if err := rawconv.WriteTIFF16(hdr, p0.W, p0.H, final, o.LZW, mk, md, sws); err != nil {
+	meta := o.Metadata
+	if res.Base1N > 0 && res.Base1Err == "" {
+		b := res.Base1
+		meta.FilmBase = &b
+		meta.BaseSource = "measured HDR clear base"
+	}
+	if res.ColorNote != "" {
+		meta.Processing = res.ColorNote
+		meta.Encoding = "processed"
+	}
+	if err := writeScanTIFF(hdr, p0.W, p0.H, final, o.LZW, mk, md, sws, meta); err != nil {
 		return nil, err
 	}
 	if err := ctxErr(o.Ctx); err != nil {

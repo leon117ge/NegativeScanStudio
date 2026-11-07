@@ -217,6 +217,18 @@ func ProcessTrichrome(raws [3][]string, exps []float64, o ProcessOptions) (retRe
 		if hdr {
 			co := o
 			co.Merge.Exposure = exps
+			// Intermediate component images are not combined RGB negatives.
+			// Do not label their base/profile as though all lights were on.
+			co.Metadata.Mode = "trichrome-component-" + TriTags[ch]
+			co.Metadata.Encoding = "trichrome-component"
+			co.Metadata.CameraMatrix = nil
+			co.Metadata.CameraProfile = ""
+			co.Metadata.FilmBase = nil
+			if o.Metadata.LightRGB != nil {
+				var drive [3]int
+				drive[ch] = (*o.Metadata.LightRGB)[ch]
+				co.Metadata.LightRGB = &drive
+			}
 			co.Dust, co.Color, co.KeepTIFF, co.DeleteRAW, co.OutDir = DustOff, ColorOptions{}, false, false, dir
 			co.MeteredBase = [3]float64{}
 			co.Progress = func(m string) { say("%s: %s", TriTags[ch], m) }
@@ -284,7 +296,14 @@ func ProcessTrichrome(raws [3][]string, exps []float64, o ProcessOptions) (retRe
 	path := uniqueFile(TriPath(dir, raws[0][0], hdr))
 	say("Writing %s ...", filepath.Base(path))
 	wrote = append(wrote, path)
-	if err := rawconv.WriteTIFF16(path, p0.W, p0.H, out, o.LZW, p0.Make, p0.Model, sw); err != nil {
+	meta := o.Metadata
+	meta.Mode = "trichrome"
+	if res.BaseN > 0 && res.BaseErr == "" {
+		b := res.Base
+		meta.FilmBase = &b
+		meta.BaseSource = "measured RGB TIFF clear base"
+	}
+	if err := writeScanTIFF(path, p0.W, p0.H, out, o.LZW, p0.Make, p0.Model, sw, meta); err != nil {
 		return nil, err
 	}
 	if err := ctxErr(o.Ctx); err != nil {

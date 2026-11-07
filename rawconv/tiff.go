@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/binary"
 	"os"
+	"sort"
 	"unsafe"
 )
 
@@ -12,6 +13,7 @@ const rowsPerStrip = 16
 type tiffMeta struct {
 	Make, Model, Software string
 	ICC                   []byte
+	Description           string
 }
 
 type ifdEntry struct {
@@ -110,6 +112,9 @@ func writeTIFF(path string, w, h int, pix []uint16, compress bool, meta tiffMeta
 		{259, 3, 1, u16s(comp)},
 		{262, 3, 1, u16s(2)},
 	}
+	if meta.Description != "" {
+		entries = append(entries, ifdEntry{270, 2, uint32(len(meta.Description) + 1), ascii(meta.Description)})
+	}
 	if meta.Make != "" {
 		entries = append(entries, ifdEntry{271, 2, uint32(len(meta.Make) + 1), ascii(meta.Make)})
 	}
@@ -133,6 +138,7 @@ func writeTIFF(path string, w, h int, pix []uint16, compress bool, meta tiffMeta
 		entries = append(entries, ifdEntry{34675, 7, uint32(len(meta.ICC)), meta.ICC})
 	}
 
+	sort.Slice(entries, func(i, j int) bool { return entries[i].tag < entries[j].tag })
 	if pos%2 == 1 {
 		bw.WriteByte(0)
 		pos++
@@ -184,4 +190,11 @@ func u16bytes(s []uint16) []byte {
 		return nil
 	}
 	return unsafe.Slice((*byte)(unsafe.Pointer(&s[0])), len(s)*2)
+}
+
+// WriteTIFF16Description embeds a versioned JSON ImageDescription (tag 270).
+// Existing pixel encoding and compression are unchanged; callers may preserve
+// arbitrary descriptions while rewriting hair edits.
+func WriteTIFF16Description(path string, w, h int, pix []uint16, lzw bool, make_, model, software, description string) error {
+	return writeTIFF(path, w, h, pix, lzw, tiffMeta{Make: make_, Model: model, Software: software, Description: description})
 }

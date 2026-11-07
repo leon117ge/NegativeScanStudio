@@ -14,3 +14,7 @@ userlogs/
 *~
 /out/
 /build/
+
+# Local OFX artifacts and native test builds
+/ofx/build/
+/ofx/test-build/

@@ -1,0 +1,161 @@
+[
+  {
+    "stock": "UltraMax 400",
+    "source": "https://kodakprofessional.com/sites/default/files/wysiwyg/pro/resources/E7023_max_400.pdf",
+    "revision": "February 2016 E-7023",
+    "page": 4,
+    "pdf_sha256": "598f44c39c2cd420554d9e7395ce7213e8bf9f1815fbf550dadaeb625826c77d",
+    "path_ids_RGB": [
+      35,
+      34,
+      33
+    ],
+    "axis": {
+      "x0": 81.09,
+      "x1": 265.904,
+      "logH0": -4,
+      "logH1": 1,
+      "yD0": 297.352,
+      "yD4": 112.746
+    },
+    "midscale_logH": [
+      -1.5,
+      0
+    ],
+    "channels": [
+      {
+        "channel": "R",
+        "gamma": 0.5185905845065769,
+        "rms_density": 0.001447027511903974,
+        "alternate_gamma": [
+          0.5168305115661569,
+          0.49458033194757084
+        ]
+      },
+      {
+        "channel": "G",
+        "gamma": 0.5363169403547203,
+        "rms_density": 0.0032667430468673133,
+        "alternate_gamma": [
+          0.5377442224420749,
+          0.4974241465777518
+        ]
+      },
+      {
+        "channel": "B",
+        "gamma": 0.6048260919192165,
+        "rms_density": 0.0009966573905165201,
+        "alternate_gamma": [
+          0.6012205387479452,
+          0.6052259706262877
+        ]
+      }
+    ]
+  },
+  {
+    "stock": "Portra 400",
+    "source": "https://www.kodakprofessional.com/sites/default/files/2025-07/e4050.pdf",
+    "revision": "January 2025 E-4050, revised 1-25",
+    "page": 4,
+    "pdf_sha256": "70b15171673c5d01505f58ace448995ad72acbe5e401d1966563a61ac0712838",
+    "path_ids_RGB": [
+      36,
+      35,
+      34
+    ],
+    "axis": {
+      "x0": 81.163,
+      "x1": 265.626,
+      "logH0": -4,
+      "logH1": 1,
+      "yD0": 287.368,
+      "yD4": 102.853
+    },
+    "midscale_logH": [
+      -1.5,
+      0
+    ],
+    "channels": [
+      {
+        "channel": "R",
+        "gamma": 0.5559345840131016,
+        "rms_density": 0.0023364135898231143,
+        "alternate_gamma": [
+          0.5409641768230498,
+          0.5675026147220824
+        ]
+      },
+      {
+        "channel": "G",
+        "gamma": 0.5495891365021582,
+        "rms_density": 0.0009765369562996084,
+        "alternate_gamma": [
+          0.5527876331097942,
+          0.5458447677313321
+        ]
+      },
+      {
+        "channel": "B",
+        "gamma": 0.6400319431173799,
+        "rms_density": 0.0006751276775073472,
+        "alternate_gamma": [
+          0.6360219383660743,
+          0.6440020701974728
+        ]
+      }
+    ]
+  },
+  {
+    "stock": "Gold 200",
+    "source": "https://www.kodakprofessional.com/sites/default/files/wysiwyg/pro/resources/E7022%20Gold%20tech%20sheet.pdf",
+    "revision": "June 2023 E-7022, revised 06-23",
+    "page": 4,
+    "pdf_sha256": "8f20aa3ca762c898591f30479ead35587adf43eecc22a5a49acc48e54745f062",
+    "path_ids_RGB": [
+      38,
+      37,
+      36
+    ],
+    "axis": {
+      "x0": 81.6768,
+      "x1": 266.18448,
+      "logH0": -3,
+      "logH1": 1,
+      "yD0": 256.4328,
+      "yD4": 71.92512
+    },
+    "midscale_logH": [
+      -1.5,
+      0
+    ],
+    "channels": [
+      {
+        "channel": "R",
+        "gamma": 0.5507237024318213,
+        "rms_density": 0.0017876051622981088,
+        "alternate_gamma": [
+          0.5410646715250591,
+          0.504678555206632
+        ]
+      },
+      {
+        "channel": "G",
+        "gamma": 0.5644498433782418,
+        "rms_density": 0.001974818619661627,
+        "alternate_gamma": [
+          0.5685003391139907,
+          0.5066198530309849
+        ]
+      },
+      {
+        "channel": "B",
+        "gamma": 0.6103881223461858,
+        "rms_density": 0.007225525204836992,
+        "alternate_gamma": [
+          0.6199661508606986,
+          0.5663318734230905
+        ]
+      }
+    ]
+  }
+]

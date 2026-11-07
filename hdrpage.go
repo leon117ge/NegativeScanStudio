@@ -31,7 +31,7 @@ import (
 )
 
 const appName = "NegativeScan Studio"
-const appVersion = appName + " v0.89"
+const appVersion = appName + " v0.90"
 
 // legacyAppName: the program was called Film Base Meter up to v0.67; its
 // settings folder is still read (copied once, never changed) by migrateLegacyConfig.
@@ -1784,7 +1784,7 @@ func (u *HDRUI) processOptions(dir string) hdrscan.ProcessOptions {
 	mo := hdrscan.DefaultOptions()
 	mo.Align = alignModes[max(0, u.alignCB.CurrentIndex())]
 	mo.Method = mergeModes[max(0, u.mergeCB.CurrentIndex())]
-	return hdrscan.ProcessOptions{Merge: mo, OutDir: dir, KeepTIFF: u.cfg.KeepTIFF, DeleteRAW: u.cfg.DeleteRAW, LZW: u.cfg.LZW, Software: appVersion, LeakPct: u.leak(), Dust: u.cfg.Dust}
+	return hdrscan.ProcessOptions{Merge: mo, OutDir: dir, KeepTIFF: u.cfg.KeepTIFF, DeleteRAW: u.cfg.DeleteRAW, LZW: u.cfg.LZW, Software: appVersion, Metadata: u.scanMetadata(), LeakPct: u.leak(), Dust: u.cfg.Dust}
 }
 
 // process converts + merges in the background (camera stays usable).

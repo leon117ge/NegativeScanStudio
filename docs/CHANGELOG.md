@@ -22,5 +22,7 @@
 
 - **v0.89** – 优先实现 500T 3200K 平衡。基于 Kodak H-1-5219 rev.3-26 的光谱感度 10 nm 转录、Planck 光源积分和 ECN-2 gamma，生成有来源的近似密度偏移。支持 3200/4300/5500/6500K 和自定义 K，Light 页写入 DCTL、胶片库保存与加载、发送到 Develop。调平后不改灯、不改片基、不改相机 WB。Density_In 增加默认关闭的 `cast_on/cast_r/g/b`，Go Develop 同步公式。灰点实测与交叉偏色拟合后续实现。
 
+- **v0.90** – 首个 Windows x64 CPU OpenFX 一体插件：线性 CameraCal → Density In → Mask/Crosstalk → Positive Out，保留模板默认值；T/D 两套3200/3800/4400/5000/5600K signed density-offset presets、手动微调；500T/250D/UltraMax400/Portra400/Gold200官方曲线中段gamma预设与500T LED估计；片种默认T/D可覆盖。HDR/三色TIFF tag270写入versioned scan JSON，hair/dust/crop保留；OFX尝试Resolve20源路径扩展，另有TIFF/JSON选择+Load并保留manual override。最小OFX host与独立Go DCTL parity已测，静态链接DLL及NSS exe交叉编译；未在真实Resolve/Windows GUI/硬件验收。科学模型/完整精度/误差见 `docs/OFX.md` 和 `docs/data/ofx_*`。400K WIP stash未应用。
+
 ## 仓库说明
 仓库已通过 git 上传完整源码和构建所需的图标、资源与 LibRaw 静态库。Windows 可执行文件放在 GitHub Releases，不随源码重复提交。

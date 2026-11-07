@@ -1,7 +1,7 @@
 # NegativeScan Studio
 
 胶片负片翻拍（相机扫描）工具，Windows 桌面程序，Go + [lxn/walk](https://github.com/lxn/walk) GUI。
-当前版本 **v0.89**。作者：**Grok Bot**（AI 助手），为 leon117ge 编写与维护。
+当前版本 **v0.90**。作者：**Grok Bot**（AI 助手），为 leon117ge 编写与维护。
 
 A Windows tool for scanning film negatives with a tethered camera (Fujifilm X-T3) and a
 CuteNewDesign RGB Light Air backlight: film-base metering, light-based base leveling,
@@ -52,3 +52,7 @@ v0.89 先做 500T 光源平衡模型。灯光调平后保持不变，偏色只�
 
 ## License
 MIT © 2026 Grok Bot. Third-party code under `third_party/` keeps its own licenses (walk: BSD-3; LibRaw: LGPL/CDDL).
+
+## v0.90 OFX 与 TIFF metadata
+
+一体 Windows x64 OFX（Camera matrix → Density In → Crosstalk → Positive Out），T/D 3200–5600K 每600K预设、Kodak片种gamma预设；HDR/三色TIFF内嵌卷扫描JSON、插件读取。详见 [安装说明](ofx/README.md) / [实现与验证边界](docs/OFX.md)。CPU原型已构建测试，**真实Resolve尚待验收**。

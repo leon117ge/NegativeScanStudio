@@ -15,10 +15,11 @@ import (
 // TIFFInfo is what the hair tool keeps when it rewrites an HDR TIFF.
 type TIFFInfo struct {
 	Make, Model, Software string
+	Description           string
 	LZW                   bool
 }
 
-// ReadTIFFInfo reads Make/Model/Software and the compression of the first IFD.
+// ReadTIFFInfo reads ImageDescription, Make/Model/Software and compression of IFD0.
 func ReadTIFFInfo(path string) (TIFFInfo, error) {
 	var ti TIFFInfo
 	f, err := os.Open(path)
@@ -51,7 +52,7 @@ func ReadTIFFInfo(path string) (TIFFInfo, error) {
 	}
 	str := func(e []byte) string {
 		cnt := int(bo.Uint32(e[4:]))
-		if cnt <= 0 || cnt > 4096 {
+		if cnt <= 0 || cnt > 1<<20 {
 			return ""
 		}
 		b := make([]byte, cnt)
@@ -67,6 +68,8 @@ func ReadTIFFInfo(path string) (TIFFInfo, error) {
 		switch bo.Uint16(e) {
 		case 259:
 			ti.LZW = bo.Uint16(e[8:]) == 5
+		case 270:
+			ti.Description = str(e)
 		case 271:
 			ti.Make = str(e)
 		case 272:
@@ -113,7 +116,7 @@ func HairSoftware(sw, app string, edits int) string {
 func SaveHairTIFF(path string, w, h int, pix []uint16, ti TIFFInfo) error {
 	tmp := path + ".hairtmp"
 	os.Remove(tmp)
-	if err := rawconv.WriteTIFF16(tmp, w, h, pix, ti.LZW, ti.Make, ti.Model, ti.Software); err != nil {
+	if err := rawconv.WriteTIFF16Description(tmp, w, h, pix, ti.LZW, ti.Make, ti.Model, ti.Software, ti.Description); err != nil {
 		os.Remove(tmp)
 		return err
 	}

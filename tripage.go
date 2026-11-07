@@ -471,6 +471,10 @@ func (t *TriUI) capture() {
 	c := lu.cl
 	s := h.sess
 	opts := h.processOptions(dir)
+	opts.Metadata.LightRGB = &vals
+	opts.Metadata.LightModel = "CuteNewDesign RGB Light Air"
+	opts.Metadata.Mode = "trichrome"
+	opts.Metadata = withScanCamera(opts.Metadata)
 	opts.MeteredBase = s.Reading.RGB
 	// v0.82: the base is measured in the RGB TIFF over the metered region
 	opts.BaseArea = s.Reading.Area

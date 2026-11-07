@@ -253,7 +253,8 @@ func DespeckleFile(path string, level int, software string) (string, DustStats, 
 	pix, ds := despeckleHDR(p, p.Pix, ProcessOptions{Dust: level})
 	stem := strings.TrimSuffix(path, filepath.Ext(path))
 	out := uniqueFile(stem + "_dust.tiff")
-	if err := rawconv.WriteTIFF16(out, p.W, p.H, pix, true, p.Make, p.Model, software+", dust removal "+DustName(level)); err != nil {
+	ti, _ := ReadTIFFInfo(path)
+	if err := rawconv.WriteTIFF16Description(out, p.W, p.H, pix, true, p.Make, p.Model, software+", dust removal "+DustName(level), ti.Description); err != nil {
 		return "", ds, err
 	}
 	return out, ds, nil
