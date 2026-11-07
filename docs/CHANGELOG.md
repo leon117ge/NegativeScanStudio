@@ -20,5 +20,7 @@
 - **v0.87** – 三色自动调平支持手选片基矩形。
 - **v0.88** – Light 页共享实时画面直接拖框；调平 R/G/B 读数显示、复制、CSV 日志；「写入 DCTL」写入 Density_In 片基与预设。详见 `NegativeScanStudio_v0.88_notes.txt`。
 
+- **v0.89** – 优先实现 500T 3200K 平衡。基于 Kodak H-1-5219 rev.3-26 的光谱感度 10 nm 转录、Planck 光源积分和 ECN-2 gamma，生成有来源的近似密度偏移。支持 3200/4300/5500/6500K 和自定义 K，Light 页写入 DCTL、胶片库保存与加载、发送到 Develop。调平后不改灯、不改片基、不改相机 WB。Density_In 增加默认关闭的 `cast_on/cast_r/g/b`，Go Develop 同步公式。灰点实测与交叉偏色拟合后续实现。
+
 ## 仓库说明
-通过 GitHub 连接器（只支持文本）上传，二进制文件（`rsrc_windows_amd64.syso`、`*.ico`、`*.icc/*.icm`、LibRaw 静态库）可能不在仓库中，需要从维护者本地补齐后才能构建。
+仓库已通过 git 上传完整源码和构建所需的图标、资源与 LibRaw 静态库。Windows 可执行文件放在 GitHub Releases，不随源码重复提交。

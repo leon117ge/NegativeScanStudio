@@ -15,6 +15,7 @@ import (
 	"sync"
 
 	"basetool/basestat"
+	"basetool/develop"
 	"basetool/filmdb"
 	"github.com/lxn/walk"
 	. "github.com/lxn/walk/declarative"
@@ -316,7 +317,7 @@ func main() {
 		if cfg.DCTLPath == "" || !cfg.AutoSync {
 			return ""
 		}
-		if err := os.WriteFile(cfg.DCTLPath, []byte(buildDCTLWithBase(pmodel.items, cfg.CurrentBase)), 0644); err != nil {
+		if err := writeDensityDCTL(cfg.DCTLPath, pmodel.items, cfg.CurrentBase); err != nil {
 			return "Could not update " + cfg.DCTLPath + ": " + err.Error()
 		}
 		if err := writeMaskDCTL(cfg.DCTLPath, calibratedStocks()); err != nil {
@@ -346,7 +347,7 @@ func main() {
 				p += ".dctl"
 			}
 		}
-		if err := os.WriteFile(p, []byte(buildDCTLWithBase(pmodel.items, cfg.CurrentBase)), 0644); err != nil {
+		if err := writeDensityDCTL(p, pmodel.items, cfg.CurrentBase); err != nil {
 			walk.MsgBox(mw, "Export DCTL", "Could not write the file:\n"+err.Error(), walk.MsgBoxIconError)
 			return
 		}
@@ -939,6 +940,20 @@ func main() {
 	}
 	tabs.onChange, camTabs.onChange, scanTabs.onChange = updateLivePage, updateLivePage, updateLivePage
 	updateLivePage(0)
+	lightui.cast.sync = syncDCTL
+	lightui.cast.toDevelop = func(c filmdb.ColourCast) {
+		n := &devui.chain.Nodes[devui.nodeIndex(develop.TDensity)]
+		n.V["cast_on"] = 0
+		if c.Enabled {
+			n.V["cast_on"] = 1
+		}
+		for i, key := range []string{"cast_r", "cast_g", "cast_b"} {
+			n.V[key] = c.Offset[i]
+		}
+		devui.syncPanel(develop.TDensity)
+		devui.changed()
+		walk.MsgBox(mw, "500T colour cast", "Density_In correction sent to Develop. Existing creative gamma / auto-WB settings are unchanged; avoid double colour correction.", walk.MsgBoxIconInformation)
+	}
 	lightui.sendDCTL = func(b [3]float64) error {
 		if running {
 			return fmt.Errorf("Film base is measuring; wait until it finishes")

@@ -42,6 +42,8 @@ func compileDensity(n Node, cx *Context) PixFunc {
 	blkR, blkG, blkB := n.f("blk_r"), n.f("blk_g"), n.f("blk_b")
 	gain := exp2f(n.f("ev_stops"))
 	k := -1.0 / (2.302585093 * step * full)
+	castOn := n.i("cast_on") != 0
+	castR, castG, castB := n.f("cast_r")/(step*full), n.f("cast_g")/(step*full), n.f("cast_b")/(step*full)
 	dm := dmin / full
 	ur, ug, ub := fmaxf(baseR, 0.000001), fmaxf(baseG, 0.000001), fmaxf(baseB, 0.000001)
 	di := func(p float32) float32 {
@@ -60,6 +62,11 @@ func compileDensity(n Node, cx *Context) PixFunc {
 		r := dm + logf(tr)*k
 		g := dm + logf(tg)*k
 		b := dm + logf(tb)*k
+		if castOn {
+			r += castR
+			g += castG
+			b += castB
+		}
 		if outTrans {
 			r, g, b = tr, tg, tb
 		}

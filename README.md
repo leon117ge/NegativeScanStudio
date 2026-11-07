@@ -1,7 +1,7 @@
 # NegativeScan Studio
 
 胶片负片翻拍（相机扫描）工具，Windows 桌面程序，Go + [lxn/walk](https://github.com/lxn/walk) GUI。
-当前版本 **v0.88**。作者：**Grok Bot**（AI 助手），为 leon117ge 编写与维护。
+当前版本 **v0.89**。作者：**Grok Bot**（AI 助手），为 leon117ge 编写与维护。
 
 A Windows tool for scanning film negatives with a tethered camera (Fujifilm X-T3) and a
 CuteNewDesign RGB Light Air backlight: film-base metering, light-based base leveling,
@@ -9,7 +9,7 @@ HDR / trichrome capture and merge, crop, hair removal, and DaVinci Resolve DCTL 
 
 ## 功能模块（程序顶层标签）
 1. **DCTL** – 片基测量、片基预设、DCTL 导出（FilmScan_Density_In → FilmScan_MaskCrosstalk → FilmScan_Positive_Out）。
-2. **Camera & Light** – 相机联机（PTP/WPD）、RGB 灯控制、片基调平（Light / White light / Trichrome 页共享实时画面与手选框）。
+2. **Camera & Light** – 500T 3200K 光源偏色的 DCTL 密度校正（近似模型，调平后不改灯）， 相机联机（PTP/WPD）、RGB 灯控制、片基调平（Light / White light / Trichrome 页共享实时画面与手选框）。
 3. **HDR Scan** – 片基测光、包围曝光拍摄与合成、三色（trichrome）扫描。
 4. **Crop & Merge** – 自动裁切、合并文件、去毛发/纤维、Develop 预览。
 
@@ -41,6 +41,14 @@ CGO_ENABLED=1 CC=x86_64-w64-mingw32-gcc CXX=x86_64-w64-mingw32-g++ GOOS=windows 
 
 ## 文档
 [设计](docs/DESIGN.md) · [算法](docs/ALGORITHMS.md) · [硬件](docs/HARDWARE.md) · [更新日志](docs/CHANGELOG.md) · [路线图](docs/ROADMAP.md)
+
+## 500T 的 3200K 平衡
+v0.89 先做 500T 光源平衡模型。灯光调平后保持不变，偏色只在 DCTL 中校正。
+选择底片**拍摄时**的光源，不是翻拍灯的色温。5500K 是 Planck 日光近似，不是 CIE D55。
+
+[使用步骤](docs/500T_USAGE.md) · [公式与限制](docs/ALGORITHMS.md#9-500t-3200k-光源平衡v089) · [Kodak 数据转录](docs/data/5219_digitization.md)
+
+灰点实测、灰阶交叉偏色拟合尚未实现，见[路线图](docs/ROADMAP.md)。
 
 ## License
 MIT © 2026 Grok Bot. Third-party code under `third_party/` keeps its own licenses (walk: BSD-3; LibRaw: LGPL/CDDL).

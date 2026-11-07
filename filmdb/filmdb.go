@@ -44,7 +44,16 @@ type Entry struct {
 	CrosstalkInfo string      `json:"crosstalk_info,omitempty"`
 	// RGBLight (v0.80) is the RGB Light Air setting found by auto film-base
 	// leveling for this stock; nil = none. It does not change R/G/B above.
-	RGBLight *RGBLight `json:"rgb_light,omitempty"`
+	RGBLight   *RGBLight   `json:"rgb_light,omitempty"`
+	ColourCast *ColourCast `json:"colour_cast,omitempty"`
+}
+
+// ColourCast is a DCTL-only, additive density correction. It never changes the light.
+type ColourCast struct {
+	Kelvin  float64    `json:"kelvin"`
+	Offset  [3]float64 `json:"offset"`
+	Model   string     `json:"model"`
+	Enabled bool       `json:"enabled"`
 }
 
 // RGBLight is a levelled RGB light setting: brightness 1..100 per channel
@@ -217,6 +226,9 @@ func (db *DB) Put(e Entry, average bool) (*Entry, error) {
 	e.Name = old.Name
 	if e.Crosstalk == nil { // a new base reading keeps the calibrated matrix
 		e.Crosstalk, e.CrosstalkInfo = old.Crosstalk, old.CrosstalkInfo
+	}
+	if e.ColourCast == nil {
+		e.ColourCast = old.ColourCast
 	}
 	if e.RGBLight == nil { // ... and the levelled light setting
 		e.RGBLight = old.RGBLight

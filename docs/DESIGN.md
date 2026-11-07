@@ -31,3 +31,13 @@ RGB Light Air (串口)               ▼
 - 调平只改灯，不改相机曝光；相机用固定 ISO/快门。
 - `rgblight` 只允许发送官方文档列出的命令，拒绝其它字节（不碰序列号写入/固件升级）。
 - 设置与日志位于 `%APPDATA%\NegativeScanStudio\`（如 `leveling_log.csv`）。
+
+## 500T 光源平衡（v0.89）
+
+`colorsci/illuminant.go` 用 Kodak 感度和 Planck 光谱计算名义密度偏移。
+`castpage.go` 负责 Light 页控件，`castconfig.go` 保存独立导出设置。
+`filmdb.Entry.ColourCast` 保存胶片预设。`template.dctl` 与 `develop/eval.go`
+使用同一密度加法。默认关闭，不影响现有扫描与导出行为。
+
+灯光只负责片基调平，调平后不再改动。光源偏色和后续的交叉偏色校正均在 DCTL 中完成。
+模型不把代表性胶片特性当作本卷实测。数据来源和适用边界见算法文档。

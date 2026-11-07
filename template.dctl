@@ -6,6 +6,11 @@ DEFINE_UI_PARAMS(out_trans, Output transmittance instead of density, DCTLUI_CHEC
 DEFINE_UI_PARAMS(base_r, Film base R, DCTLUI_SLIDER_FLOAT, 0.1933, 0.0001, 16.0, 0.00001)
 DEFINE_UI_PARAMS(base_g, Film base G, DCTLUI_SLIDER_FLOAT, 0.1883, 0.0001, 16.0, 0.00001)
 DEFINE_UI_PARAMS(base_b, Film base B, DCTLUI_SLIDER_FLOAT, 0.0593, 0.0001, 16.0, 0.00001)
+// 500T illuminant model: signed ADDITIVE density correction; Off preserves legacy output.
+DEFINE_UI_PARAMS(cast_on, Apply colour cast correction, DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(cast_r, Colour cast density R, DCTLUI_SLIDER_FLOAT, 0.0, -1.0, 1.0, 0.0001)
+DEFINE_UI_PARAMS(cast_g, Colour cast density G, DCTLUI_SLIDER_FLOAT, 0.0, -1.0, 1.0, 0.0001)
+DEFINE_UI_PARAMS(cast_b, Colour cast density B, DCTLUI_SLIDER_FLOAT, 0.0, -1.0, 1.0, 0.0001)
 DEFINE_UI_PARAMS(dmin_code, Film base code, DCTLUI_SLIDER_FLOAT, 95.0, 0.0, 300.0, 0.5)
 DEFINE_UI_PARAMS(dens_step, Density per code, DCTLUI_SLIDER_FLOAT, 0.002, 0.0005, 0.005, 0.0001)
 DEFINE_UI_PARAMS(full_code, Full scale code, DCTLUI_SLIDER_FLOAT, 1023.0, 255.0, 4095.0, 1.0)
@@ -37,6 +42,12 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
     float r = dmin_code / full_code + _logf(tr) * k;
     float g = dmin_code / full_code + _logf(tg) * k;
     float b = dmin_code / full_code + _logf(tb) * k;
+    if (cast_on != 0)
+    {
+        r += cast_r / (dens_step * full_code);
+        g += cast_g / (dens_step * full_code);
+        b += cast_b / (dens_step * full_code);
+    }
     if (out_trans != 0)
     {
         r = tr;

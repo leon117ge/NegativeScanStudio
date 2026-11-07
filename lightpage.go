@@ -107,6 +107,7 @@ type LightUI struct {
 	busy             bool // a light job or the leveling runs (UI thread)
 	level            bool // leveling runs
 	cancel           context.CancelFunc
+	cast             *castUI
 	lastSuccess      *levelingRecord
 	sendDCTL         func([3]float64) error
 	sendBtn, copyBtn *walk.PushButton
@@ -1189,6 +1190,7 @@ func (u *LightUI) mouseUp(x, y int, b walk.MouseButton) {
 
 func (u *LightUI) Page() TabPage {
 	u.cfg = loadLightConfig(u.hdr.cfg.ISO)
+	u.cast = &castUI{owner: u}
 	u.lw = newCamWorker()
 	u.lw.onPanic = func(r any, st string) { u.hdr.reportPanic("light job", r, st) }
 	bold := Font{Family: "Segoe UI", PointSize: 9, Bold: true}
@@ -1222,6 +1224,7 @@ func (u *LightUI) Page() TabPage {
 								OnMouseDown: u.mouseDown, OnMouseMove: u.mouseMove, OnMouseUp: u.mouseUp},
 							Label{AssignTo: &u.viewLbl, Text: "Captures appear after leveling.", TextColor: grey},
 						}},
+					u.cast.page(),
 					TextEdit{AssignTo: &u.logTE, ReadOnly: true, VScroll: true, StretchFactor: 1, MinSize: Size{Height: 90}},
 				},
 			},
