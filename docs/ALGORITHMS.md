@@ -1,5 +1,8 @@
 # 算法 / Algorithms
 
+> Historical reference through v0.90. App v0.91 removes the DCTL page, all DCTL generation/export, and related write controls. The formulas below remain relevant to the built-in Develop preview, but the old page layout and export instructions are retired. See [current app workflow](APP_WORKFLOW.md), [v0.91 changelog](CHANGELOG.md#v091), and [OFX usage](../ofx/README.md).
+
+
 所有描述来自源码注释与实现。
 
 ## 1. 片基统计与检测（`basestat`, `hdrscan/basefind.go`）

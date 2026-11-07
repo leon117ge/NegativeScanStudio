@@ -2,7 +2,7 @@ package main
 
 // "Chart calibration" (v0.84): camera + light input profile from a 24-patch
 // transmission chart (IT8.7/1 reference). Replaces the v0.66 "Calibrate
-// crosstalk from chart" dialog; opened from DCTL > Mask & Crosstalk.
+// crosstalk from chart" dialog; opened from Camera & Light > Camera.
 
 import (
 	"fmt"
@@ -22,10 +22,10 @@ import (
 	. "github.com/lxn/walk/declarative"
 )
 
-const calTip = "Camera + light input profile: scan a 24-patch transmission chart (e.g. SoftLoaf / IT8.7/1) with the trichrome light, load its CGATS reference, fit a grey-preserving 3x3 (mean ΔE2000), save it as a camera profile (applied to the automatic trichrome film-base measurement) and export CameraCal_Trichrome.dctl."
+const calTip = "Camera + light input profile: scan a 24-patch transmission chart (e.g. SoftLoaf / IT8.7/1) with the trichrome light, load its CGATS reference, fit a grey-preserving 3x3 (mean ΔE2000), save it as a camera profile (applied to the automatic trichrome film-base measurement); TIFF scan metadata records the profile for the OFX plugin."
 
 type chartCal struct {
-	u       *MaskUI
+	u       *HDRUI
 	dlg     *walk.Dialog
 	view    *walk.CustomWidget
 	fileLbl *walk.Label
@@ -33,7 +33,6 @@ type chartCal struct {
 	resTE   *walk.TextEdit
 	nameLE  *walk.LineEdit
 	saveBtn *walk.PushButton
-	dctlBtn *walk.PushButton
 	profCB  *walk.ComboBox
 	enCB    *walk.CheckBox
 	strNE   *walk.NumberEdit
@@ -56,7 +55,7 @@ func matText(m colorsci.Mat3) string {
 	return fmt.Sprintf("[%.3f %.3f %.3f | %.3f %.3f %.3f | %.3f %.3f %.3f]", m[0][0], m[0][1], m[0][2], m[1][0], m[1][1], m[1][2], m[2][0], m[2][1], m[2][2])
 }
 
-func (u *MaskUI) calibrateChart() {
+func (u *HDRUI) calibrateChart() {
 	k := &chartCal{u: u, drag: -1}
 	grey := walk.RGB(128, 128, 136)
 	var closePB *walk.PushButton
@@ -96,7 +95,6 @@ func (u *MaskUI) calibrateChart() {
 				Label{Text: "Profile name"},
 				LineEdit{AssignTo: &k.nameLE, Text: "XT3 trichrome " + time.Now().Format("2006-01-02"), MinSize: Size{Width: 200}},
 				PushButton{AssignTo: &k.saveBtn, Text: "Save as camera profile", Enabled: false, OnClicked: k.save},
-				PushButton{AssignTo: &k.dctlBtn, Text: "Export DCTL...", Enabled: false, OnClicked: k.exportDCTL, ToolTipText: "Standalone CameraCal_Trichrome.dctl: Enable, Strength, Neutralise grey. Place it before FilmScan_Density_In."},
 				HSpacer{},
 			}},
 			Composite{Layout: HBox{MarginsZero: true, Spacing: 6}, Children: []Widget{
@@ -121,7 +119,6 @@ func (u *MaskUI) calibrateChart() {
 		k.loadRef(s.LastRef, true)
 	}
 	k.dlg.Run()
-	u.refresh()
 	if k.bmp != nil {
 		k.bmp.Dispose()
 	}
@@ -324,7 +321,6 @@ func (k *chartCal) resetCorners() {
 func (k *chartCal) changed() {
 	k.fit = nil
 	k.saveBtn.SetEnabled(false)
-	k.dctlBtn.SetEnabled(false)
 	if k.pix != nil {
 		ps := colorsci.SampleCamChart(k.pix, k.w, k.h, k.corners, 0.25)
 		k.ps = &ps
@@ -499,7 +495,6 @@ func (k *chartCal) solve() {
 	}
 	k.resTE.SetText(sb.String())
 	k.saveBtn.SetEnabled(true)
-	k.dctlBtn.SetEnabled(true)
 	k.view.Invalidate()
 }
 
@@ -536,34 +531,4 @@ func (k *chartCal) save() {
 	k.loadSettingsUI()
 	k.u.say("Camera profile \"" + name + "\" saved (" + p.Info + "). Tick Enable to apply it to the trichrome film-base measurement.")
 	k.resTE.SetText("Saved camera profile \"" + name + "\" and made it the active profile (Enable is " + map[bool]string{true: "on", false: "off"}[s.Enabled] + ").\r\n" + k.resTE.Text())
-}
-
-func (k *chartCal) exportDCTL() {
-	if k.fit == nil {
-		return
-	}
-	dlg := new(walk.FileDialog)
-	dlg.Title = "Export camera calibration DCTL"
-	dlg.Filter = "DCTL (*.dctl)|*.dctl"
-	dlg.FilePath = "CameraCal_Trichrome.dctl"
-	if s := camSettings(); s.LastDir != "" {
-		dlg.InitialDirPath = s.LastDir
-	}
-	if ok, _ := dlg.ShowSave(k.dlg); !ok {
-		return
-	}
-	path := dlg.FilePath
-	if !strings.EqualFold(filepath.Ext(path), ".dctl") {
-		path += ".dctl"
-	}
-	name, _ := cleanName(k.nameLE.Text())
-	txt := colorsci.CamDCTL(name, k.info(), k.fit.Mx, k.fit.Neutral)
-	if err := os.WriteFile(path, []byte(txt), 0644); err != nil {
-		walk.MsgBox(k.dlg, "Export DCTL", err.Error(), walk.MsgBoxIconError)
-		return
-	}
-	s := camSettings()
-	s.LastDir = filepath.Dir(path)
-	saveCamSettings(s)
-	k.u.say("Camera calibration DCTL written: " + path)
 }

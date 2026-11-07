@@ -99,21 +99,21 @@ type LightUI struct {
 	cfg lightConfig
 	lw  *camWorker // light jobs (serial port)
 
-	cl               *rgblight.Client
-	sim              *rgblight.SimDevice
-	port             string
-	info             rgblight.Info
-	ports            []rgblight.PortInfo
-	busy             bool // a light job or the leveling runs (UI thread)
-	level            bool // leveling runs
-	cancel           context.CancelFunc
-	cast             *castUI
-	lastSuccess      *levelingRecord
-	sendDCTL         func([3]float64) error
-	sendBtn, copyBtn *walk.PushButton
-	lastRes          *lightlevel.Result
-	lastExp          camera.Exposure
-	lastTgt          float64
+	cl          *rgblight.Client
+	sim         *rgblight.SimDevice
+	port        string
+	info        rgblight.Info
+	ports       []rgblight.PortInfo
+	busy        bool // a light job or the leveling runs (UI thread)
+	level       bool // leveling runs
+	cancel      context.CancelFunc
+	cast        *castUI
+	lastSuccess *levelingRecord
+
+	copyBtn *walk.PushButton
+	lastRes *lightlevel.Result
+	lastExp camera.Exposure
+	lastTgt float64
 	// v0.85 camera-profile leveling
 	camCB    *walk.CheckBox
 	lastPlan camPlan
@@ -277,9 +277,7 @@ func (u *LightUI) updateButtons() {
 		b.SetEnabled(idle)
 	}
 	u.stopBtn.SetEnabled(u.level)
-	if u.sendBtn != nil {
-		u.sendBtn.SetEnabled(!u.busy && u.lastSuccess != nil && u.lastSuccess.Measured)
-	}
+
 	if u.copyBtn != nil {
 		u.copyBtn.SetEnabled(!u.busy && u.lastSuccess != nil)
 	}
@@ -860,7 +858,7 @@ func (u *LightUI) startLevel() {
 			}
 		}
 		if err == nil && res.Converged() && inTIFF && pl.worstDev(post) > p.Tol {
-			err = fmt.Errorf("final TIFF base is still %.2f%% from target (tolerance %.2f%%); no DCTL result saved", 100*pl.worstDev(post), 100*p.Tol)
+			err = fmt.Errorf("final TIFF base is still %.2f%% from target (tolerance %.2f%%); no measured base accepted", 100*pl.worstDev(post), 100*p.Tol)
 		}
 		if err == nil && ctx.Err() != nil {
 			err = ctx.Err()
@@ -975,7 +973,7 @@ func (u *LightUI) showResult(res lightlevel.Result, err error, exp camera.Exposu
 	setLightStatusN(3, u.resLbl, t)
 	u.log("Result: %s (%s)", t, pl.label())
 	if res.Converged() && u.lastSuccess != nil && !u.lastSuccess.Measured {
-		u.log("DCTL write is disabled: the TIFF check failed, so these are estimates rather than the exported TIFF's measured base. Check the TIFF conversion log and level again.")
+		u.log("Measured base is unavailable: the TIFF check failed, so these are estimates rather than the exported TIFF's measured base. Check the TIFF conversion log and level again.")
 	}
 	u.updateButtons()
 	limited := res.Limited[0] || res.Limited[1] || res.Limited[2]
@@ -1304,7 +1302,7 @@ func (u *LightUI) Page() TabPage {
 								ToolTipText: "Auto measures the detected rebate / gap / sprocket cluster in the trichrome TIFF - that area can be large.\nRectangle: drag a small patch of clear film base on the preview (or on Camera live view), the same orange box as white-light metering.\nLeveling then reads only that patch for the RAW measure and the TIFF check."},
 							Label{Text: "Camera profile", MinSize: Size{Width: 96}},
 							CheckBox{AssignTo: &u.camCB, Text: "Apply camera profile (base after the matrix)", Checked: !u.cfg.NoCam,
-								ToolTipText: "v0.85: with a camera profile enabled (Chart calibration), leveling aims at the film base AFTER the CameraCal matrix,\nso FilmScan_Density_In can stay at 0.5/0.5/0.5. After leveling the last R/G/B RAWs go through the real trichrome\nTIFF converter and clear-base measurement; if that base is off by more than the tolerance, one corrective pass runs."},
+								ToolTipText: "v0.85: with a camera profile enabled (Chart calibration), leveling aims at the film base AFTER the CameraCal matrix,\nso the film-base reference can stay at 0.5/0.5/0.5. After leveling the last R/G/B RAWs go through the real trichrome\nTIFF converter and clear-base measurement; if that base is off by more than the tolerance, one corrective pass runs."},
 							Composite{ColumnSpan: 2, Layout: HBox{MarginsZero: true, Spacing: 4}, Children: []Widget{
 								PushButton{AssignTo: &u.startBtn, Text: "Start leveling", Enabled: false, Font: bold, MinSize: Size{Height: 26}, OnClicked: u.startLevel,
 									ToolTipText: "For R, G and B in turn: only that channel on, wait the settle time, shoot one RAW at the fixed exposure and measure the base\nin that colour channel; brightness = current x target / measured, repeated until all three are within tolerance.\nFilm base: Auto (large detected cluster) or a rectangle you drag on the preview / Camera live view."},
@@ -1317,8 +1315,6 @@ func (u *LightUI) Page() TabPage {
 							}},
 							Label{AssignTo: &u.resLbl, ColumnSpan: 2, Text: "Clear film base on the light; exposure fixed, only the light changes.", MinSize: Size{Width: 440, Height: 76}},
 							Composite{ColumnSpan: 2, Layout: HBox{MarginsZero: true, Spacing: 4}, Children: []Widget{
-								PushButton{AssignTo: &u.sendBtn, Text: "写入 DCTL", Enabled: false, OnClicked: u.writeLevelingDCTL,
-									ToolTipText: "Store the measured base as the Light leveling preset and the default Film base R/G/B for the next Density_In export."},
 								PushButton{AssignTo: &u.copyBtn, Text: "Copy", Enabled: false, OnClicked: u.copyLeveling},
 								HSpacer{},
 							}},

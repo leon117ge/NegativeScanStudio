@@ -139,7 +139,9 @@ func labF(t float64) float64 {
 }
 
 // XYZToLabD50: XYZ 0..100 (or relative 0..1 when scale=1 handled by caller) -> Lab.
-func XYZToLabD50(x [3]float64) [3]float64 { return camLab([3]float64{x[0] / 100, x[1] / 100, x[2] / 100}) }
+func XYZToLabD50(x [3]float64) [3]float64 {
+	return camLab([3]float64{x[0] / 100, x[1] / 100, x[2] / 100})
+}
 
 func camLab(x [3]float64) [3]float64 {
 	fx, fy, fz := labF(x[0]/camW50[0]), labF(x[1]/camW50[1]), labF(x[2]/camW50[2])
@@ -752,40 +754,4 @@ func ApplyCam(m Mat3, strength float64, v [3]float64) [3]float64 {
 	return o
 }
 
-// CamDCTL renders the standalone DCTL (same behaviour as
-// prototype chartcal/CameraCal_Trichrome.dctl).
-func CamDCTL(name, info string, mx, mn Mat3) string {
-	var b strings.Builder
-	b.WriteString("// CameraCal_Trichrome.dctl - camera + light input profile \"" + name + "\"\n")
-	b.WriteString("// Written by NegativeScan Studio (Chart calibration). " + info + "\n")
-	b.WriteString("// Apply on LINEAR scan data, BEFORE FilmScan_Density_In. Re-measure the film base after inserting it.\n")
-	b.WriteString("// Default matrix keeps the camera grey unchanged (M * grey = grey): it only fixes cross-channel response.\n")
-	b.WriteString("// \"Neutralise grey\" instead maps the chart grey to equal RGB (Rec709 luma kept) - a baked white balance.\n\n")
-	b.WriteString("DEFINE_UI_PARAMS(cal_on, Enable camera calibration, DCTLUI_CHECK_BOX, 1)\n")
-	b.WriteString("DEFINE_UI_PARAMS(strength, Strength, DCTLUI_SLIDER_FLOAT, 1.0, 0.0, 1.0, 0.01)\n")
-	b.WriteString("DEFINE_UI_PARAMS(neutralise, Neutralise grey - bake white balance, DCTLUI_CHECK_BOX, 0)\n\n")
-	b.WriteString("__DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p_R, float p_G, float p_B)\n{\n")
-	b.WriteString("    if (cal_on == 0)\n    {\n        return make_float3(p_R, p_G, p_B);\n    }\n")
-	for _, s := range []struct {
-		p string
-		m Mat3
-	}{{"a", mx}, {"n", mn}} {
-		for i := 0; i < 3; i++ {
-			for j := 0; j < 3; j++ {
-				fmt.Fprintf(&b, "    const float %s%d%d = %.6ff;\n", s.p, i, j, s.m[i][j])
-			}
-		}
-	}
-	for i := 0; i < 3; i++ {
-		for j := 0; j < 3; j++ {
-			fmt.Fprintf(&b, "    float m%d%d = (neutralise != 0) ? n%d%d : a%d%d;\n", i, j, i, j, i, j)
-		}
-	}
-	b.WriteString("    float r = m00 * p_R + m01 * p_G + m02 * p_B;\n    float g = m10 * p_R + m11 * p_G + m12 * p_B;\n    float b = m20 * p_R + m21 * p_G + m22 * p_B;\n")
-	b.WriteString("    float k = _fminf(_fmaxf(strength, 0.0f), 1.0f);\n    r = p_R + k * (r - p_R);\n    g = p_G + k * (g - p_G);\n    b = p_B + k * (b - p_B);\n")
-	b.WriteString("    return make_float3(r, g, b);\n}\n")
-	return b.String()
-}
-
-// ErrNoCamChart is returned when no grid could be found.
 var ErrNoCamChart = errors.New("colorsci: chart grid not found")

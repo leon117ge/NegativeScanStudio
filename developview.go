@@ -147,7 +147,7 @@ func (u *DevUI) paintView(c *walk.Canvas, _ walk.Rectangle) error {
 	fill(c, walk.RGB(18, 18, 20), cb)
 	u.fonts()
 	if u.bmp == nil || u.pw == 0 {
-		msg := "Drop an HDR TIFF from module 3 or a roll folder here, or use Open.\r\n\r\nThe negative is developed with the node chain on the right:\r\n1-3 are the three FilmScan DCTLs (exact port)."
+		msg := "Drop an HDR TIFF from HDR Scan or a roll folder here, or use Open.\r\n\r\nThe negative is developed with the node chain on the right:\r\nNodes 1-3 convert the negative to a positive using the built-in processing chain."
 		if u.font != nil {
 			c.DrawTextPixels(msg, u.font, cDim, cb, walk.TextCenter|walk.TextVCenter|walk.TextWordbreak)
 		}

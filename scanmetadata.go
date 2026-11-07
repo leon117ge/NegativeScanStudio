@@ -4,7 +4,7 @@ import "basetool/scanmeta"
 
 // Capture GUI settings once before a scan starts. A pending camera matrix is
 // recorded, never falsely marked baked into the TIFF (NSS measures through it
-// for DCTL export but does not modify the TIFF pixels).
+// for preview/base reference but does not modify the TIFF pixels).
 func (u *HDRUI) scanMetadata() scanmeta.Metadata {
 	m := scanmeta.Metadata{Roll: u.cfg.Roll, Mode: "white-light", Encoding: "linear"}
 	if u.lockLight != nil {

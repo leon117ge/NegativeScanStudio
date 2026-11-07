@@ -16,8 +16,8 @@ import (
 
 type CamProfile struct {
 	Name    string        `json:"name"`
-	M       colorsci.Mat3 `json:"matrix"`          // grey-preserving camera -> camera
-	Neutral colorsci.Mat3 `json:"neutral_matrix"` // grey -> equal RGB variant (DCTL option)
+	M       colorsci.Mat3 `json:"matrix"`         // grey-preserving camera -> camera
+	Neutral colorsci.Mat3 `json:"neutral_matrix"` // grey -> equal RGB variant (neutral variant)
 	Info    string        `json:"info"`
 }
 
@@ -27,7 +27,6 @@ type CamSettings struct {
 	Enabled  bool         `json:"enabled"`
 	Strength float64      `json:"strength"`
 	LastRef  string       `json:"last_reference"`
-	LastDir  string       `json:"last_dctl_dir"`
 }
 
 var (
@@ -101,6 +100,6 @@ func applyCamToBase(r *hdrscan.TriResult) string {
 	}
 	before := r.Base
 	r.Base = colorsci.ApplyCam(p.M, k, before)
-	return fmt.Sprintf("Camera profile \"%s\" (strength %.2f) applied before the film-base measurement: R %.4f G %.4f B %.4f -> R %.4f G %.4f B %.4f. Put CameraCal_Trichrome.dctl (same profile and strength) before FilmScan_Density_In in Resolve.",
+	return fmt.Sprintf("Camera profile \"%s\" (strength %.2f) applied before the film-base measurement: R %.4f G %.4f B %.4f -> R %.4f G %.4f B %.4f. The matrix is recorded in TIFF metadata; it is not baked into image pixels.",
 		p.Name, k, before[0], before[1], before[2], r.Base[0], r.Base[1], r.Base[2])
 }

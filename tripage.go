@@ -260,7 +260,7 @@ type TriUI struct {
 	camLbl, lockLbl, lightLbl, valLbl, outLbl, whyLbl *walk.Label
 	capBtn, stopBtn, meterBtn                         *walk.PushButton
 	mergeCancel                                       context.CancelFunc // v0.83 Stop during the merge
-	sendBtn                                           *walk.PushButton   // v0.82 Send base to Film base
+	sendBtn                                           *walk.PushButton   // v0.82 Send base to Develop
 	baseLbl                                           *walk.Label        // v0.82 Density_In film base of the last scan
 	pb                                                *walk.ProgressBar
 	resTE, logTE                                      *walk.TextEdit
@@ -738,11 +738,11 @@ func (t *TriUI) Page() TabPage {
 						Composite{Layout: HBox{MarginsZero: true, Spacing: 6}, Children: []Widget{
 							PushButton{AssignTo: &t.meterBtn, Text: "Meter base (manual)", Enabled: false, MinSize: Size{Height: 28}, StretchFactor: 1, OnClicked: func() { h.meter() },
 								ToolTipText: "Optional: meter frame 0 by hand (as on Camera and Light > Camera). Not needed after leveling or preset load."},
-							PushButton{AssignTo: &t.sendBtn, Text: "Send base to Film base", Enabled: false, MinSize: Size{Height: 28}, StretchFactor: 1, OnClicked: t.sendBase,
-								ToolTipText: "Film base R/G/B measured in the last RGB TIFF -> DCTL > Film base (save it as a preset there; FilmScan_Density_In then uses it).\nFor trichrome, orange mask compensation and crosstalk on DCTL > Mask & Crosstalk are set Off / 0."},
+							PushButton{AssignTo: &t.sendBtn, Text: "Send base to Develop", Enabled: false, MinSize: Size{Height: 28}, StretchFactor: 1, OnClicked: t.sendBase,
+								ToolTipText: "Film base R/G/B measured in the last RGB TIFF -> Develop > Density In for preview. TIFF pixels and metadata remain unchanged."},
 						}},
 						Label{AssignTo: &t.whyLbl, Text: "", Font: bold},
-						Label{AssignTo: &t.baseLbl, Text: "FilmScan_Density_In: Film base R / G / B = - (measured after each scan)"},
+						Label{AssignTo: &t.baseLbl, Text: "Density In: Film base R / G / B = - (measured after each scan)"},
 						ProgressBar{AssignTo: &t.pb, MaxSize: Size{Height: 8}},
 						TextEdit{AssignTo: &t.resTE, ReadOnly: true, VScroll: true, MinSize: Size{Height: 90},
 							Text: "Output: <Save to>\\<roll>\\<name>_RGB.tiff or _RGB_HDR.tiff, RAFs <name>_R_0EV.RAF ... (same folder, roll and counter as HDR scan)."},
@@ -775,13 +775,13 @@ func (u *LightUI) isoChanged() {
 	}
 }
 
-// triBaseText: the FilmScan_Density_In parameters from a trichrome TIFF.
+// triBaseText: the Density In parameters from a trichrome TIFF.
 func triBaseText(r *hdrscan.TriResult) string {
 	if r.BaseErr != "" || r.BaseN == 0 {
 		return "Film base NOT measured in the RGB TIFF: " + map[bool]string{true: r.BaseErr, false: "no samples"}[r.BaseErr != ""]
 	}
 	rc := r.BaseRegion.Rect
-	return fmt.Sprintf("FilmScan_Density_In: Film base R %.4f  G %.4f  B %.4f  (linear RGB TIFF / 65535, %d samples of the clear base in (%d,%d)-(%d,%d); orange mask compensation Off, crosstalk strength 0 for trichrome)",
+	return fmt.Sprintf("Density In: Film base R %.4f  G %.4f  B %.4f  (linear RGB TIFF / 65535, %d samples of the clear base in (%d,%d)-(%d,%d); orange mask compensation Off, crosstalk strength 0 for trichrome)",
 		r.Base[0], r.Base[1], r.Base[2], r.BaseN, rc.Min.X, rc.Min.Y, rc.Max.X, rc.Max.Y)
 }
 
@@ -790,21 +790,18 @@ func (t *TriUI) showBase(r *hdrscan.TriResult) {
 		setStatusWide(t.baseLbl, "Film base: not measured - "+r.BaseErr)
 		return
 	}
-	setStatusWide(t.baseLbl, fmt.Sprintf("FilmScan_Density_In  Film base  R %.4f   G %.4f   B %.4f   (%s)", r.Base[0], r.Base[1], r.Base[2], filepath.Base(r.Out)))
+	setStatusWide(t.baseLbl, fmt.Sprintf("Density In  Film base  R %.4f   G %.4f   B %.4f   (%s)", r.Base[0], r.Base[1], r.Base[2], filepath.Base(r.Out)))
 }
 
-// sendBase hands the last trichrome base to DCTL > Film base (the same
-// flow as the HDR scan page's Send base to Film base).
+// sendBase hands the last trichrome base to Develop > Density In (the same
+// flow as the HDR scan page's Send base to Develop).
 func (t *TriUI) sendBase() {
 	h, r := t.hdr, t.lastTri
 	if r == nil || r.BaseErr != "" || r.BaseN == 0 || h.SendBase == nil {
 		return
 	}
-	stem := strings.TrimSuffix(filepath.Base(r.Out), filepath.Ext(r.Out))
-	reg := r.BaseRegion
-	b := SentBase{RGB: r.Base, Path: r.Out, Region: &reg, Trichrome: true,
-		Source:  fmt.Sprintf("trichrome scan %s, %d samples of the clear base", filepath.Base(r.Out), r.BaseN),
-		Suggest: suggestName("Base " + stem)}
-	t.say(fmt.Sprintf("Sent base to Film base: R %.4f G %.4f B %.4f (%s)", b.RGB[0], b.RGB[1], b.RGB[2], b.Source))
+	b := SentBase{RGB: r.Base, Trichrome: true,
+		Source: fmt.Sprintf("trichrome scan %s, %d samples of the clear base", filepath.Base(r.Out), r.BaseN)}
+	t.say(fmt.Sprintf("Sent base to Develop: R %.4f G %.4f B %.4f (%s)", b.RGB[0], b.RGB[1], b.RGB[2], b.Source))
 	h.SendBase(b)
 }

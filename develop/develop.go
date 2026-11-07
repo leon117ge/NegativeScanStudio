@@ -84,7 +84,7 @@ var LUTWhites = []string{"D55", "D60", "D65"}
 
 // Types lists every node type: DCTL params with the DCTL defaults and ranges.
 var Types = []Type{
-	{ID: TDensity, Name: "Density In", Short: "FilmScan_Density_In", Note: "Linear scan / film base -> Cineon-style density code (DCTL node 1).", Params: []Param{
+	{ID: TDensity, Name: "Density In", Short: "FilmScan_Density_In", Note: "Linear scan / film base -> Cineon-style density code (conversion node 1).", Params: []Param{
 		{Key: "preset", Label: "Film base preset", Kind: Combo, Def: 0},
 		cb("in_di", "Input is DaVinci Intermediate timeline", 0),
 		cb("out_trans", "Output transmittance instead of density", 0),
@@ -104,7 +104,7 @@ var Types = []Type{
 		sl("blk_b", "Black subtract B", 0.0, -0.05, 0.2, 0.00001),
 		cb("clamp01", "Clamp output to 0 to 1", 1),
 	}},
-	{ID: TMask, Name: "Mask / Crosstalk", Short: "FilmScan_MaskCrosstalk", Note: "Orange-mask compensation and 3x3 dye-crosstalk matrix in density space (DCTL). Defaults = no change.", Params: []Param{
+	{ID: TMask, Name: "Mask / Crosstalk", Short: "FilmScan_MaskCrosstalk", Note: "Orange-mask compensation and 3x3 dye-crosstalk matrix in density space. Defaults = no change.", Params: []Param{
 		{Key: "mat_preset", Label: "Crosstalk matrix preset", Kind: Combo, Def: 0},
 		cb("mask_on", "Orange mask compensation", 0),
 		sl("bd_r", "Base density R", 0.0, -0.5, 3.0, 0.0001),
@@ -125,7 +125,7 @@ var Types = []Type{
 		sl("full_code", "Full scale code", 1023.0, 255.0, 4095.0, 1.0),
 		cb("clamp01", "Clamp output to 0 to 1", 0),
 	}},
-	{ID: TPositive, Name: "Positive Out", Short: "FilmScan_Positive_Out", Note: "Density code -> positive (print-like inversion) and output encoding (DCTL). Nodes 4-7 grade in this encoding.", Params: []Param{
+	{ID: TPositive, Name: "Positive Out", Short: "FilmScan_Positive_Out", Note: "Density code -> positive (print-like inversion) and output encoding. Nodes 4-7 grade in this encoding.", Params: []Param{
 		co("out_mode", "Output", 2, "Rec709", "DaVinci Intermediate", "Cineon", "ACEScct", "Linear"),
 		co("contrast", "Contrast", 0, "Off", "Low", "Medium", "High"),
 		sl("white_code", "White point code", 696.0, 200.0, 1023.0, 1.0),

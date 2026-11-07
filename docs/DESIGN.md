@@ -1,5 +1,8 @@
 # 设计文档 / Design
 
+> Historical reference through v0.90. App v0.91 removes the DCTL page, all DCTL generation/export, and related write controls. The formulas below remain relevant to the built-in Develop preview, but the old page layout and export instructions are retired. See [current app workflow](APP_WORKFLOW.md), [v0.91 changelog](CHANGELOG.md#v091), and [OFX usage](../ofx/README.md).
+
+
 ## 总体架构
 单一 Windows 可执行文件，GUI 使用 lxn/walk（本地 fork 在 `third_party/walk`）。业务逻辑尽量放在无 UI 依赖的包里（`hdrscan`, `lightlevel`, `colorsci`, `develop`, `cropper`, `rgblight`, `camera`, `basestat`），根目录只是页面与粘合层，因此算法可在 Linux 上测试（`go test ./...` 各包）。
 

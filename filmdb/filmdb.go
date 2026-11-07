@@ -48,7 +48,7 @@ type Entry struct {
 	ColourCast *ColourCast `json:"colour_cast,omitempty"`
 }
 
-// ColourCast is a DCTL-only, additive density correction. It never changes the light.
+// ColourCast is an additive density correction for Develop preview. It never changes the light.
 type ColourCast struct {
 	Kelvin  float64    `json:"kelvin"`
 	Offset  [3]float64 `json:"offset"`

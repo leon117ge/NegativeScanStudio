@@ -162,8 +162,8 @@ func (u *DevUI) log(s string) {
 	u.logTE.ScrollToCaret()
 }
 
-// developContext builds the DCTL preset lists exactly as the exported DCTLs
-// contain them (module 1 presets %.5f, matrices %.4f, WB grays %.2f).
+// developContext keeps existing saved base and WB presets available for preview.
+// Rounding preserves the conversion behavior of earlier app versions.
 func developContext() (*develop.Context, []filmdb.Entry) {
 	cx := &develop.Context{}
 	for _, p := range loadConfig().Presets {
@@ -179,7 +179,7 @@ func developContext() (*develop.Context, []filmdb.Entry) {
 		for i, v := range *e.Crosstalk {
 			m[i] = develop.Round(v, 4)
 		}
-		cx.Matrices = append(cx.Matrices, develop.NamedMat{Name: dctlLabel(e.Name) + " - chart", M: m})
+		cx.Matrices = append(cx.Matrices, develop.NamedMat{Name: e.Name + " - chart", M: m})
 	}
 	for _, g := range loadWBConfig().Presets {
 		cx.WBGrays = append(cx.WBGrays, develop.NamedRGB{Name: g.Name, V: [3]float64{develop.Round(g.R, 2), develop.Round(g.G, 2), develop.Round(g.B, 2)}})
@@ -363,8 +363,8 @@ func runAuto(chain develop.Chain, cx *develop.Context, pix []uint16, stock strin
 			r.logs = append(r.logs, fmt.Sprintf("Film base: no roll preset and no film base DB match - estimated from the image: %.5f %.5f %.5f (p%.1f of %d px below %.1f)", b[0], b[1], b[2], develop.EstPct, used, develop.EstClip))
 			r.notes = append(r.notes, "Film base ESTIMATED from the image - use Pick film base (node 1) on clear film, or the film base DB, for an exact base")
 		} else {
-			r.logs = append(r.logs, fmt.Sprintf("Film base: estimate failed (%d usable px) - DCTL default base kept; use Pick film base", used))
-			r.notes = append(r.notes, "Film base: DCTL default (estimate failed) - use Pick film base or the film base DB")
+			r.logs = append(r.logs, fmt.Sprintf("Film base: estimate failed (%d usable px) - built-in default base kept; use Pick film base", used))
+			r.notes = append(r.notes, "Film base: built-in default (estimate failed) - use Pick film base or the film base DB")
 		}
 	}
 	if wb {
@@ -373,7 +373,7 @@ func runAuto(chain develop.Chain, cx *develop.Context, pix []uint16, stock strin
 			r.pos = chain.Nodes[2].Clone()
 			r.logs = append(r.logs, msg)
 		} else if chain.Nodes[2].Get("film_wb_auto") != 0 {
-			r.logs = append(r.logs, "Film WB Auto: film stock unknown (no DB match, no stock in the file name) - film WB left at \"Kodak Vision3 500T\" (DCTL default)")
+			r.logs = append(r.logs, "Film WB Auto: film stock unknown (no DB match, no stock in the file name) - film WB left at \"Kodak Vision3 500T\" (built-in default)")
 		}
 	}
 	return r
@@ -742,7 +742,7 @@ func (u *DevUI) selectNode(i int) {
 	ty := develop.TypeByID(n.Type)
 	fixed := ""
 	if i < develop.Fixed {
-		fixed = "   (DCTL - fixed)"
+		fixed = "   (conversion - fixed)"
 	}
 	u.nodeTitle.SetText(fmt.Sprintf("Node %d: %s%s", i+1, ty.Name, fixed))
 	u.nodeNote.SetText(wrapText(ty.Note, 64))
@@ -1006,7 +1006,7 @@ func (u *DevUI) loadPresetFile(p string, quiet bool) bool {
 	}
 	c := dp.Chain
 	// Presets saved before v0.71 have no film_wb_auto: their film WB was
-	// chosen by hand (or the DCTL default) and is kept as saved.
+	// chosen by hand (or the built-in default) and is kept as saved.
 	for i := range c.Nodes {
 		if c.Nodes[i].Type == develop.TPositive && c.Nodes[i].V != nil {
 			if _, ok := c.Nodes[i].V["film_wb_auto"]; !ok {
@@ -1161,7 +1161,7 @@ func (u *DevUI) Page() TabPage {
 		panelWs = append(panelWs, Composite{AssignTo: &pv[i], Visible: i == 0, Layout: Grid{Columns: 3, Spacing: 4, MarginsZero: true}, Children: u.panelWidgets(t)})
 	}
 	return TabPage{
-		Title:  "  5. Develop  ",
+		Title:  "  4. Develop  ",
 		Layout: HBox{Margins: Margins{Left: 8, Top: 6, Right: 8, Bottom: 6}, Spacing: 8},
 		Children: []Widget{
 			Composite{
@@ -1187,7 +1187,7 @@ func (u *DevUI) Page() TabPage {
 						PushButton{Text: "100%", OnClicked: func() { u.zoom100() }, ToolTipText: "1:1 - one image pixel per screen pixel, rendered from the full-resolution frame"},
 						Label{AssignTo: &u.zoomLbl, Text: "Fit", MinSize: Size{Width: 70}},
 					}},
-					Label{AssignTo: &u.status, EllipsisMode: EllipsisEnd, Text: "Open an HDR TIFF (module 3) or a roll folder.", TextColor: grey},
+					Label{AssignTo: &u.status, EllipsisMode: EllipsisEnd, Text: "Open an HDR TIFF (HDR Scan) or a roll folder.", TextColor: grey},
 					Composite{Layout: HBox{MarginsZero: true, Spacing: 4}, Children: []Widget{
 						PushButton{Text: "Open TIFF...", OnClicked: func() {
 							dlg := new(walk.FileDialog)

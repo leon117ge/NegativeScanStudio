@@ -1,3 +1,4 @@
+// Frozen legacy Film base measurement reference. The GUI page was removed in app v0.91.
 package main
 
 import (

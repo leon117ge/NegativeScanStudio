@@ -20,7 +20,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"basetool/basestat"
 	"basetool/camera"
 	"basetool/filmdb"
 	"basetool/hdrscan"
@@ -31,7 +30,7 @@ import (
 )
 
 const appName = "NegativeScan Studio"
-const appVersion = appName + " v0.90"
+const appVersion = appName + " v0.91"
 
 // legacyAppName: the program was called Film Base Meter up to v0.67; its
 // settings folder is still read (copied once, never changed) by migrateLegacyConfig.
@@ -411,17 +410,15 @@ type HDRUI struct {
 	logTE, resTE                                                        *walk.TextEdit
 	pb                                                                  *walk.ProgressBar
 
-	// link to DCTL > Film base
+	// link to Develop > Density In
 	sendBtn, stopBtn, mOpenBtn *walk.PushButton
 	scanCancel                 context.CancelFunc // v0.83 Stop (white light scan)
 	scanBefore                 *rgblight.State
 	lastCap, lastMerge         *hdrscan.Result // last HDR from Camera capture / Merge two files
 	sending                    bool
-	// SendBase / OpenInFilmBase are set by main and switch to DCTL > Film base;
-	// LeakPct returns Film base page's light-leak setting.
-	SendBase       func(SentBase)
-	OpenInFilmBase func(path string)
-	LeakPct        func() float64
+	// SendBase / OpenInDevelop are set by main and switch to Develop > Density In;
+	SendBase      func(SentBase)
+	OpenInDevelop func(path string)
 
 	// merge two files
 	m0Ed, m2Ed, m4Ed  *walk.LineEdit
@@ -680,29 +677,19 @@ func (u *HDRUI) updateButtons() {
 	}
 }
 
-// SentBase is a clear-base reading handed to DCTL > Film base, on its scale
+// SentBase is a clear-base reading handed to Develop > Density In, on its scale
 // (linear TIFF value / 65535, leak rejection, per-channel median).
 type SentBase struct {
-	RGB     [3]float64
-	Path    string           // TIFF the values were measured on ("" = locked probe RAW)
-	Region  *basestat.Region // base region in that TIFF
-	Source  string           // human description
-	Suggest string           // suggested preset name
-	// Trichrome (v0.82): from a trichrome RGB TIFF - the DCTL's orange mask
-	// compensation stays off and the crosstalk strength 0.
+	RGB    [3]float64
+	Source string
+	// Trichrome base transfer disables mask/crosstalk in Develop preview.
 	Trichrome bool
 }
 
-func (u *HDRUI) leak() float64 {
-	if u.LeakPct != nil {
-		if v := u.LeakPct(); v > 0 {
-			return v
-		}
-	}
-	return 20
-}
+// Keep the existing default light-leak rejection after retiring its DCTL-page UI.
+func (u *HDRUI) leak() float64 { return 20 }
 
-// sendBase hands the clear base to "1. Film base": from the last HDR
+// sendBase hands the clear base to Develop: from the last HDR
 // capture after a merge (same values as frame 0 at the base), otherwise from
 // the locked probe RAW decoded on the TIFF path (same exposure as frame 0).
 func (u *HDRUI) sendBase() {
@@ -710,12 +697,9 @@ func (u *HDRUI) sendBase() {
 		return
 	}
 	if r := u.lastCap; r != nil && r.Base1N > 0 && r.Base1Err == "" {
-		stem := strings.TrimSuffix(filepath.Base(r.HDR), filepath.Ext(r.HDR))
-		stem = strings.TrimSuffix(stem, "_HDR")
-		b := SentBase{RGB: r.Base1, Path: r.HDR, Region: &r.Base1Region,
-			Source:  fmt.Sprintf("HDR scan %s, %d samples of the clear base (frame 0 %.4f/%.4f/%.4f)", filepath.Base(r.HDR), r.Base1N, r.Base1F0[0], r.Base1F0[1], r.Base1F0[2]),
-			Suggest: suggestName("Base " + stem)}
-		u.say(fmt.Sprintf("Sent base to Film base: R %.4f G %.4f B %.4f (%s)", b.RGB[0], b.RGB[1], b.RGB[2], b.Source))
+		b := SentBase{RGB: r.Base1,
+			Source: fmt.Sprintf("HDR scan %s, %d samples of the clear base (frame 0 %.4f/%.4f/%.4f)", filepath.Base(r.HDR), r.Base1N, r.Base1F0[0], r.Base1F0[1], r.Base1F0[2])}
+		u.say(fmt.Sprintf("Sent base to Develop: R %.4f G %.4f B %.4f (%s)", b.RGB[0], b.RGB[1], b.RGB[2], b.Source))
 		u.SendBase(b)
 		return
 	}
@@ -727,7 +711,7 @@ func (u *HDRUI) sendBase() {
 	u.sending = true
 	u.updateButtons()
 	prevExp := u.expLbl.Text()
-	setStatus(u.expLbl, "Measuring the base for Film base ...")
+	setStatus(u.expLbl, "Measuring the base for Develop ...")
 	go func() {
 		rgb, n, err := s.ProbeBase(leak)
 		u.ui(func() {
@@ -736,42 +720,26 @@ func (u *HDRUI) sendBase() {
 			u.updateButtons()
 			if err != nil {
 				u.say("Send base failed: " + err.Error())
-				walk.MsgBox(u.win(), "Send base to Film base", "Could not measure the base: "+err.Error(), walk.MsgBoxIconWarning)
+				walk.MsgBox(u.win(), "Send base to Develop", "Could not measure the base: "+err.Error(), walk.MsgBoxIconWarning)
 				return
 			}
 			b := SentBase{RGB: rgb,
-				Source:  fmt.Sprintf("locked probe RAW at %s (frame 0 exposure), %d samples of the clear base", s.Locked, n),
-				Suggest: suggestName("Base " + time.Now().Format("2006-01-02 1504"))}
-			u.say(fmt.Sprintf("Sent base to Film base: R %.4f G %.4f B %.4f (%s)", rgb[0], rgb[1], rgb[2], b.Source))
+				Source: fmt.Sprintf("locked probe RAW at %s (frame 0 exposure), %d samples of the clear base", s.Locked, n)}
+			u.say(fmt.Sprintf("Sent base to Develop: R %.4f G %.4f B %.4f (%s)", rgb[0], rgb[1], rgb[2], b.Source))
 			u.SendBase(b)
 		})
 	}()
 }
 
-// suggestName makes a valid preset name (letters, digits, space - _ ., max 40).
-func suggestName(s string) string {
-	var b strings.Builder
-	for _, c := range s {
-		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == ' ' || c == '-' || c == '_' || c == '.' {
-			b.WriteRune(c)
-		}
-	}
-	t := strings.TrimSpace(b.String())
-	if len(t) > 40 {
-		t = t[:40]
-	}
-	return t
-}
-
-func (u *HDRUI) openInFilmBase(r *hdrscan.Result) {
-	if r == nil || r.HDR == "" || u.OpenInFilmBase == nil {
+func (u *HDRUI) openInDevelop(r *hdrscan.Result) {
+	if r == nil || r.HDR == "" || u.OpenInDevelop == nil {
 		return
 	}
 	if _, err := os.Stat(r.HDR); err != nil {
-		walk.MsgBox(u.win(), "Open in Film base", "The HDR TIFF is gone: "+r.HDR, walk.MsgBoxIconWarning)
+		walk.MsgBox(u.win(), "Open in Develop", "The HDR TIFF is gone: "+r.HDR, walk.MsgBoxIconWarning)
 		return
 	}
-	u.OpenInFilmBase(r.HDR)
+	u.OpenInDevelop(r.HDR)
 }
 
 // ---------- device list / connect ----------
@@ -1972,6 +1940,7 @@ func (u *HDRUI) Pages(batch TabPage) HDRPages {
 				Composite{Layout: HBox{MarginsZero: true}, Children: []Widget{
 					ComboBox{AssignTo: &u.devCB, Model: []string{simItem}, CurrentIndex: 0, StretchFactor: 1},
 					PushButton{Text: "Refresh", MaxSize: Size{Width: 70}, OnClicked: u.refreshDevices},
+					PushButton{Text: "Chart calibration...", OnClicked: u.calibrateChart, ToolTipText: calTip},
 				}},
 				Composite{Layout: HBox{MarginsZero: true}, Children: []Widget{
 					PushButton{AssignTo: &u.connBtn, Text: "Connect", MinSize: Size{Width: 100}, OnClicked: u.connect},
@@ -2038,8 +2007,8 @@ func (u *HDRUI) Pages(batch TabPage) HDRPages {
 					LineEdit{AssignTo: &u.p2Sh, ReadOnly: true, Font: big, ColumnSpan: 3, ToolTipText: "Shutters of the brighter frames: shutter only, ISO 160, aperture unchanged."},
 					Label{Text: "Base level", Font: bold},
 					LineEdit{AssignTo: &u.baseLv, ReadOnly: true, Font: big},
-					PushButton{AssignTo: &u.sendBtn, ColumnSpan: 2, Text: "Send base to Film base", Enabled: false, OnClicked: u.sendBase,
-						ToolTipText: "Fill DCTL > Film base's R/G/B with this clear base, measured the way that page measures (TIFF value / 65535, leak rejection, median). After a capture it uses the HDR TIFF; before, the locked probe RAW (same exposure as frame 0)."},
+					PushButton{AssignTo: &u.sendBtn, ColumnSpan: 2, Text: "Send base to Develop", Enabled: false, OnClicked: u.sendBase,
+						ToolTipText: "Fill Develop > Density In's R/G/B with this clear base, measured the way that page measures (TIFF value / 65535, leak rejection, median). After a capture it uses the HDR TIFF; before, the locked probe RAW (same exposure as frame 0)."},
 					Label{Text: "Base R / G / B", Font: bold},
 					LineEdit{AssignTo: &u.baseR, ReadOnly: true, Font: big, TextColor: walk.RGB(200, 50, 50)},
 					LineEdit{AssignTo: &u.baseG, ReadOnly: true, Font: big, TextColor: walk.RGB(40, 150, 60)},
@@ -2184,8 +2153,8 @@ func (u *HDRUI) Pages(batch TabPage) HDRPages {
 			},
 			Composite{Layout: HBox{MarginsZero: true}, Children: []Widget{
 				PushButton{AssignTo: &u.mBtn, Text: "Merge to HDR TIFF", MinSize: Size{Width: 200, Height: 32}, Font: Font{Family: "Segoe UI", PointSize: 10, Bold: true}, OnClicked: u.mergeFiles},
-				PushButton{AssignTo: &u.mOpenBtn, Text: "Open in Film base", Enabled: false, MinSize: Size{Height: 32}, OnClicked: func() { u.openInFilmBase(u.lastMerge) },
-					ToolTipText: "Add the merged HDR TIFF to the file list of DCTL > Film base for measuring."},
+				PushButton{AssignTo: &u.mOpenBtn, Text: "Open in Develop", Enabled: false, MinSize: Size{Height: 32}, OnClicked: func() { u.openInDevelop(u.lastMerge) },
+					ToolTipText: "Open the merged HDR TIFF in Develop for preview."},
 				HSpacer{},
 			}},
 			TextEdit{AssignTo: &u.mRes, ReadOnly: true, VScroll: true, MinSize: Size{Height: 80}, StretchFactor: 1,

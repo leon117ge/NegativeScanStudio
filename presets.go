@@ -1,46 +1,17 @@
 package main
 
 import (
-	_ "embed"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/lxn/walk"
 )
-
-//go:embed template.dctl
-var dctlTemplate string
 
 type Preset struct {
 	Name    string
 	R, G, B float64
-}
-
-type PresetModel struct {
-	walk.TableModelBase
-	items []Preset
-}
-
-func (m *PresetModel) RowCount() int { return len(m.items) }
-func (m *PresetModel) Value(row, col int) interface{} {
-	p := m.items[row]
-	switch col {
-	case 0:
-		return fmt.Sprintf("%d", row+1)
-	case 1:
-		return p.Name
-	case 2:
-		return fmt.Sprintf("%.5f", p.R)
-	case 3:
-		return fmt.Sprintf("%.5f", p.G)
-	case 4:
-		return fmt.Sprintf("%.5f", p.B)
-	}
-	return ""
 }
 
 const maxPresets = 60
@@ -127,10 +98,7 @@ func migrateLegacyConfig() []string {
 }
 
 type Config struct {
-	Presets     []Preset
-	DCTLPath    string
-	AutoSync    bool
-	CurrentBase *[3]float64 // default Density_In sliders from Light leveling
+	Presets []Preset
 }
 
 func parsePresetLine(line string) (Preset, bool) {
@@ -151,7 +119,7 @@ func parsePresetLine(line string) (Preset, bool) {
 	return Preset{name, r, g, b}, true
 }
 
-// parsePresets reads the machine-readable preset lines of a DCTL file produced by this program.
+// parsePresets reads the legacy machine-readable film-base settings.
 func parsePresets(text string) []Preset {
 	var out []Preset
 	for _, ln := range strings.Split(strings.ReplaceAll(text, "\r", ""), "\n") {
@@ -172,120 +140,5 @@ func loadConfig() Config {
 	if ps := parsePresets(txt); len(ps) > 0 {
 		c.Presets = ps
 	}
-	for _, ln := range strings.Split(txt, "\n") {
-		if b, ok := parseCurrentBase(ln); ok {
-			c.CurrentBase = &b
-		}
-		if strings.HasPrefix(ln, "DCTL_PATH=") {
-			c.DCTLPath = strings.TrimPrefix(ln, "DCTL_PATH=")
-		}
-		if ln == "AUTOSYNC=1" {
-			c.AutoSync = true
-		}
-	}
 	return c
-}
-
-func saveConfig(c Config) error {
-	if err := os.MkdirAll(configDir(), 0755); err != nil {
-		return err
-	}
-	var sb strings.Builder
-	for _, p := range c.Presets {
-		sb.WriteString(fmt.Sprintf("// FBM_PRESET|%s|%.5f|%.5f|%.5f\n", p.Name, p.R, p.G, p.B))
-	}
-	if c.CurrentBase != nil {
-		sb.WriteString(currentBaseLine(*c.CurrentBase) + "\n")
-	}
-	sb.WriteString("DCTL_PATH=" + c.DCTLPath + "\n")
-	if c.AutoSync {
-		sb.WriteString("AUTOSYNC=1\n")
-	}
-	return os.WriteFile(filepath.Join(configDir(), "config.txt"), []byte(sb.String()), 0644)
-}
-
-func buildDCTL(ps []Preset) string {
-	var h strings.Builder
-	h.WriteString("// ===== FILM BASE PRESETS =====\n")
-	h.WriteString("// This list is written by Film Base Meter. Edit it there (or add a preset and a matching case by hand).\n")
-	h.WriteString("// Resolve can not move sliders from a dropdown, so choosing a preset overrides the three Film base sliders.\n")
-	h.WriteString("// Choose Custom to use the sliders again.\n")
-	for _, p := range ps {
-		h.WriteString(fmt.Sprintf("// FBM_PRESET|%s|%.5f|%.5f|%.5f\n", p.Name, p.R, p.G, p.B))
-	}
-	ids := "P_CUSTOM"
-	labels := "Custom - use sliders below"
-	for i, p := range ps {
-		ids += fmt.Sprintf(", P_%d", i+1)
-		labels += ", " + p.Name
-	}
-	h.WriteString(fmt.Sprintf("DEFINE_UI_PARAMS(preset, Film base preset, DCTLUI_COMBO_BOX, 0, {%s}, {%s})", ids, labels))
-
-	var f strings.Builder
-	f.WriteString("__DEVICE__ float3 preset_base(int id, float3 slider)\n{\n    switch (id)\n    {\n")
-	for i, p := range ps {
-		f.WriteString(fmt.Sprintf("        case %d: return make_float3(%.5ff, %.5ff, %.5ff);\n", i+1, p.R, p.G, p.B))
-	}
-	f.WriteString("        default: return slider;\n    }\n}")
-
-	out := strings.Replace(dctlTemplate, "@@PRESET_HEADER@@", h.String(), 1)
-	out = strings.Replace(out, "@@PRESET_FUNC@@", f.String(), 1)
-	return out
-}
-
-// importMode asks how imported presets join a non-empty list:
-// 1 = replace the list, 2 = merge by name, 0 = cancel.
-func importMode(owner walk.Form, have, got int, src string) int {
-	if have == 0 {
-		return 1
-	}
-	switch walk.MsgBox(owner, "Import presets",
-		fmt.Sprintf("%s has %d preset(s); the list has %d now.\n\n"+
-			"Yes = replace the list with the imported presets\n"+
-			"No = merge: same name updates the preset, new names are added at the end\n"+
-			"Cancel = keep the list as it is", src, got, have),
-		walk.MsgBoxYesNoCancel|walk.MsgBoxIconQuestion) {
-	case walk.DlgCmdYes:
-		return 1
-	case walk.DlgCmdNo:
-		return 2
-	}
-	return 0
-}
-
-// mergeByName updates presets whose name matches (case-insensitive) and
-// appends the rest up to max. It returns the list and the counts.
-func mergeByName[T any](cur, add []T, name func(T) string, max int) (out []T, updated, added, skipped int) {
-	out = append([]T{}, cur...)
-	for _, p := range add {
-		hit := false
-		for i := range out {
-			if strings.EqualFold(name(out[i]), name(p)) {
-				out[i], hit = p, true
-				updated++
-				break
-			}
-		}
-		if hit {
-			continue
-		}
-		if len(out) >= max {
-			skipped++
-			continue
-		}
-		out = append(out, p)
-		added++
-	}
-	return
-}
-
-func importSummary(mode, n, upd, add, skip int) string {
-	if mode == 1 {
-		return fmt.Sprintf("Imported %d preset(s) (list replaced).", n)
-	}
-	s := fmt.Sprintf("Merged %d preset(s): %d updated, %d added", n, upd, add)
-	if skip > 0 {
-		s += fmt.Sprintf(", %d not added (list full, max %d)", skip, maxPresets)
-	}
-	return s + "."
 }

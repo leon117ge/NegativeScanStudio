@@ -3,11 +3,9 @@ package main
 import (
 	"encoding/csv"
 	"fmt"
-	"math"
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"time"
 
 	"basetool/hdrscan"
@@ -70,32 +68,4 @@ func appendLevelingLog(path string, r levelingRecord) error {
 		return err
 	}
 	return f.Close()
-}
-
-func validLevelingBase(b [3]float64) bool {
-	for _, v := range b {
-		if math.IsNaN(v) || math.IsInf(v, 0) || v < 0.0001 || v > 16 {
-			return false
-		}
-	}
-	return true
-}
-
-func currentBaseLine(b [3]float64) string {
-	return fmt.Sprintf("// FBM_CURRENT_BASE|%.8f|%.8f|%.8f", b[0], b[1], b[2])
-}
-func parseCurrentBase(line string) ([3]float64, bool) {
-	var b [3]float64
-	f := strings.Split(strings.TrimSpace(line), "|")
-	if len(f) != 4 || f[0] != "// FBM_CURRENT_BASE" {
-		return b, false
-	}
-	for c := range b {
-		v, err := strconv.ParseFloat(f[c+1], 64)
-		if err != nil {
-			return b, false
-		}
-		b[c] = v
-	}
-	return b, validLevelingBase(b)
 }

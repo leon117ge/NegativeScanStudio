@@ -4,7 +4,7 @@
 
 | Product | Current version | Download / release | Documentation |
 |---|---|---|---|
-| **NegativeScan Studio** — scanning app | **v0.90** | [App release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/v0.90) · [Windows x64 EXE](https://github.com/leon117ge/NegativeScanStudio/releases/download/v0.90/NegativeScanStudio_v0.90.exe) | [Hardware](docs/HARDWARE.md) · [App changelog](docs/CHANGELOG.md) · [App roadmap](docs/ROADMAP.md) |
+| **NegativeScan Studio** — scanning app | **v0.91** | [App release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/v0.91) · [Windows x64 EXE](https://github.com/leon117ge/NegativeScanStudio/releases/download/v0.91/NegativeScanStudio_v0.91.exe) | [Hardware](docs/HARDWARE.md) · [App changelog](docs/CHANGELOG.md) · [App roadmap](docs/ROADMAP.md) |
 | **NegativeScan Studio OFX** — Resolve plugin | **0.90.4** | [Plugin release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/ofx-v0.90.4) · [Windows x64 ZIP](https://github.com/leon117ge/NegativeScanStudio/releases/download/ofx-v0.90.4/NegativeScanStudio_OFX_v0.90.4_Win64.zip) | [Install / usage](ofx/README.md) · [Plugin changelog](ofx/CHANGELOG.md) · [Plugin roadmap](ofx/ROADMAP.md) |
 
 Both current releases are **prereleases**. Download the EXE for scanning, the OFX ZIP for Resolve, or both. The old OFX ZIP on the app v0.90 release is retained as history; use the separate plugin release above for the current plugin.
@@ -16,12 +16,12 @@ Camera-scanning/capture software written in Go with a [walk](https://github.com/
 - Tethered camera control (PTP/WPD), live-view film-base selection and RGB-light control.
 - Film-base metering and closed-loop light leveling; scanning configuration and film-base presets.
 - HDR/bracketed capture, trichrome/RGB-light capture and merge, linear RAW-to-TIFF conversion through LibRaw.
-- Crop, merge, hair/dust removal, camera-matrix calibration, Develop preview and legacy DCTL export.
+- Crop, merge, hair/dust removal, camera-matrix calibration, Develop preview. The app UI, prompts, and log messages are English only.
 - HDR/trichrome scan TIFFs can carry `nss.scan/1` scan provenance: known light drive RGB, film base, pending/applied camera matrix, light model and software version.
 
-**Use:** download `NegativeScanStudio_v0.90.exe` from the app release and run on Windows x64 with the appropriate camera/light setup. This is the capture app, not a Resolve plugin. App and plugin updates are independent.
+**Use:** download `NegativeScanStudio_v0.91.exe` from the app release and run on Windows x64 with the appropriate camera/light setup. This is the capture app, not a Resolve plugin. App and plugin updates are independent.
 
-[Design](docs/DESIGN.md) · [Algorithms](docs/ALGORITHMS.md) · [500T app workflow](docs/500T_USAGE.md)
+[Design](docs/DESIGN.md) · [Algorithms](docs/ALGORITHMS.md) · [500T Develop preview](docs/500T_USAGE.md) · [v0.91 verification](docs/QA_v0.91.md)
 
 ## 2. NegativeScan Studio OFX — DaVinci Resolve plugin
 
@@ -55,7 +55,7 @@ Scanning app → linear TIFF + nss.scan/1 metadata → OFX Load → develop in R
 
 `light_rgb` is the scanner's drive value, **not** normalized film-base RGB. Old TIFFs without NSS metadata require manual values; unknown scan information is not reconstructed or invented. RAW conversion/other exports do not automatically imply complete scan provenance. See the [metadata contract](docs/OFX.md#数据契约).
 
-The original DCTL templates remain available as **legacy/reference tools** for the app/export workflow and mathematical comparisons. Do not apply the old DCTL chain again on top of the equivalent OFX conversion. In particular, legacy mask/crosstalk code is not a stage in the current OFX product.
+App v0.91 removes the DCTL module, generators, template embedding, export settings, and write-to-DCTL controls. Use the independent OFX plugin for Resolve conversion. The two root conversion templates remain only because `ofx/tools/generate.py` uses them to generate plugin C++; the app does not embed or export them. Other historical DCTL sources remain in tags through v0.90. The built-in Develop preview and its existing conversion math remain available without any DCTL files. Legacy mask/crosstalk math in Develop is not a stage in the OFX plugin.
 
 ## Repository map
 
@@ -66,8 +66,8 @@ The original DCTL templates remain available as **legacy/reference tools** for t
 | `filmdb/`, `scanconfig/`, `scanmeta/` | App presets, configuration and scan metadata |
 | `ofx/src/`, `ofx/vendor/` | OFX C++/OpenCL implementation and vendored SDK headers |
 | `ofx/build.sh`, `ofx/test.sh`, `ofx/tests/` | Plugin build, math/metadata/host tests and benchmark |
-| `colorsci/`, `develop/`, `docs/data/` | Color science, app DCTL evaluator and calibration/research data |
-| `template.dctl`, `template_core.dctl`, `FilmScan_MaskCrosstalk.dctl` | Legacy/reference DCTL templates |
+| `template.dctl`, `template_core.dctl` | OFX code-generation inputs only; not embedded or exported by the app |
+| `colorsci/`, `develop/`, `docs/data/` | Color science, built-in Develop evaluator and calibration/research data |
 | `cmd/`, `third_party/` | QA tools and app dependencies, including LibRaw/walk |
 | `docs/`, `ofx/README.md` | App/shared docs and plugin installation/usage |
 
@@ -89,15 +89,6 @@ The app uses `rsrc_windows_amd64.syso` and `third_party/libraw/lib/windows_amd64
 ```
 
 Plugin dependencies and optional OpenCL tests are documented in [ofx/README.md](ofx/README.md). Building either product does not require rebuilding the other.
-
-## 中文简述
-
-本仓库现在是两个独立产品：
-
-- **NegativeScan Studio 扫描软件 v0.90**：Windows 相机联机、RGB灯调平、HDR/三色扫描合成、裁切去尘等。下载上方 App release 的 EXE。
-- **NegativeScan Studio OFX 插件 0.90.4**：Resolve 内转正、片基/色温/片种gamma预设、500T Base可见balance、灰白点与metadata加载。下载独立 Plugin release 的 ZIP，退出Resolve后将完整bundle放入上方OFX目录。
-- 扫描TIFF内的 `nss.scan/1` JSON 可由插件 Load 读取；旧图无metadata时手填，不编造RGB。DCTL保留为旧工作流/参考，不是第三个独立发版产品。
-- app 与插件独立版本/日志/路线图；插件更新不等于app升级。0.90.4的新GPU与viewer交互尚待真实Resolve验收。
 
 ## License
 

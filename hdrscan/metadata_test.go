@@ -16,7 +16,7 @@ func TestScanTIFFMetadataAndHairPreservation(t *testing.T) {
 	b := [3]float64{.48, .50, .46}
 	light := [3]int{1200, 2300, 3400}
 	matrix := [9]float64{1.1, -.1, 0, 0, 1, 0, 0, 0, 1}
-	meta := scanmeta.Metadata{Roll: "测试卷📷", LightRGB: &light, LightModel: "CuteNewDesign RGB Light Air", FilmBase: &b, CameraMatrix: &matrix, CameraStrength: .5}
+	meta := scanmeta.Metadata{Roll: "\u6d4b\u8bd5\u5377📷", LightRGB: &light, LightModel: "CuteNewDesign RGB Light Air", FilmBase: &b, CameraMatrix: &matrix, CameraStrength: .5}
 	for _, lzw := range []bool{false, true} {
 		path := filepath.Join(t.TempDir(), "scan.tiff")
 		pix := make([]uint16, 24*24*3)

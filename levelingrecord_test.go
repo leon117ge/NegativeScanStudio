@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/csv"
-	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -43,25 +42,6 @@ func TestLevelingCSVAndClipboardKeepMeasuredSpace(t *testing.T) {
 	for _, want := range []string{"R 0.50123 G 0.49876 B 0.50001", "R 13 G 35 B 57", "TIFF-checked", "+08:00"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("clipboard missing %q: %s", want, text)
-		}
-	}
-}
-
-func TestCurrentLevelingBaseRoundTripAndRejectInvalid(t *testing.T) {
-	b := [3]float64{.50123456, .49999999, .50000001}
-	got, ok := parseCurrentBase(currentBaseLine(b))
-	if !ok || got != b {
-		t.Fatalf("roundtrip: %v %v", got, ok)
-	}
-	for _, v := range []float64{0, -1, math.NaN(), math.Inf(1), 16.01} {
-		bad := [3]float64{.5, v, .5}
-		if validLevelingBase(bad) {
-			t.Fatalf("accepted %v", v)
-		}
-	}
-	for _, s := range []string{"// FBM_CURRENT_BASE|NaN|.5|.5", "// FBM_CURRENT_BASE|.5|.5", "// FBM_CURRENT_BASE|0|.5|.5"} {
-		if _, ok := parseCurrentBase(s); ok {
-			t.Fatalf("accepted %q", s)
 		}
 	}
 }

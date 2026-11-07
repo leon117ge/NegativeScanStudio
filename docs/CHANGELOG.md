@@ -1,8 +1,22 @@
 # NegativeScan Studio app — Changelog / 扫描软件更新日志
 
-Current app: **v0.90** · [App release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/v0.90) · [OFX plugin changelog](../ofx/CHANGELOG.md) · [Versioning policy](VERSIONING.md)
+Current app: **v0.91** · [App release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/v0.91) · [OFX plugin changelog](../ofx/CHANGELOG.md) · [Versioning policy](VERSIONING.md)
 
 This file tracks the scanning app, not plugin-only releases. / 本文件只记录扫描软件。
+
+## v0.91
+
+- Remove the DCTL module and its Film base, White balance, and Mask & Crosstalk pages. Remove generators, app template embedding, export-only settings, and Light/colour-cast write-to-DCTL controls.
+- Keep the 500T illuminant calculator as an English-only Develop-preview tool. Remove DCTL-only saved-stock controls and global export state.
+- Move camera chart calibration to Camera & Light > Camera. Keep camera-profile fitting and use in leveling/base measurement; remove calibration DCTL export.
+- Send measured HDR/trichrome base readings to Develop instead of the retired DCTL page. Open merged TIFFs in Develop. Update four-module navigation and command-line page routing.
+- Keep camera/light control, auto leveling, scan presets, capture, image tools, and the built-in Develop chain. TIFF `nss.scan/1` metadata serialization is unchanged.
+- Remove the remaining Chinese UI text. Add a repeatable source/embedded-asset language and retired-export check.
+- App version only. OFX remains 0.90.4, with no changes under `ofx/`.
+
+See [verification and limits](QA_v0.91.md). Earlier entries below describe historical releases and do not imply that DCTL export remains available.
+
+## Historical app releases
 
 根据源码中的版本注释、备份文件与说明文件整理（v0.70 之前为 FilmBaseMeter v0.1–v0.67）。
 
@@ -30,3 +44,5 @@ This file tracks the scanning app, not plugin-only releases. / 本文件只记�
 
 ## 仓库说明
 仓库已通过 git 上传完整源码和构建所需的图标、资源与 LibRaw 静态库。Windows 可执行文件放在 GitHub Releases，不随源码重复提交。
+
+The root `template.dctl` and `template_core.dctl` remain unchanged as inputs to `ofx/tools/generate.py`. They are not app assets or app export features. Removing them would break OFX regeneration, so app-only cleanup does not delete them.
