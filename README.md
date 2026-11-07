@@ -1,58 +1,104 @@
 # NegativeScan Studio
 
-胶片负片翻拍（相机扫描）工具，Windows 桌面程序，Go + [lxn/walk](https://github.com/lxn/walk) GUI。
-当前版本 **v0.90**。作者：**Grok Bot**（AI 助手），为 leon117ge 编写与维护。
+**Two products, one film-scanning workflow:** a Windows capture application and a DaVinci Resolve OpenFX plugin. They share this MIT-licensed repository, but have independent versions and releases.
 
-A Windows tool for scanning film negatives with a tethered camera (Fujifilm X-T3) and a
-CuteNewDesign RGB Light Air backlight: film-base metering, light-based base leveling,
-HDR / trichrome capture and merge, crop, hair removal, and DaVinci Resolve DCTL export.
+| Product | Current version | Download / release | Documentation |
+|---|---|---|---|
+| **NegativeScan Studio** — scanning app | **v0.90** | [App release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/v0.90) · [Windows x64 EXE](https://github.com/leon117ge/NegativeScanStudio/releases/download/v0.90/NegativeScanStudio_v0.90.exe) | [Hardware](docs/HARDWARE.md) · [App changelog](docs/CHANGELOG.md) · [App roadmap](docs/ROADMAP.md) |
+| **NegativeScan Studio OFX** — Resolve plugin | **0.90.1** | [Plugin release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/ofx-v0.90.1) · [Windows x64 ZIP](https://github.com/leon117ge/NegativeScanStudio/releases/download/ofx-v0.90.1/NegativeScanStudio_OFX_v0.90.1_Win64.zip) | [Install / usage](ofx/README.md) · [Plugin changelog](ofx/CHANGELOG.md) · [Plugin roadmap](ofx/ROADMAP.md) |
 
-## 功能模块（程序顶层标签）
-1. **DCTL** – 片基测量、片基预设、DCTL 导出（FilmScan_Density_In → FilmScan_MaskCrosstalk → FilmScan_Positive_Out）。
-2. **Camera & Light** – 500T 3200K 光源偏色的 DCTL 密度校正（近似模型，调平后不改灯）， 相机联机（PTP/WPD）、RGB 灯控制、片基调平（Light / White light / Trichrome 页共享实时画面与手选框）。
-3. **HDR Scan** – 片基测光、包围曝光拍摄与合成、三色（trichrome）扫描。
-4. **Crop & Merge** – 自动裁切、合并文件、去毛发/纤维、Develop 预览。
+Both current releases are **prereleases**. Download the EXE for scanning, the OFX ZIP for Resolve, or both. The old OFX ZIP on the app v0.90 release is retained as history; use the separate plugin release above for the current plugin.
 
-## 代码结构
-| 路径 | 内容 |
+## 1. NegativeScan Studio — Windows scanning app
+
+Camera-scanning/capture software written in Go with a [walk](https://github.com/lxn/walk) desktop GUI. The current hardware workflow targets a Fujifilm X-T3 and CuteNewDesign RGB Light Air; see [hardware support and limits](docs/HARDWARE.md).
+
+- Tethered camera control (PTP/WPD), live-view film-base selection and RGB-light control.
+- Film-base metering and closed-loop light leveling; scanning configuration and film-base presets.
+- HDR/bracketed capture, trichrome/RGB-light capture and merge, linear RAW-to-TIFF conversion through LibRaw.
+- Crop, merge, hair/dust removal, camera-matrix calibration, Develop preview and legacy DCTL export.
+- HDR/trichrome scan TIFFs can carry `nss.scan/1` scan provenance: known light drive RGB, film base, pending/applied camera matrix, light model and software version.
+
+**Use:** download `NegativeScanStudio_v0.90.exe` from the app release and run on Windows x64 with the appropriate camera/light setup. This is the capture app, not a Resolve plugin. App and plugin updates are independent.
+
+[Design](docs/DESIGN.md) · [Algorithms](docs/ALGORITHMS.md) · [500T app workflow](docs/500T_USAGE.md)
+
+## 2. NegativeScan Studio OFX — DaVinci Resolve plugin
+
+A separate C++/OpenFX product for developing linear negative scans inside Resolve. Windows x64 is currently available.
+
+- Camera calibration → Density In → Positive Out in one effect. The current plugin has **no mask/crosstalk stage**.
+- Film stock gamma presets; T/D film balance and 3200/3800/4400/5000/5600K presets that immediately fill visible film-base sliders.
+- A visible RGB balance loader: **500T Base** loads **+1.57 / 0 / +1.00 stops**; manual adjustment remains. This is a measured workflow residual, not a universal Kodak constant. [Calibration conditions](docs/data/ofx_film_bases.md).
+- Viewer gray/white-point sampling through a host-native 2D point parameter and patch radius; TIFF/JSON metadata loading with manual override.
+- Runtime OpenCL buffer rendering when offered by the host, plus an optimized multithreaded CPU fallback.
+
+**Install:** quit Resolve, unzip the plugin release, and copy the **entire** `NegativeScanStudio.ofx.bundle` folder to:
+
+```text
+C:\Program Files\Common Files\OFX\Plugins\
+```
+
+Restart Resolve and find **NegativeScan Studio OFX 0.90.1** under OpenFX → NegativeScan Studio. Back up projects and remove duplicate/older bundles before replacing them. See the [bilingual installation guide](ofx/README.md).
+
+**Validation limits:** 0.90.1 has CPU/host-free and actual PoCL CPU OpenCL tests, but its new path has not been verified in real Windows Resolve or on a physical GPU. Native viewer-handle appearance and host GPU negotiation remain to be checked. CPU mode is available. [Implementation, tests and limitations](docs/OFX.md).
+
+## How the two products connect
+
+```text
+Scanning app → linear TIFF + nss.scan/1 metadata → OFX Load → develop in Resolve
+```
+
+1. Capture in the app's HDR/trichrome workflow. Known scan information is embedded as JSON in TIFF **ImageDescription (tag 270)**; it does not require a proprietary TIFF reader.
+2. In OFX, choose the scan TIFF or an exported `.nss.json` sidecar and click **Load from file (or Resolve source)**. The plugin fills film base/camera controls and keeps a baseline before scene-illuminant compensation. Load turns Auto off so manual overrides persist.
+3. Resolve's optional source-path extension may allow auto-read, but standard OFX does not guarantee a source filename. Explicit file selection is the portable route. The input must still be the same unconverted linear scan.
+
+`light_rgb` is the scanner's drive value, **not** normalized film-base RGB. Old TIFFs without NSS metadata require manual values; unknown scan information is not reconstructed or invented. RAW conversion/other exports do not automatically imply complete scan provenance. See the [metadata contract](docs/OFX.md#数据契约).
+
+The original DCTL templates remain available as **legacy/reference tools** for the app/export workflow and mathematical comparisons. Do not apply the old DCTL chain again on top of the equivalent OFX conversion. In particular, legacy mask/crosstalk code is not a stage in the current OFX product.
+
+## Repository map
+
+| Path | Product / purpose |
 |---|---|
-| `*.go`（根目录） | walk GUI 各页面与粘合逻辑（`main.go`, `hdrpage.go`, `lightpage.go`, `tripage.go`, `croppage.go`, `developpage.go`, `maskpage.go`, `presets.go`, `leveling*.go` …） |
-| `basestat/` | 片基统计（16-bit 线性/65535、漏光剔除、逐通道中位数） |
-| `camera/` | PTP over Windows Portable Devices，富士 X-T3 属性，模拟相机 |
-| `rgblight/` | RGB Light Air 串口协议 RGBAIR API 1.3（只实现官方客户命令） |
-| `lightlevel/` | 片基闭环调平（固定曝光，只调灯三通道） |
-| `hdrscan/` | 片基检测、包围合成（Classic / Weighted / 传感器马赛克）、三色、去尘去毛发 |
-| `colorsci/` | 色彩科学：Cineon 密度、橙色片基补偿、染料串扰、色卡 3×3 校准、胶片库 |
-| `develop/` | 3 个 DCTL 的 Go 1:1 移植，Resolve 式节点链 + 2383 LUT |
-| `cropper/` | 画幅边缘检测与裁切 |
-| `rawconv/` | LibRaw RAW → 线性 16-bit TIFF |
-| `filmdb/`, `scanconfig/` | 片基数据库、扫描配置预设 |
-| `cmd/` | 开发/QA 命令行工具 |
-| `third_party/` | walk（本地修改版，go.mod replace）、LibRaw 头文件、rawtoaces 数据 |
-| `docs/` | 设计、算法、硬件、更新日志、路线图、RGBAIR API 文档 |
+| Root `*.go`, `camera/`, `rgblight/`, `lightlevel/` | Scanning app GUI, tethering and light leveling |
+| `hdrscan/`, `rawconv/`, `cropper/`, `basestat/` | App capture/merge, RAW conversion and image tools |
+| `filmdb/`, `scanconfig/`, `scanmeta/` | App presets, configuration and scan metadata |
+| `ofx/src/`, `ofx/vendor/` | OFX C++/OpenCL implementation and vendored SDK headers |
+| `ofx/build.sh`, `ofx/test.sh`, `ofx/tests/` | Plugin build, math/metadata/host tests and benchmark |
+| `colorsci/`, `develop/`, `docs/data/` | Color science, app DCTL evaluator and calibration/research data |
+| `template.dctl`, `template_core.dctl`, `FilmScan_MaskCrosstalk.dctl` | Legacy/reference DCTL templates |
+| `cmd/`, `third_party/` | QA tools and app dependencies, including LibRaw/walk |
+| `docs/`, `ofx/README.md` | App/shared docs and plugin installation/usage |
 
-## 构建（Linux 交叉编译 Windows）
+[Release history index](CHANGELOG.md) · [Independent versioning policy](docs/VERSIONING.md)
+
+## Build from source
+
+App (Linux → Windows x64; MinGW, Go/CGO and vendored LibRaw required):
+
 ```sh
 CGO_ENABLED=1 CC=x86_64-w64-mingw32-gcc CXX=x86_64-w64-mingw32-g++ GOOS=windows GOARCH=amd64 \
   go build -trimpath -ldflags "-H windowsgui -s -w" -o NegativeScanStudio.exe .
 ```
-需要 `rsrc_windows_amd64.syso`（图标+manifest）和 `third_party/libraw/lib/windows_amd64` 下的 LibRaw 静态库。
-注意：二进制文件（.syso、.ico、.icc、LibRaw 静态库）若仓库中缺失，见 docs/CHANGELOG.md 的“仓库说明”。
 
-## 文档
-[设计](docs/DESIGN.md) · [算法](docs/ALGORITHMS.md) · [硬件](docs/HARDWARE.md) · [更新日志](docs/CHANGELOG.md) · [路线图](docs/ROADMAP.md)
+The app uses `rsrc_windows_amd64.syso` and `third_party/libraw/lib/windows_amd64` static libraries. Plugin build:
 
-## 500T 的 3200K 平衡
-v0.89 先做 500T 光源平衡模型。灯光调平后保持不变，偏色只在 DCTL 中校正。
-选择底片**拍摄时**的光源，不是翻拍灯的色温。5500K 是 Planck 日光近似，不是 CIE D55。
+```sh
+./ofx/build.sh /absolute/output/directory
+```
 
-[使用步骤](docs/500T_USAGE.md) · [公式与限制](docs/ALGORITHMS.md#9-500t-3200k-光源平衡v089) · [Kodak 数据转录](docs/data/5219_digitization.md)
+Plugin dependencies and optional OpenCL tests are documented in [ofx/README.md](ofx/README.md). Building either product does not require rebuilding the other.
 
-灰点实测、灰阶交叉偏色拟合尚未实现，见[路线图](docs/ROADMAP.md)。
+## 中文简述
+
+本仓库现在是两个独立产品：
+
+- **NegativeScan Studio 扫描软件 v0.90**：Windows 相机联机、RGB灯调平、HDR/三色扫描合成、裁切去尘等。下载上方 App release 的 EXE。
+- **NegativeScan Studio OFX 插件 0.90.1**：Resolve 内转正、片基/色温/片种gamma预设、500T Base可见balance、灰白点与metadata加载。下载独立 Plugin release 的 ZIP，退出Resolve后将完整bundle放入上方OFX目录。
+- 扫描TIFF内的 `nss.scan/1` JSON 可由插件 Load 读取；旧图无metadata时手填，不编造RGB。DCTL保留为旧工作流/参考，不是第三个独立发版产品。
+- app 与插件独立版本/日志/路线图；插件更新不等于app升级。0.90.1的新GPU与viewer交互尚待真实Resolve验收。
 
 ## License
-MIT © 2026 Grok Bot. Third-party code under `third_party/` keeps its own licenses (walk: BSD-3; LibRaw: LGPL/CDDL).
 
-## v0.90 OFX 与 TIFF metadata
-
-一体 Windows x64 OFX（Camera matrix → Density In → Crosstalk → Positive Out），T/D 3200–5600K 每600K预设、Kodak片种gamma预设；HDR/三色TIFF内嵌卷扫描JSON、插件读取。详见 [安装说明](ofx/README.md) / [实现与验证边界](docs/OFX.md)。CPU原型已构建测试，**真实Resolve尚待验收**。
+MIT © 2026 Grok Bot. Maintained for leon117ge. Third-party components retain their own licenses: walk (BSD-3), LibRaw (LGPL/CDDL), OpenFX (BSD-3), OpenCL headers (Apache-2.0) and nlohmann/json (MIT); see the corresponding vendored license files.
