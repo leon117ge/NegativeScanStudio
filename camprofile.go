@@ -5,13 +5,11 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
 
 	"basetool/colorsci"
-	"basetool/hdrscan"
 )
 
 type CamProfile struct {
@@ -87,19 +85,4 @@ func activeCam() (*CamProfile, float64) {
 		return nil, 0
 	}
 	return p, s.Strength
-}
-
-// applyCamToBase applies the active camera profile to the automatically
-// measured trichrome film base (the matrix acts on the median clear-base
-// colour, as the CameraCal DCTL would on those pixels) and returns a log line.
-func applyCamToBase(r *hdrscan.TriResult) string {
-	lastTriOut = r.Out
-	p, k := activeCam()
-	if p == nil || r.BaseErr != "" || r.BaseN == 0 {
-		return ""
-	}
-	before := r.Base
-	r.Base = colorsci.ApplyCam(p.M, k, before)
-	return fmt.Sprintf("Camera profile \"%s\" (strength %.2f) applied before the film-base measurement: R %.4f G %.4f B %.4f -> R %.4f G %.4f B %.4f. The matrix is recorded in TIFF metadata; it is not baked into image pixels.",
-		p.Name, k, before[0], before[1], before[2], r.Base[0], r.Base[1], r.Base[2])
 }

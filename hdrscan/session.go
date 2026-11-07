@@ -355,8 +355,10 @@ func (s *Session) CaptureBracketEVCtx(ctx context.Context, dir string, evs []int
 
 // ProcessOptions control conversion + merge.
 type ProcessOptions struct {
-	Metadata scanmeta.Metadata // frozen at scan start; no GUI state read by workers
-	Merge    Options
+	// MeasureLevelingBase is only for the explicit Light-page calibration check.
+	MeasureLevelingBase bool
+	Metadata            scanmeta.Metadata // frozen at scan start; no GUI state read by workers
+	Merge               Options
 	// Ctx (v0.83) stops the processing (Stop button); on cancel every file
 	// this call wrote is removed and ctx.Err() is returned.
 	Ctx       context.Context
@@ -733,7 +735,7 @@ func ProcessN(srcs []string, o ProcessOptions) (retRes *Result, retErr error) {
 			}
 		}
 	}
-	if !reg.Rect.Empty() {
+	if !reg.Rect.Empty() && o.Color.Enabled() {
 		res.Base1Region = reg
 		leak := o.LeakPct
 		if leak <= 0 {
@@ -764,12 +766,7 @@ func ProcessN(srcs []string, o ProcessOptions) (retRes *Result, retErr error) {
 	hdr := uniqueFile(HDRPath(dir, src0))
 	say("Writing %s ...", filepath.Base(hdr))
 	wrote = append(wrote, hdr)
-	meta := o.Metadata
-	if res.Base1N > 0 && res.Base1Err == "" {
-		b := res.Base1
-		meta.FilmBase = &b
-		meta.BaseSource = "measured HDR clear base"
-	}
+	meta := o.Metadata.ForCapture()
 	if res.ColorNote != "" {
 		meta.Processing = res.ColorNote
 		meta.Encoding = "processed"

@@ -6,7 +6,7 @@ Current app: **v0.91** · [App changelog](CHANGELOG.md) · [OFX roadmap](../ofx/
 
 - Camera and light control, film-base metering and leveling, HDR/trichrome capture and merge, crop, and hair/dust cleanup.
 - v0.89 introduced a 5219/500T illuminant model. In v0.91 the app keeps only its Develop-preview calculator, without DCTL export or light changes.
-- v0.90 introduced `nss.scan/1` TIFF scan provenance and preservation through image tools. v0.91 keeps the metadata format and writer behavior unchanged.
+- v0.90 introduced `nss.scan/1` TIFF scan provenance and preservation through image tools. v0.91 keeps tag 270 and the schema, but writes the accepted after-profile Light-page leveling result instead of a scene measurement. Both capture panels show the saved RGB/time and have a persisted default-on metadata switch.
 - v0.91 removes the DCTL module, app template embedding, generators, export settings, and cross-module DCTL controls. The app has four modules and English-only built-in UI text.
 - Camera chart calibration remains available under Camera & Light > Camera. Develop remains an independent in-app preview and positive-TIFF export tool.
 

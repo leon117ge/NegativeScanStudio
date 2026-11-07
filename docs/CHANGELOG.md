@@ -8,11 +8,14 @@ This file tracks the scanning app, not plugin-only releases. / 本文件只记�
 
 - Remove the DCTL module and its Film base, White balance, and Mask & Crosstalk pages. Remove generators, app template embedding, export-only settings, and Light/colour-cast write-to-DCTL controls.
 - Keep the 500T illuminant calculator as an English-only Develop-preview tool. Remove DCTL-only saved-stock controls and global export state.
-- Move camera chart calibration to Camera & Light > Camera. Keep camera-profile fitting and use in leveling/base measurement; remove calibration DCTL export.
-- Send measured HDR/trichrome base readings to Develop instead of the retired DCTL page. Open merged TIFFs in Develop. Update four-module navigation and command-line page routing.
-- Keep camera/light control, auto leveling, scan presets, capture, image tools, and the built-in Develop chain. TIFF `nss.scan/1` metadata serialization is unchanged.
+- Move camera chart calibration to Camera & Light > Camera. Keep camera-profile fitting and use in leveling; remove calibration DCTL export.
+- Send the accepted leveling base to Develop instead of the retired DCTL page. Open merged TIFFs in Develop. Update four-module navigation and command-line page routing.
+- Keep camera/light control, auto leveling, scan presets, capture, image tools, and the built-in Develop chain. Keep TIFF tag 270 and the `nss.scan/1` schema.
 - Remove the remaining Chinese UI text. Add a repeatable source/embedded-asset language and retired-export check.
-- App version only. OFX remains 0.90.4, with no changes under `ofx/`.
+- Fix incorrect RGB metadata by using only the accepted Light-page leveling result after the camera profile. Remove normal scan post-merge base measurement. Calibration-only TIFF verification remains part of leveling.
+- Add the default-on **Film base for metadata: Last leveling (after profile)** switch and RGB/time display to both capture panels. Send base to Develop uses that same reference. Off or no matching result omits `film_base`.
+- Persist the result in light state and named/exported scan presets. `base_source` is `light leveling (after profile)`; the additive `film_base_space: after_profile` marker prevents double camera correction.
+- The independent OFX 0.90.5 patch loads after-profile base without transforming it again. It keeps the pending camera matrix for image pixels and preserves legacy metadata behavior. No scan TIFFs are rewritten.
 
 See [verification and limits](QA_v0.91.md). Earlier entries below describe historical releases and do not imply that DCTL export remains available.
 

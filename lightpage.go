@@ -26,6 +26,7 @@ import (
 	"basetool/rawconv"
 	"basetool/rgblight"
 	"basetool/scanconfig"
+	"basetool/scanmeta"
 
 	"github.com/lxn/walk"
 	. "github.com/lxn/walk/declarative"
@@ -41,25 +42,27 @@ const simLightItem = "Simulated light (test, no hardware)"
 const simNoAckItem = "Simulated light - FW V1.0.5 (03: state event, no 81)"
 
 type lightConfig struct {
-	Port       string          `json:"port"`
-	Values     [3]int          `json:"values"`
-	ISO        int             `json:"iso"`    // index into isoVals
-	Target     int             `json:"target"` // index into targetVals
-	Tol        float64         `json:"tol_pct"`
-	MaxIter    int             `json:"max_iter"`
-	SettleMS   int             `json:"settle_ms"`
-	Area       lightlevel.Rect `json:"area"`
-	AreaPicked bool            `json:"area_picked,omitempty"` // only true after an actual drag
-	AreaMode   int             `json:"area_mode,omitempty"`   // v0.87: 0 auto, 1 rectangle (same as Camera)
-	Stock      string          `json:"stock"`
-	AutoLoad   bool            `json:"apply_on_select"`
-	NoCam      bool            `json:"no_cam_profile,omitempty"` // v0.85 "Apply camera profile" unticked
+	UseLastLeveling bool               `json:"use_last_leveling"`
+	Leveling        *scanmeta.Leveling `json:"leveling,omitempty"`
+	Port            string             `json:"port"`
+	Values          [3]int             `json:"values"`
+	ISO             int                `json:"iso"`    // index into isoVals
+	Target          int                `json:"target"` // index into targetVals
+	Tol             float64            `json:"tol_pct"`
+	MaxIter         int                `json:"max_iter"`
+	SettleMS        int                `json:"settle_ms"`
+	Area            lightlevel.Rect    `json:"area"`
+	AreaPicked      bool               `json:"area_picked,omitempty"` // only true after an actual drag
+	AreaMode        int                `json:"area_mode,omitempty"`   // v0.87: 0 auto, 1 rectangle (same as Camera)
+	Stock           string             `json:"stock"`
+	AutoLoad        bool               `json:"apply_on_select"`
+	NoCam           bool               `json:"no_cam_profile,omitempty"` // v0.85 "Apply camera profile" unticked
 }
 
 func lightConfigFile() string { return filepath.Join(configDir(), "rgb_light.json") }
 
 func loadLightConfig(isoIdx int) lightConfig {
-	c := lightConfig{Values: [3]int{50, 50, 50}, ISO: isoIdx, Target: 0, Tol: 2, MaxIter: 4, SettleMS: 300, Area: lightlevel.Centre, AutoLoad: true}
+	c := lightConfig{UseLastLeveling: true, Values: [3]int{50, 50, 50}, ISO: isoIdx, Target: 0, Tol: 2, MaxIter: 4, SettleMS: 300, Area: lightlevel.Centre, AutoLoad: true}
 	if b, err := os.ReadFile(lightConfigFile()); err == nil {
 		json.Unmarshal(b, &c)
 	}
@@ -791,6 +794,8 @@ func (u *LightUI) startLevel() {
 	ctx, cancel := context.WithCancel(context.Background())
 	u.cancel = cancel
 	u.lastSuccess = nil
+	u.cfg.Leveling = nil
+	u.saveCfg()
 	u.busy, u.level = true, true
 	u.lastTgt = p.Target
 	u.updateButtons()
@@ -913,6 +918,11 @@ func (u *LightUI) startLevel() {
 			}
 			u.lastPost, u.lastTIFF = post, inTIFF
 			u.lastSuccess = record
+			if record != nil {
+				u.cfg.Leveling = &scanmeta.Leveling{Base: post, Values: res.Values, At: record.Time.Format(time.RFC3339)}
+				u.cfg.Values = res.Values
+			}
+			u.saveCfg()
 			u.showResult(res, err, exp)
 			if err == nil && res.Converged() {
 				// v0.82: hand the levelled light + exposure to the frame-0 lock
@@ -973,7 +983,7 @@ func (u *LightUI) showResult(res lightlevel.Result, err error, exp camera.Exposu
 	setLightStatusN(3, u.resLbl, t)
 	u.log("Result: %s (%s)", t, pl.label())
 	if res.Converged() && u.lastSuccess != nil && !u.lastSuccess.Measured {
-		u.log("Measured base is unavailable: the TIFF check failed, so these are estimates rather than the exported TIFF's measured base. Check the TIFF conversion log and level again.")
+		u.log("TIFF verification is unavailable: the saved after-profile leveling uses the RAW estimate. Check the conversion log and level again if needed.")
 	}
 	u.updateButtons()
 	limited := res.Limited[0] || res.Limited[1] || res.Limited[2]

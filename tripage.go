@@ -18,6 +18,7 @@ import (
 	"basetool/camera"
 	"basetool/hdrscan"
 	"basetool/rgblight"
+	"basetool/scanmeta"
 
 	"github.com/lxn/walk"
 	. "github.com/lxn/walk/declarative"
@@ -253,23 +254,23 @@ type baseHandoff struct {
 }
 
 type TriUI struct {
-	hdr   *HDRUI
-	light *LightUI
+	levelMetaCB *walk.CheckBox
+	hdr         *HDRUI
+	light       *LightUI
 
 	modeCB, brCB                                      *walk.ComboBox
 	camLbl, lockLbl, lightLbl, valLbl, outLbl, whyLbl *walk.Label
 	capBtn, stopBtn, meterBtn                         *walk.PushButton
 	mergeCancel                                       context.CancelFunc // v0.83 Stop during the merge
 	sendBtn                                           *walk.PushButton   // v0.82 Send base to Develop
-	baseLbl                                           *walk.Label        // v0.82 Density_In film base of the last scan
+	baseLbl                                           *walk.Label        // saved leveling reference
 	pb                                                *walk.ProgressBar
 	resTE, logTE                                      *walk.TextEdit
 
 	cancel  func() // non-nil while a scan runs
 	running bool
-	why     string // last logged disabled reason
-	scans   int    // scans this session
-	lastTri *hdrscan.TriResult
+	why     string   // last logged disabled reason
+	scans   int      // scans this session
 	queue   []triJob // merges waiting (the next scan may run meanwhile)
 	merging bool
 }
@@ -365,7 +366,14 @@ func (t *TriUI) updateButtons() {
 	t.modeCB.SetEnabled(!t.running)
 	t.brCB.SetEnabled(!t.running && t.mode() == 1)
 	t.meterBtn.SetEnabled(h.dev != nil && !h.busy)
-	t.sendBtn.SetEnabled(t.lastTri != nil && t.lastTri.BaseErr == "" && t.lastTri.BaseN > 0 && h.SendBase != nil)
+	v, _, _ := t.scanValues()
+	l := h.metadataLeveling()
+	t.sendBtn.SetEnabled(l.Matches(v) && h.SendBase != nil)
+	if t.levelMetaCB != nil {
+		t.levelMetaCB.SetChecked(lu.cfg.UseLastLeveling)
+		t.levelMetaCB.SetEnabled(!t.running && !t.merging)
+	}
+	setStatusWide(t.baseLbl, h.lastLevelingText(v))
 	t.capBtn.SetText(t.captureText(t.evs()))
 	if why != t.why {
 		if why == "" {
@@ -474,7 +482,7 @@ func (t *TriUI) capture() {
 	opts.Metadata.LightRGB = &vals
 	opts.Metadata.LightModel = "CuteNewDesign RGB Light Air"
 	opts.Metadata.Mode = "trichrome"
-	opts.Metadata = withScanCamera(opts.Metadata)
+	opts.Metadata = withScanCamera(opts.Metadata).WithLeveling(h.metadataLeveling(), vals)
 	opts.MeteredBase = s.Reading.RGB
 	// v0.82: the base is measured in the RGB TIFF over the metered region
 	opts.BaseArea = s.Reading.Area
@@ -641,8 +649,7 @@ func (t *TriUI) nextMerge() {
 				set("Trichrome merge failed: " + err.Error())
 				t.say("Trichrome merge failed: " + err.Error())
 			} else {
-				t.lastTri = res
-				camNote := applyCamToBase(res)
+				lastTriOut = res.Out
 				msg := fmt.Sprintf("Saved %s  (trichrome, %d frames per channel, %.1f s)", res.Out, len(j.shot.EVs), res.Elapsed.Seconds())
 				for ch := 0; ch < 3; ch++ {
 					msg += fmt.Sprintf("\n%s-lit frame: own channel %.4f FS, other channels %.4f / %.4f",
@@ -654,11 +661,7 @@ func (t *TriUI) nextMerge() {
 				if ds := res.Dust; ds.Level != hdrscan.DustOff {
 					msg += fmt.Sprintf("\nDust removal (%s): %d spots (%d hairs), %d fibres, %d px changed.", hdrscan.DustName(ds.Level), ds.Spots, ds.Hairs, ds.Fibres, ds.Pixels)
 				}
-				msg += "\n" + triBaseText(res)
-				if camNote != "" {
-					msg += "\n" + camNote
-				}
-				t.showBase(res)
+				msg += "\n" + levelMetadataSummary(j.opts.Metadata)
 				set(msg)
 				t.say(strings.ReplaceAll(msg, "\n", " | "))
 			}
@@ -742,7 +745,8 @@ func (t *TriUI) Page() TabPage {
 								ToolTipText: "Film base R/G/B measured in the last RGB TIFF -> Develop > Density In for preview. TIFF pixels and metadata remain unchanged."},
 						}},
 						Label{AssignTo: &t.whyLbl, Text: "", Font: bold},
-						Label{AssignTo: &t.baseLbl, Text: "Density In: Film base R / G / B = - (measured after each scan)"},
+						CheckBox{AssignTo: &t.levelMetaCB, Text: "Film base for metadata: Last leveling (after profile)", Checked: t.light.cfg.UseLastLeveling, OnClicked: func() { t.hdr.setUseLastLeveling(t.levelMetaCB.Checked()) }, ToolTipText: levelMetadataTip},
+						Label{AssignTo: &t.baseLbl, Text: "Last leveling: unavailable"},
 						ProgressBar{AssignTo: &t.pb, MaxSize: Size{Height: 8}},
 						TextEdit{AssignTo: &t.resTE, ReadOnly: true, VScroll: true, MinSize: Size{Height: 90},
 							Text: "Output: <Save to>\\<roll>\\<name>_RGB.tiff or _RGB_HDR.tiff, RAFs <name>_R_0EV.RAF ... (same folder, roll and counter as HDR scan)."},
@@ -775,33 +779,12 @@ func (u *LightUI) isoChanged() {
 	}
 }
 
-// triBaseText: the Density In parameters from a trichrome TIFF.
-func triBaseText(r *hdrscan.TriResult) string {
-	if r.BaseErr != "" || r.BaseN == 0 {
-		return "Film base NOT measured in the RGB TIFF: " + map[bool]string{true: r.BaseErr, false: "no samples"}[r.BaseErr != ""]
-	}
-	rc := r.BaseRegion.Rect
-	return fmt.Sprintf("Density In: Film base R %.4f  G %.4f  B %.4f  (linear RGB TIFF / 65535, %d samples of the clear base in (%d,%d)-(%d,%d); orange mask compensation Off, crosstalk strength 0 for trichrome)",
-		r.Base[0], r.Base[1], r.Base[2], r.BaseN, rc.Min.X, rc.Min.Y, rc.Max.X, rc.Max.Y)
-}
-
-func (t *TriUI) showBase(r *hdrscan.TriResult) {
-	if r.BaseErr != "" || r.BaseN == 0 {
-		setStatusWide(t.baseLbl, "Film base: not measured - "+r.BaseErr)
-		return
-	}
-	setStatusWide(t.baseLbl, fmt.Sprintf("Density In  Film base  R %.4f   G %.4f   B %.4f   (%s)", r.Base[0], r.Base[1], r.Base[2], filepath.Base(r.Out)))
-}
-
-// sendBase hands the last trichrome base to Develop > Density In (the same
-// flow as the HDR scan page's Send base to Develop).
+// sendBase uses the same accepted reference that is written to scan metadata.
 func (t *TriUI) sendBase() {
-	h, r := t.hdr, t.lastTri
-	if r == nil || r.BaseErr != "" || r.BaseN == 0 || h.SendBase == nil {
+	v, _, _ := t.scanValues()
+	l := t.hdr.metadataLeveling()
+	if !l.Matches(v) || t.hdr.SendBase == nil {
 		return
 	}
-	b := SentBase{RGB: r.Base, Trichrome: true,
-		Source: fmt.Sprintf("trichrome scan %s, %d samples of the clear base", filepath.Base(r.Out), r.BaseN)}
-	t.say(fmt.Sprintf("Sent base to Develop: R %.4f G %.4f B %.4f (%s)", b.RGB[0], b.RGB[1], b.RGB[2], b.Source))
-	h.SendBase(b)
+	t.hdr.SendBase(SentBase{RGB: l.Base, Trichrome: true, Source: scanmeta.LevelingSource})
 }

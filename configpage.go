@@ -214,6 +214,7 @@ func (u *LightUI) currentConfig(name string) (scanconfig.Config, error) {
 			c.Film.TIFFBase = u.lastPost
 		}
 	}
+	c.RecordLeveling(u.cfg.Leveling)
 	return c, c.Valid()
 }
 
@@ -338,7 +339,9 @@ func (u *LightUI) applyConfig(c scanconfig.Config) {
 		u.valEd[i].SetText(fmt.Sprint(v[i]))
 	}
 	u.cfg.Values = v
+	u.cfg.Leveling = c.LevelingReference()
 	u.saveCfg()
+	u.hdr.updateButtons()
 	iso, sh := c.ISO, c.ShutterUS
 	if iso == 0 {
 		iso = u.hdr.fixedISO()

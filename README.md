@@ -17,7 +17,8 @@ Camera-scanning/capture software written in Go with a [walk](https://github.com/
 - Film-base metering and closed-loop light leveling; scanning configuration and film-base presets.
 - HDR/bracketed capture, trichrome/RGB-light capture and merge, linear RAW-to-TIFF conversion through LibRaw.
 - Crop, merge, hair/dust removal, camera-matrix calibration, Develop preview. The app UI, prompts, and log messages are English only.
-- HDR/trichrome scan TIFFs can carry `nss.scan/1` scan provenance: known light drive RGB, film base, pending/applied camera matrix, light model and software version.
+- HDR/trichrome TIFFs carry `nss.scan/1` provenance. The default-on **Film base for metadata: Last leveling (after profile)** option writes the accepted Light-page result and displays its RGB and time. It never re-measures the scene as film base.
+- The accepted reference survives restart and scan-preset recall. Off, unknown, or mismatched light values omit `film_base`. After-profile metadata requires the independent OFX 0.90.5 patch; older unmarked scans keep their original interpretation.
 
 **Use:** download `NegativeScanStudio_v0.91.exe` from the app release and run on Windows x64 with the appropriate camera/light setup. This is the capture app, not a Resolve plugin. App and plugin updates are independent.
 

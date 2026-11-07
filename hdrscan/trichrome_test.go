@@ -167,7 +167,12 @@ func TestTrichromeSingleAndHDR(t *testing.T) {
 			if m, _ := filepath.Glob(filepath.Join(dir, "*_HDR.tiff")); n > 1 && len(m) != 1 {
 				t.Fatalf("per-channel HDR TIFFs left: %v", m)
 			}
-			// v0.82: the film base measured in the written RGB TIFF
+			// Normal scan capture must not measure scene content as film base.
+			if res.BaseN != 0 {
+				t.Fatal("automatic post-merge base measurement survived")
+			}
+			// Only the explicit Light-page calibration check measures the TIFF.
+			measureTriBase(res, p.Pix, p, ProcessOptions{})
 			if res.BaseErr != "" || res.BaseN < 100 {
 				t.Fatalf("base not measured: %q n=%d", res.BaseErr, res.BaseN)
 			}

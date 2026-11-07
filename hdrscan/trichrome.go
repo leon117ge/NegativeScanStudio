@@ -286,9 +286,11 @@ func ProcessTrichrome(raws [3][]string, exps []float64, o ProcessOptions) (retRe
 		out, res.Dust = despeckleHDR(comb, out, o)
 		sw += ", dust removal " + DustName(o.Dust)
 	}
-	measureTriBase(res, out, p0, o)
-	if res.BaseErr == "" {
-		say("Film base in the RGB TIFF: R %.4f G %.4f B %.4f (%d samples)", res.Base[0], res.Base[1], res.Base[2], res.BaseN)
+	if o.MeasureLevelingBase {
+		measureTriBase(res, out, p0, o)
+		if res.BaseErr == "" {
+			say("Film base in the RGB TIFF: R %.4f G %.4f B %.4f (%d samples)", res.Base[0], res.Base[1], res.Base[2], res.BaseN)
+		}
 	}
 	if err := ctxErr(o.Ctx); err != nil {
 		return nil, err
@@ -296,13 +298,8 @@ func ProcessTrichrome(raws [3][]string, exps []float64, o ProcessOptions) (retRe
 	path := uniqueFile(TriPath(dir, raws[0][0], hdr))
 	say("Writing %s ...", filepath.Base(path))
 	wrote = append(wrote, path)
-	meta := o.Metadata
+	meta := o.Metadata.ForCapture()
 	meta.Mode = "trichrome"
-	if res.BaseN > 0 && res.BaseErr == "" {
-		b := res.Base
-		meta.FilmBase = &b
-		meta.BaseSource = "measured RGB TIFF clear base"
-	}
 	if err := writeScanTIFF(path, p0.W, p0.H, out, o.LZW, p0.Make, p0.Model, sw, meta); err != nil {
 		return nil, err
 	}
@@ -351,10 +348,8 @@ func resolveTriBase(bounds image.Rectangle, o ProcessOptions, auto func() (image
 	return basestat.Region{}, ""
 }
 
-// measureTriBase measures the clear base on the combined RGB image: the
-// user-drawn rectangle (v0.87) if set, else the metered base region (green
-// box) if known, else the base area, else the base found in the image - as
-// ProcessN does for a white-light HDR.
+// measureTriBase verifies calibration TIFFs during Light-page leveling only.
+// Normal scan captures never call it or use image content as their reference.
 func measureTriBase(res *TriResult, out []uint16, p0 *Plane, o ProcessOptions) {
 	bounds := image.Rect(0, 0, p0.W, p0.H)
 	reg, _ := resolveTriBase(bounds, o, func() (image.Rectangle, bool) {

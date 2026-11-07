@@ -4,6 +4,7 @@
 package scanconfig
 
 import (
+	"basetool/scanmeta"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -35,6 +36,7 @@ type Film struct {
 	// the film base measured in the trichrome TIFF after the matrix.
 	CamProfile  string     `json:"cam_profile,omitempty"`
 	CamStrength float64    `json:"cam_strength,omitempty"`
+	LevelingAt  string     `json:"leveling_at,omitempty"`
 	TIFFBase    [3]float64 `json:"tiff_base,omitempty"`
 }
 
@@ -47,6 +49,24 @@ type Config struct {
 	Film      Film   `json:"film"`
 	Source    string `json:"source,omitempty"` // "saved", "migrated from film-base DB", "file"
 	Date      string `json:"date"`
+}
+
+// LevelingReference recalls only a saved accepted after-profile result.
+func (c Config) LevelingReference() *scanmeta.Leveling {
+	if !c.Film.Levelled {
+		return nil
+	}
+	l := &scanmeta.Leveling{Base: c.Film.TIFFBase, Values: c.Light.Values, At: c.Film.LevelingAt}
+	if !l.Matches(c.Light.Values) {
+		return nil
+	}
+	return l
+}
+func (c *Config) RecordLeveling(l *scanmeta.Leveling) {
+	c.Film.TIFFBase, c.Film.Levelled, c.Film.LevelingAt = [3]float64{}, false, ""
+	if l.Matches(c.Light.Values) {
+		c.Film.TIFFBase, c.Film.Levelled, c.Film.LevelingAt = l.Base, true, l.At
+	}
 }
 
 // Shutters are the allowed base shutters (µs) - set by the caller.

@@ -71,7 +71,7 @@ func TestTrichromePipelineWritesMetadata(t *testing.T) {
 		}
 		paths[ch] = []string{path}
 	}
-	r, err := ProcessTrichrome(paths, []float64{1}, ProcessOptions{Merge: DefaultOptions(), OutDir: dir, Software: "NSS v0.90 test", BaseArea: image.Rect(2, 2, 22, 22), Metadata: scanmeta.Metadata{LightRGB: &light, LightModel: "test"}})
+	r, err := ProcessTrichrome(paths, []float64{1}, ProcessOptions{Merge: DefaultOptions(), OutDir: dir, Software: "NSS v0.90 test", BaseArea: image.Rect(2, 2, 22, 22), Metadata: (scanmeta.Metadata{LightRGB: &light, LightModel: "test"}).WithLeveling(&scanmeta.Leveling{Base: [3]float64{.49844, .49639, .50210}, Values: light}, light)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func TestTrichromePipelineWritesMetadata(t *testing.T) {
 		t.Fatalf("metadata %+v", m)
 	}
 	for c := 0; c < 3; c++ {
-		want := float64(28000+c*1000) / 65535
+		want := [3]float64{.49844, .49639, .50210}[c]
 		if math.Abs((*m.FilmBase)[c]-want) > 1e-6 {
 			t.Fatalf("base %v want %.6f", m.FilmBase, want)
 		}

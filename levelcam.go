@@ -90,7 +90,7 @@ func tiffBase(ctx context.Context, raws [3]string, dir string, leak float64, box
 		}
 		rs[c] = []string{r}
 	}
-	res, err := hdrscan.ProcessTrichrome(rs, nil, hdrscan.ProcessOptions{Ctx: ctx, OutDir: dir, Software: appVersion + " leveling check", LeakPct: leak, BaseNorm: box})
+	res, err := hdrscan.ProcessTrichrome(rs, nil, hdrscan.ProcessOptions{MeasureLevelingBase: true, Ctx: ctx, OutDir: dir, Software: appVersion + " leveling check", LeakPct: leak, BaseNorm: box})
 	if err != nil {
 		return [3]float64{}, 0, err
 	}

@@ -24,6 +24,7 @@ import (
 	"basetool/filmdb"
 	"basetool/hdrscan"
 	"basetool/rawconv"
+	"basetool/scanmeta"
 
 	"github.com/lxn/walk"
 	. "github.com/lxn/walk/declarative"
@@ -361,10 +362,12 @@ func (w *camWorker) do(f func()) { w.jobs <- f }
 // ---------- UI ----------
 
 type HDRUI struct {
-	mw     **walk.MainWindow
-	cfg    HDRConfig
-	log    *camera.Logger
-	worker *camWorker
+	levelMetaCB  *walk.CheckBox
+	levelMetaLbl *walk.Label
+	mw           **walk.MainWindow
+	cfg          HDRConfig
+	log          *camera.Logger
+	worker       *camWorker
 
 	dev    camera.Device
 	sess   *hdrscan.Session
@@ -654,7 +657,7 @@ func (u *HDRUI) updateButtons() {
 	u.meterBtn.SetText(map[bool]string{true: "Re-meter base", false: "Meter base"}[locked])
 	u.capBtn.SetEnabled(locked && !u.busy && !u.processing)
 	if u.sendBtn != nil {
-		u.sendBtn.SetEnabled(!u.sending && !u.processing && ((locked && !u.busy) || (u.lastCap != nil && u.lastCap.Base1Err == "" && u.lastCap.Base1N > 0)))
+		u.sendBtn.SetEnabled(!u.sending && !u.processing && locked && !u.busy)
 		u.stopBtn.SetEnabled(u.scanCancel != nil)
 	}
 	if u.mOpenBtn != nil {
@@ -672,6 +675,7 @@ func (u *HDRUI) updateButtons() {
 	if u.handoff != nil && u.handoff.pending {
 		u.autoLock()
 	}
+	u.refreshLevelingUI()
 	if u.tri != nil {
 		u.tri.updateButtons()
 	}
@@ -696,11 +700,12 @@ func (u *HDRUI) sendBase() {
 	if u.SendBase == nil || u.sending {
 		return
 	}
-	if r := u.lastCap; r != nil && r.Base1N > 0 && r.Base1Err == "" {
-		b := SentBase{RGB: r.Base1,
-			Source: fmt.Sprintf("HDR scan %s, %d samples of the clear base (frame 0 %.4f/%.4f/%.4f)", filepath.Base(r.HDR), r.Base1N, r.Base1F0[0], r.Base1F0[1], r.Base1F0[2])}
-		u.say(fmt.Sprintf("Sent base to Develop: R %.4f G %.4f B %.4f (%s)", b.RGB[0], b.RGB[1], b.RGB[2], b.Source))
-		u.SendBase(b)
+	if u.light != nil && u.light.cfg.UseLastLeveling {
+		l := u.metadataLeveling()
+		if !l.Matches(u.levelingValues()) {
+			return
+		}
+		u.SendBase(SentBase{RGB: l.Base, Source: scanmeta.LevelingSource})
 		return
 	}
 	if u.sess == nil || u.sess.Locked == nil {
@@ -1795,6 +1800,7 @@ func (u *HDRUI) process(srcs []string, o hdrscan.ProcessOptions, lbl *walk.Label
 				return
 			}
 			msg := fmt.Sprintf("Saved %s  (%d frames, %.1f s)", res.HDR, res.Frames, res.Elapsed.Seconds())
+			msg += "\n" + levelMetadataSummary(o.Metadata)
 			for _, st := range res.StatsN {
 				if st.Dropped {
 					msg += fmt.Sprintf("\nWARNING: the %s frame could not be used - this is a %d-frame HDR.", st.Label, res.Frames)
@@ -1819,12 +1825,6 @@ func (u *HDRUI) process(srcs []string, o hdrscan.ProcessOptions, lbl *walk.Label
 			}
 			if len(res.TIFFs) > 0 {
 				msg += "\nFrame TIFFs kept: " + strings.Join(res.TIFFs, ", ")
-			}
-			if res.Base1Err != "" {
-				msg += "\nFilm base values: " + res.Base1Err
-			} else if res.Base1N > 0 {
-				msg += fmt.Sprintf("\nFilm base values (Film base scale): R %.4f G %.4f B %.4f (HDR), frame 0 R %.4f G %.4f B %.4f, %d samples",
-					res.Base1[0], res.Base1[1], res.Base1[2], res.Base1F0[0], res.Base1F0[1], res.Base1F0[2], res.Base1N)
 			}
 			if te == u.mRes {
 				u.lastMerge = res
@@ -2008,12 +2008,14 @@ func (u *HDRUI) Pages(batch TabPage) HDRPages {
 					Label{Text: "Base level", Font: bold},
 					LineEdit{AssignTo: &u.baseLv, ReadOnly: true, Font: big},
 					PushButton{AssignTo: &u.sendBtn, ColumnSpan: 2, Text: "Send base to Develop", Enabled: false, OnClicked: u.sendBase,
-						ToolTipText: "Fill Develop > Density In's R/G/B with this clear base, measured the way that page measures (TIFF value / 65535, leak rejection, median). After a capture it uses the HDR TIFF; before, the locked probe RAW (same exposure as frame 0)."},
+						ToolTipText: "Send the saved after-profile leveling base when the metadata option is on. Otherwise measure the locked probe explicitly."},
 					Label{Text: "Base R / G / B", Font: bold},
 					LineEdit{AssignTo: &u.baseR, ReadOnly: true, Font: big, TextColor: walk.RGB(200, 50, 50)},
 					LineEdit{AssignTo: &u.baseG, ReadOnly: true, Font: big, TextColor: walk.RGB(40, 150, 60)},
 					LineEdit{AssignTo: &u.baseB, ReadOnly: true, Font: big, TextColor: walk.RGB(50, 90, 200)},
 				}},
+				CheckBox{AssignTo: &u.levelMetaCB, ColumnSpan: 2, Text: "Film base for metadata: Last leveling (after profile)", OnClicked: func() { u.setUseLastLeveling(u.levelMetaCB.Checked()) }, ToolTipText: levelMetadataTip},
+				Label{AssignTo: &u.levelMetaLbl, ColumnSpan: 2, Text: "Last leveling: unavailable"},
 				Label{AssignTo: &u.expLbl, ColumnSpan: 2, Text: "", Font: bold, TextColor: walk.RGB(30, 110, 60)},
 				Label{AssignTo: &u.baseLbl, ColumnSpan: 2, Text: "Frame 0 Auto: ISO 160, 1/60 s or faster. Fixed: chosen ISO and base shutter.\nAperture: the f-number the camera reports is stored with base records.", MinSize: Size{Height: 30}},
 			},

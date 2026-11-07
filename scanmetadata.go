@@ -12,6 +12,15 @@ func (u *HDRUI) scanMetadata() scanmeta.Metadata {
 		m.LightRGB = &v
 		m.LightModel = "CuteNewDesign RGB Light Air"
 	}
+	if l := u.light; l != nil {
+		values := l.cfg.Values
+		if m.LightRGB != nil {
+			values = *m.LightRGB
+		} else if st := u.lightState(); st != nil {
+			values = st.Value
+		}
+		m = m.WithLeveling(u.metadataLeveling(), values)
+	}
 	return m
 }
 
