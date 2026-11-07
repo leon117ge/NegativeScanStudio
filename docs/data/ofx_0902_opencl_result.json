@@ -1,0 +1,17 @@
+{
+  "cases": 164,
+  "viewer_pick_cases": 4,
+  "missing_queue_status": 1002,
+  "multi_context_program_kernel_cache": true,
+  "passed": true,
+  "channel_comparisons": 193536,
+  "max_absolute_error": 2.09808349609375e-05,
+  "max_scaled_error": 9.930211138135261e-07,
+  "tolerance": "2e-5 * max(1, abs(CPU))",
+  "platform": "Portable Computing Language",
+  "device": "pthread-Intel(R) Xeon(R) Processor",
+  "device_type": "ALL | CPU",
+  "path": "Actual OFX Render action + runtime-loaded CL bridge + host buffers/queue",
+  "real_resolve_tested": false,
+  "physical_gpu_tested": false
+}

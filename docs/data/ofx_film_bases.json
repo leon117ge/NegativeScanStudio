@@ -3,27 +3,24 @@
     "stock": "5219",
     "label": "500T Base",
     "stops": [
-      1.57,
+      1.4,
       0,
-      1.0
+      0.8
     ],
     "conditions": {
       "frame": "0206.tiff",
       "film": "T",
       "kelvin": 5600,
-      "gamma": [
-        0.45,
-        0.54,
-        0.53
-      ],
-      "white_code": 696,
-      "baseline": [
-        0.5,
-        0.5,
-        0.5
-      ]
+      "gamma_scale": 1.15,
+      "exposure": 0.9
     },
-    "source": "ofx_500t_base_measurements.json",
-    "note": "Measured residual after T5600 compensation; not a universal stock calibration"
+    "source": "User eye-tuned decision for OFX0.90.2; no new re-measurement performed",
+    "note": "User eye-tuned under new Gamma scale1.15/Exposure0.90 defaults. Not a universal stock calibration.",
+    "previous_stops": [
+      1.57,
+      0,
+      1.0
+    ],
+    "previous_measurement": "ofx_500t_base_measurements.json"
   }
 ]

@@ -1,0 +1,19 @@
+{
+  "compiler": "NVIDIA NVRTC 12.0.140",
+  "target": "compute_52",
+  "options": [
+    "--gpu-architecture=compute_52",
+    "--std=c++14",
+    "--fmad=false",
+    "--ftz=false",
+    "--prec-div=true",
+    "--prec-sqrt=true"
+  ],
+  "source_sha256": "bee300b43ba3f6d433c796499dc8cb417c3105db323c0868f17a47b9e443dcb3",
+  "ptx_sha256": "3a5c6c8c4b2cf51f02e562ac1ba17b1e107064e828e9f1a21712b79e3b6e20cf",
+  "ptx_bytes": 77771,
+  "real_gpu_executed": false,
+  "real_resolve_tested": false,
+  "assembly_verified": true,
+  "assembler_output": "ptxas info    : 304 bytes gmem\nptxas info    : Compiling entry function 'nss_render_cuda' for 'sm_52'\nptxas info    : Function properties for nss_render_cuda\n    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads\nptxas info    : Used 16 registers, 556 bytes cmem[0], 264 bytes cmem[2]\n"
+}

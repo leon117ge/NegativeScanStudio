@@ -40,15 +40,17 @@ for ns,file in [('Density','template.dctl'),('Positive','template_core.dctl')]:
 out.append('}\n')
 (ROOT/'ofx/src/dctl_math.hpp').write_text(''.join(out))
 (ROOT/'ofx/src/parameters.json').write_text(json.dumps(UI,indent=2)+'\n')
-# UI definition list stays in lockstep with template defaults/ranges.
+(ROOT/'ofx/src/pipeline_equal.inc').write_text(' &&\n'.join(f'a.{p["stage"].lower()}.{p["name"]}==b.{p["stage"].lower()}.{p["name"]}' for p in UI)+' &&\n')
+# Template-derived controls, followed by explicit plugin default/group overrides.
 lines=['// Generated DCTL UI descriptors\n']
 for p in UI:
  if p['stage']=='Density' and p['name'].startswith('cast_'):continue
  key=p['stage'].lower()+'_'+p['name'];opts='|'.join(p['options'])
  kind={'DCTLUI_SLIDER_FLOAT':'Number','DCTLUI_CHECK_BOX':'Boolean','DCTLUI_COMBO_BOX':'Choice'}[p['type']]
- group='balance' if (p['stage']=='Density' and p['name'].startswith('base_')) or (p['stage']=='Positive' and p['name'].startswith('gam_')) else p['stage'].lower()
- default=.5 if p['stage']=='Density' and p['name'].startswith('base_') else p['default']
+ group='balance' if p['stage']=='Density' and p['name'].startswith('base_') else p['stage'].lower()
+ default=.5 if p['stage']=='Density' and p['name'].startswith('base_') else .9 if key=='positive_expo' else p['default']
  lines.append(f'{{"{key}","{p["label"]}",Kind::{kind},{default},{p["min"]},{p["max"]},{p["step"]},"{opts}","{group}"}},\n')
+ if key=='positive_gam_b':lines.append('{"gamma_scale","Gamma scale",Kind::Number,1.15,0.25,2.0,0.01,"","positive"},\n')
 (ROOT/'ofx/src/parameter_defs.inc').write_text(''.join(lines))
 (ROOT/'ofx/src/read_params.inc').write_text('// Generated\n'+''.join(f'p.{p["stage"].lower()}.{p["name"]} = {"number" if p["kind"]=="float" else "integer"}(set,"{p["stage"].lower()}_{p["name"]}",time);\n' for p in UI if not (p['stage']=='Density' and p['name'].startswith('cast_'))))
 

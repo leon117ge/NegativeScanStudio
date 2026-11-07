@@ -94,9 +94,9 @@ struct Positive {
     float gam_g = 0.635f;
     float gam_b = 0.62f;
     float expo = 1.0f;
-    float bal_r = 1.57f;
+    float bal_r = 1.4f;
     float bal_g = 0.0f;
-    float bal_b = 1.0f;
+    float bal_b = 0.8f;
     int film_wb = 1;
     int gray_on = 0;
     float gray_r = 470.0f;

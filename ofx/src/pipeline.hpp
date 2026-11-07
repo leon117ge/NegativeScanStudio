@@ -26,6 +26,9 @@ struct Pipeline {
   return positive.transform(0,0,0,0,v.x,v.y,v.z);
  }
 };
+inline bool samePipeline(const Pipeline &a,const Pipeline &b){return
+#include "pipeline_equal.inc"
+ a.stage==b.stage&&a.cameraOn==b.cameraOn&&a.neutralise==b.neutralise&&a.cameraStrength==b.cameraStrength&&a.camera==b.camera&&a.neutral==b.neutral;}
 inline Vec3 balancedBase(Vec3 baseline,int film,int temperature){
  if(film<0||film>1||temperature<0||temperature>4)return baseline;
  // D=-log10(pixel/base). Adding cast is equivalent to base*=10^(+cast).

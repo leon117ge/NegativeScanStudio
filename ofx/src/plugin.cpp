@@ -4,6 +4,9 @@
 #include "wb_presets.hpp"
 #include "ofxGPURender.h"
 #include "opencl.hpp"
+#include "cuda.hpp"
+#include "prepared_cache.hpp"
+#include <chrono>
 #include "cpu_render.hpp"
 #include "gray_pick.hpp"
 #include <cstdio>
@@ -47,7 +50,8 @@ struct Instance {
  std::mutex mutex;
  // One bounded cache entry; no stale metadata reused for another clip.
  std::string path;std::filesystem::file_time_type stamp{};std::optional<nss::Metadata> meta;
- std::string metadataError,lastRender="No render yet";nss::CLRender opencl;
+ std::string metadataError,lastRender="No render yet";nss::CLRender opencl;nss::CudaRender cuda;nss::PreparedCache preparedCache;
+ std::chrono::steady_clock::time_point nextMetadataCheck{};uint64_t metadataReads=0,metadataProbes=0;
 };
 Instance *instance(OfxImageEffectHandle e){void *p=nullptr;check(prop->propGetPointer(properties(e),kOfxPropInstanceData,0,&p));if(!p)throw kOfxStatErrBadHandle;return static_cast<Instance*>(p);}
 std::string sourcePath(OfxImageEffectHandle e,Instance *i,OfxPropertySetHandle args=nullptr,OfxPropertySetHandle image=nullptr) {
@@ -55,13 +59,16 @@ std::string sourcePath(OfxImageEffectHandle e,Instance *i,OfxPropertySetHandle a
  for(auto p:{args,image,properties(e)}){auto s=str(p,"OfxImageEffectPropSrcFilePath");if(!s.empty())return s;}
  OfxPropertySetHandle p=nullptr;effect->clipGetPropertySet(i->src,&p);return str(p,"OfxImageEffectPropSrcFilePath");
 }
-nss::Metadata load(Instance *i,const std::string &input) {
+nss::Metadata load(Instance *i,const std::string &input,bool force=false) {
  auto path=nss::normalizePath(input);if(path.empty())throw std::runtime_error("Choose TIFF or JSON");
  std::lock_guard<std::mutex> lock(i->mutex);std::error_code error;
+ auto now=std::chrono::steady_clock::now();
+ if(!force&&path==i->path&&now<i->nextMetadataCheck){if(i->meta)return *i->meta;if(!i->metadataError.empty())throw std::runtime_error(i->metadataError);}
+ i->nextMetadataCheck=now+std::chrono::milliseconds(250);++i->metadataProbes;
  auto stamp=std::filesystem::last_write_time(std::filesystem::u8path(path),error);
- if(!error&&i->path==path&&i->stamp==stamp){if(i->meta)return *i->meta;if(!i->metadataError.empty())throw std::runtime_error(i->metadataError);}
+ if(!force&&!error&&i->path==path&&i->stamp==stamp){if(i->meta)return *i->meta;if(!i->metadataError.empty())throw std::runtime_error(i->metadataError);}
  i->path=path;i->stamp=stamp;i->meta.reset();i->metadataError.clear();
- try{auto m=nss::parseMetadata(nss::readDescription(path));i->meta=m;return m;}
+ try{++i->metadataReads;auto m=nss::parseMetadata(nss::readDescription(path));i->meta=m;return m;}
  catch(const std::exception &x){i->metadataError=x.what();throw;}
 }
 std::string shortError(const std::exception &x){std::string text=x.what();return text.size()<=40?text:"Invalid NSS info";}
@@ -72,6 +79,7 @@ Pipeline readParams(OfxParamSetHandle set,double time) {
  p.positive.film_wb=0; // Dropdown is a loader, never an extra hidden render gain.
  p.stage=integer(set,"stage",time);p.cameraOn=integer(set,"camera_on",time);p.neutralise=integer(set,"neutralise",time);p.cameraStrength=number(set,"camera_strength",time);
  for(int a=0;a<9;a++){auto k="camera_"+std::to_string(a);p.camera[a]=number(set,k.c_str(),time);k="neutral_"+std::to_string(a);p.neutral[a]=number(set,k.c_str(),time);}
+ float gammaScale=number(set,"gamma_scale",time);if(!std::isfinite(gammaScale)||gammaScale<.25f||gammaScale>2.f)throw kOfxStatErrValue;p.positive.gam_r*=gammaScale;p.positive.gam_g*=gammaScale;p.positive.gam_b*=gammaScale;
  return p;
 }
 void choices(OfxPropertySetHandle p,const char *s) {std::istringstream in(s);std::string v;int i=0;while(std::getline(in,v,'|'))prop->propSetString(p,kOfxParamPropChoiceOption,i++,v.c_str());}
@@ -86,9 +94,11 @@ void choiceDef(OfxParamSetHandle s,const char *key,const char *label,const char 
 }
 void boolDef(OfxParamSetHandle s,const char *key,const char *label,int d,const char *group="") {auto p=define(s,key,label,kOfxParamTypeBoolean,group);prop->propSetInt(p,kOfxParamPropDefault,0,d);}
 OfxStatus describe(OfxImageEffectHandle e) {
- auto p=properties(e);prop->propSetString(p,kOfxPropLabel,0,"NegativeScan Studio OFX 0.90.1");prop->propSetString(p,kOfxImageEffectPluginPropGrouping,0,"NegativeScan Studio");prop->propSetString(p,kOfxImageEffectPropSupportedContexts,0,kOfxImageEffectContextFilter);prop->propSetString(p,kOfxImageEffectPropSupportedPixelDepths,0,kOfxBitDepthFloat);prop->propSetString(p,kOfxImageEffectPluginRenderThreadSafety,0,kOfxImageEffectRenderFullySafe);prop->propSetInt(p,kOfxImageEffectPropSupportsTiles,0,1);prop->propSetInt(p,kOfxImageEffectPropSupportsMultiResolution,0,1);
+ auto p=properties(e);prop->propSetString(p,kOfxPropLabel,0,"NegativeScan Studio OFX 0.90.2");prop->propSetString(p,kOfxImageEffectPluginPropGrouping,0,"NegativeScan Studio");prop->propSetString(p,kOfxImageEffectPropSupportedContexts,0,kOfxImageEffectContextFilter);prop->propSetString(p,kOfxImageEffectPropSupportedPixelDepths,0,kOfxBitDepthFloat);prop->propSetString(p,kOfxImageEffectPluginRenderThreadSafety,0,kOfxImageEffectRenderFullySafe);prop->propSetInt(p,kOfxImageEffectPropSupportsTiles,0,1);prop->propSetInt(p,kOfxImageEffectPropSupportsMultiResolution,0,1);prop->propSetInt(p,kOfxImageEffectPluginPropHostFrameThreading,0,0);
  prop->propSetString(p,kOfxImageEffectPropOpenCLRenderSupported,0,nss::CLApi::get().available?"true":"false");
- prop->propSetString(p,kOfxImageEffectPropOpenCLSupported,0,"false");return kOfxStatOK;
+ prop->propSetString(p,kOfxImageEffectPropOpenCLSupported,0,"false");
+ prop->propSetString(p,kOfxImageEffectPropCudaRenderSupported,0,nss::CudaApi::get().available?"true":"false");
+ prop->propSetString(p,kOfxImageEffectPropCudaStreamSupported,0,"true");return kOfxStatOK;
 }
 OfxStatus describeContext(OfxImageEffectHandle e) {
  for(auto name:{kOfxImageEffectSimpleSourceClipName,kOfxImageEffectOutputClipName}) {
@@ -105,7 +115,7 @@ OfxStatus describeContext(OfxImageEffectHandle e) {
  for(int c=0;c<2;c++)prop->propSetDouble(point,kOfxParamPropDefault,c,.5);
  numberDef(s,"pick_radius","Sample radius (pixels)",3,0,32,"graypick");
  choiceDef(s,"stage","Pipeline output","Density In|Positive Out",1);
- choiceDef(s,"render_device","Render engine","Auto (OpenCL if offered)|CPU",0,"render");
+ choiceDef(s,"render_device","Render engine","Auto (CUDA/OpenCL if offered)|CPU",0,"render");
  define(s,"render_info","Show render engine",kOfxParamTypePushButton,"render");
  boolDef(s,"auto_metadata","Auto-read Resolve 20 source metadata",1,"metadata");
  auto p=define(s,"metadata_file","Scan TIFF or sidecar JSON",kOfxParamTypeString,"metadata");prop->propSetString(p,kOfxParamPropStringMode,0,kOfxParamStringIsFilePath);prop->propSetString(p,kOfxParamPropDefault,0,"");prop->propSetInt(p,kOfxParamPropAnimates,0,0);
@@ -161,7 +171,7 @@ OfxStatus changed(OfxImageEffectHandle e,OfxPropertySetHandle a) {
  if(str(a,kOfxPropChangeReason)!=kOfxChangeUserEdited)return kOfxStatReplyDefault;
  auto s=params(e);auto key=str(a,kOfxPropName);double time=0;prop->propGetDouble(a,kOfxPropTime,0,&time);
  if(key=="load_metadata") {
-  try{auto i=instance(e);auto path=stringParam(s,"metadata_file");if(path.empty())path=sourcePath(e,i,a);auto m=load(i,path);Edit edit(s,"Load scan metadata");fillMetadata(s,m,time);}
+  try{auto i=instance(e);auto path=stringParam(s,"metadata_file");if(path.empty())path=sourcePath(e,i,a);auto m=load(i,path,true);Edit edit(s,"Load scan metadata");fillMetadata(s,m,time);}
   catch(const std::exception &x){setS(s,"metadata_status",shortError(x));return kOfxStatOK;}
   catch(...){setS(s,"metadata_status","Cannot read file path");return kOfxStatOK;}
  }else if(key=="positive_film_wb"){
@@ -187,9 +197,12 @@ OfxStatus changed(OfxImageEffectHandle e,OfxPropertySetHandle a) {
  }else if(key=="density_base_r"||key=="density_base_g"||key=="density_base_b"){
   setI(s,"auto_metadata",0);
  }else if(key=="render_device"){
-  prop->propSetString(properties(e),kOfxImageEffectPropOpenCLRenderSupported,0,integer(s,"render_device",time)==0&&nss::CLApi::get().available?"true":"false");
+  bool automatic=integer(s,"render_device",time)==0;
+  prop->propSetString(properties(e),kOfxImageEffectPropOpenCLRenderSupported,0,automatic&&nss::CLApi::get().available?"true":"false");
+  prop->propSetString(properties(e),kOfxImageEffectPropCudaRenderSupported,0,automatic&&nss::CudaApi::get().available?"true":"false");
  }else if(key=="render_info"){
   auto i=instance(e);std::string text;{std::lock_guard<std::mutex> lock(i->mutex);text=i->lastRender;}
+  text+="\n"+nss::CudaApi::get().availability+"\nOpenCL runtime: "+(nss::CLApi::get().available?"available":"unavailable");
   if(message)message->message(e,kOfxMessageMessage,"nss.render","%s",text.c_str());
  }
  return kOfxStatOK;
@@ -197,26 +210,42 @@ OfxStatus changed(OfxImageEffectHandle e,OfxPropertySetHandle a) {
 struct Image {
  OfxPropertySetHandle p=nullptr;float *data=nullptr;int row=0,bounds[4]{};
  ~Image(){if(p)effect->clipReleaseImage(p);}
- void get(OfxImageClipHandle c,double t){check(effect->clipGetImage(c,t,nullptr,&p));
+ void get(OfxImageClipHandle c,double t,const OfxRectD *region=nullptr){check(effect->clipGetImage(c,t,region,&p));
   if(str(p,kOfxImageEffectPropPixelDepth)!=kOfxBitDepthFloat||str(p,kOfxImageEffectPropComponents)!=kOfxImageComponentRGBA)throw kOfxStatErrFormat;
   check(prop->propGetPointer(p,kOfxImagePropData,0,reinterpret_cast<void**>(&data)));check(prop->propGetInt(p,kOfxImagePropRowBytes,0,&row));check(prop->propGetIntN(p,kOfxImagePropBounds,4,bounds));if(!data)throw kOfxStatFailed;
  }
  float *at(int x,int y){if(x<bounds[0]||x>=bounds[2]||y<bounds[1]||y>=bounds[3])return nullptr;return reinterpret_cast<float*>(reinterpret_cast<char*>(data)+ptrdiff_t(y-bounds[1])*row)+4*(x-bounds[0]);}
 };
+OfxRectD fetchRegion(OfxImageClipHandle clip,OfxParamSetHandle s,double time,const int *win,OfxPropertySetHandle args,bool includePick){
+ double sx=1,sy=1,aspect=1;prop->propGetDouble(args,kOfxImageEffectPropRenderScale,0,&sx);prop->propGetDouble(args,kOfxImageEffectPropRenderScale,1,&sy);
+ if(!(sx>0))sx=1;
+ if(!(sy>0))sy=1;
+ OfxPropertySetHandle props=nullptr;
+ if(effect->clipGetPropertySet(clip,&props)==kOfxStatOK)prop->propGetDouble(props,kOfxImagePropPixelAspectRatio,0,&aspect);
+ if(!(aspect>0))aspect=1;
+ OfxRectD roi{win[0]*aspect/sx,win[1]/sy,win[2]*aspect/sx,win[3]/sy};
+ if(includePick){double x=0,y=0;check(param->paramGetValueAtTime(handle(s,"pick_point"),time,&x,&y));double r=std::clamp(number(s,"pick_radius",time),0.,32.)+2;
+  if(std::isfinite(x)&&std::isfinite(y)){roi.x1=std::min(roi.x1,x-r*aspect/sx);roi.x2=std::max(roi.x2,x+r*aspect/sx);roi.y1=std::min(roi.y1,y-r/sy);roi.y2=std::max(roi.y2,y+r/sy);}}
+ return roi;
+}
 void cpuThread(unsigned int index,unsigned int count,void *arg){static_cast<nss::CpuJob*>(arg)->rows(index,count);}
 OfxStatus render(OfxImageEffectHandle e,OfxPropertySetHandle a) {
  double time=0;check(prop->propGetDouble(a,kOfxPropTime,0,&time));int win[4];check(prop->propGetIntN(a,kOfxImageEffectPropRenderWindow,4,win));
- int gpu=0;prop->propGetInt(a,kOfxImageEffectPropOpenCLEnabled,0,&gpu);
- auto i=instance(e);Image src,dst;src.get(i->src,time);dst.get(i->dst,time);auto s=params(e);auto p=readParams(s,time);
+ int gpu=0,cuda=0;prop->propGetInt(a,kOfxImageEffectPropOpenCLEnabled,0,&gpu);prop->propGetInt(a,kOfxImageEffectPropCudaEnabled,0,&cuda);
+ if(gpu&&cuda)return kOfxStatGPURenderFailed;
+ auto i=instance(e);auto s=params(e);bool pick=integer(s,"pick_auto",time)!=0;auto p=readParams(s,time);
+ auto sourceRegion=fetchRegion(i->src,s,time,win,a,pick),destRegion=fetchRegion(i->dst,s,time,win,a,false);
+ Image src,dst;src.get(i->src,time,&sourceRegion);dst.get(i->dst,time,&destRegion);
  if(integer(s,"auto_metadata",time)){
   auto path=stringParam(s,"metadata_file");if(path.empty())path=sourcePath(e,i,a,src.p);
   if(!path.empty())try{nss::applyMetadata(p,load(i,path));auto b=nss::balancedBase({p.density.base_r,p.density.base_g,p.density.base_b},integer(s,"film_type",time),integer(s,"temperature",time));p.density.base_r=b.x;p.density.base_g=b.y;p.density.base_b=b.z;}catch(const std::exception &){/* Old/no-info scans retain manual controls. Load reports the reason. */}
  }
  bool premult=str(src.p,kOfxImageEffectPropPreMultiplication)==kOfxImagePreMultiplied;
  void *queue=nullptr;if(gpu)prop->propGetPointer(a,kOfxImageEffectPropOpenCLCommandQueue,0,&queue);
- if(gpu&&integer(s,"render_device",time)!=0)return kOfxStatGPURenderFailed;
+ if((gpu||cuda)&&integer(s,"render_device",time)!=0)return kOfxStatGPURenderFailed;
+ void *cudaStream=nullptr;bool cudaStreamProvided=cuda&&prop->propGetPointer(a,kOfxImageEffectPropCudaStream,0,&cudaStream)==kOfxStatOK;
  bool pickUnavailable=false;
- if(integer(s,"pick_auto",time)){
+ if(pick){
   double x=0,y=0,scaleX=1,scaleY=1,aspect=1;
   check(param->paramGetValueAtTime(handle(s,"pick_point"),time,&x,&y));
   prop->propGetDouble(a,kOfxImageEffectPropRenderScale,0,&scaleX);prop->propGetDouble(a,kOfxImageEffectPropRenderScale,1,&scaleY);
@@ -224,12 +253,16 @@ OfxStatus render(OfxImageEffectHandle e,OfxPropertySetHandle a) {
   int rect[4],radius=int(std::clamp(number(s,"pick_radius",time),0.,32.));
   double px=std::floor(x*scaleX/aspect),py=std::floor(y*scaleY);
   if(!std::isfinite(px)||!std::isfinite(py)||px<INT32_MIN+64.||px>INT32_MAX-64.||py<INT32_MIN+64.||py>INT32_MAX-64.||!nss::pickRect(src.bounds,int(px),int(py),radius,rect))pickUnavailable=true;
-  else if(gpu){
-   try{auto patch=i->opencl.readPatch(queue,src.data,src.bounds,src.row,rect);nss::FrameView view{patch.data(),{rect[0],rect[1],rect[2],rect[3]},(rect[2]-rect[0])*4*int(sizeof(float))};pickUnavailable=!nss::grayFromPatch(p,view,rect,premult);}
+  else if(gpu||cuda){
+   try{auto patch=cuda?i->cuda.readPatch(cudaStream,src.data,src.bounds,src.row,rect):i->opencl.readPatch(queue,src.data,src.bounds,src.row,rect);nss::FrameView view{patch.data(),{rect[0],rect[1],rect[2],rect[3]},(rect[2]-rect[0])*4*int(sizeof(float))};pickUnavailable=!nss::grayFromPatch(p,view,rect,premult);}
    catch(const std::exception &x){setLastRender(i,x.what());return kOfxStatGPURenderFailed;}
   }else{nss::FrameView view{src.data,{src.bounds[0],src.bounds[1],src.bounds[2],src.bounds[3]},src.row};pickUnavailable=!nss::grayFromPatch(p,view,rect,premult);}
  }
- nss::Prepared prepared(p);
+ auto prepared=i->preparedCache.get(p);
+ if(cuda){
+  try{i->cuda.enqueue(cudaStream,cudaStreamProvided,src.data,dst.data,src.bounds,dst.bounds,src.row,dst.row,win,premult,prepared);setLastRender(i,std::string(cudaStreamProvided?"CUDA PTX (host stream)":"CUDA PTX (default stream waited)")+(pickUnavailable?"; pick unavailable":""));return kOfxStatOK;}
+  catch(const std::exception &x){setLastRender(i,std::string("CUDA failed; select CPU. ")+x.what());return kOfxStatGPURenderFailed;}
+ }
  if(gpu){
   try{if(integer(s,"render_device",time)!=0)throw std::runtime_error("CPU requested");i->opencl.enqueue(queue,src.data,dst.data,src.bounds,dst.bounds,src.row,dst.row,win,premult,prepared);setLastRender(i,std::string("OpenCL buffers (host queue)")+(pickUnavailable?"; pick unavailable":""));return kOfxStatOK;}
   catch(const std::exception &x){setLastRender(i,std::string("OpenCL failed; select CPU. ")+x.what());return kOfxStatGPURenderFailed;}
@@ -282,7 +315,7 @@ OfxStatus entry(const char *action,const void *handle_,OfxPropertySetHandle in,O
   return kOfxStatReplyDefault;
  }catch(OfxStatus s){return s;}catch(const std::bad_alloc &){return kOfxStatErrMemory;}catch(...){return kOfxStatFailed;}
 }
-OfxPlugin plugin={kOfxImageEffectPluginApi,1,"org.negativescanstudio.complete",0,9001,setHost,entry};
+OfxPlugin plugin={kOfxImageEffectPluginApi,1,"org.negativescanstudio.complete",0,9002,setHost,entry};
 }
 extern "C" {
 #ifdef _WIN32

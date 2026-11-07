@@ -18,3 +18,6 @@ userlogs/
 # Local OFX artifacts and native test builds
 /ofx/build/
 /ofx/test-build/
+
+# Python build helpers
+__pycache__/

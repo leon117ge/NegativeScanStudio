@@ -7,7 +7,7 @@ static void require(bool value){if(!value){std::cerr<<"Host test assertion faile
 namespace mock {
 struct Bag { std::map<std::string,std::vector<int>> ints;std::map<std::string,std::vector<double>> doubles;std::map<std::string,std::vector<std::string>> strings;std::map<std::string,std::vector<void*>> pointers;std::string type; };
 struct Set {std::map<std::string,Bag> values;};
-struct Clip {Bag props,image;};
+struct Clip {Bag props,image;OfxRectD requested{};bool requestedRegion=false;};
 struct Effect {Bag props;Set params;Clip source,output;};
 template<class T,class H>T *ptr(H h){return reinterpret_cast<T*>(h);}
 template<class T>OfxStatus put(std::map<std::string,std::vector<T>>&m,const char *k,int i,T v){if(i<0)return kOfxStatErrBadIndex;auto &a=m[k];if(a.size()<=size_t(i))a.resize(i+1);a[i]=v;return kOfxStatOK;}
@@ -26,7 +26,7 @@ OfxStatus es(OfxImageEffectHandle e,OfxParamSetHandle *p){*p=reinterpret_cast<Of
 OfxStatus cd(OfxImageEffectHandle e,const char*k,OfxPropertySetHandle *p){auto f=ptr<Effect>(e);*p=reinterpret_cast<OfxPropertySetHandle>(std::string(k)=="Source"?&f->source.props:&f->output.props);return kOfxStatOK;}
 OfxStatus cg(OfxImageEffectHandle e,const char*k,OfxImageClipHandle *c,OfxPropertySetHandle *p){auto f=ptr<Effect>(e);auto cl=std::string(k)=="Source"?&f->source:&f->output;*c=reinterpret_cast<OfxImageClipHandle>(cl);if(p)*p=reinterpret_cast<OfxPropertySetHandle>(&cl->props);return kOfxStatOK;}
 OfxStatus cp(OfxImageClipHandle c,OfxPropertySetHandle *p){*p=reinterpret_cast<OfxPropertySetHandle>(&ptr<Clip>(c)->props);return kOfxStatOK;}
-OfxStatus image(OfxImageClipHandle c,OfxTime,const OfxRectD*,OfxPropertySetHandle *p){*p=reinterpret_cast<OfxPropertySetHandle>(&ptr<Clip>(c)->image);return kOfxStatOK;}
+OfxStatus image(OfxImageClipHandle c,OfxTime,const OfxRectD *region,OfxPropertySetHandle *p){auto clip=ptr<Clip>(c);clip->requestedRegion=region!=nullptr;if(region)clip->requested=*region;*p=reinterpret_cast<OfxPropertySetHandle>(&ptr<Clip>(c)->image);return kOfxStatOK;}
 OfxStatus release(OfxPropertySetHandle){return kOfxStatOK;}
 int abort_(OfxImageEffectHandle){return 0;}
 OfxStatus pd(OfxParamSetHandle set,const char*t,const char*k,OfxPropertySetHandle *p){auto &b=ptr<Set>(set)->values[k];b.type=t;*p=reinterpret_cast<OfxPropertySetHandle>(&b);return kOfxStatOK;}
@@ -43,7 +43,7 @@ void init(){props.propSetInt=si;props.propSetDouble=sd;props.propSetString=ss;pr
 }
 int main(int argc,char **argv){require(argc==3);mock::init();OfxHost h{nullptr,mock::fetch};OfxGetPlugin(0)->setHost(&h);require(OfxGetNumberOfPlugins()==1&&OfxGetPlugin(1)==nullptr);auto call=OfxGetPlugin(0)->mainEntry;mock::Effect fx;auto e=reinterpret_cast<OfxImageEffectHandle>(&fx);auto bag=[](mock::Bag &b){return reinterpret_cast<OfxPropertySetHandle>(&b);};
 require(call(kOfxActionLoad,nullptr,nullptr,nullptr)==kOfxStatOK);require(call(kOfxActionDescribe,e,nullptr,nullptr)==kOfxStatOK);require(call(kOfxImageEffectActionDescribeInContext,e,nullptr,nullptr)==kOfxStatOK);require(fx.params.values.count("cross")==0);require(fx.params.values.count("cross_strength")==0);require(fx.params.values.count("density_cast_on")==0);require(fx.params.values.count("apply_wb")==0);require(fx.params.values.count("positive_film_wb")==1);require(call(kOfxActionCreateInstance,e,nullptr,nullptr)==kOfxStatOK);
-auto s=reinterpret_cast<OfxParamSetHandle>(&fx.params);setI(s,"auto_metadata",0);require(number(s,"positive_gam_r",0)==.55);require(number(s,"density_base_r",0)==.5);require(number(s,"density_base_g",0)==.5);require(number(s,"density_base_b",0)==.5);require(integer(s,"positive_film_wb",0)==1);
+auto s=reinterpret_cast<OfxParamSetHandle>(&fx.params);require(number(s,"gamma_scale",0)==1.15);require(number(s,"positive_expo",0)==.9);require(fx.params.values["gamma_scale"].strings[kOfxParamPropParent][0]=="positive");setI(s,"auto_metadata",0);require(number(s,"positive_gam_r",0)==.55);require(number(s,"density_base_r",0)==.5);require(number(s,"density_base_g",0)==.5);require(number(s,"density_base_b",0)==.5);require(integer(s,"positive_film_wb",0)==1);
 float in[16]={.03,.04,.05,1,.1,.2,.3,1,.4,.3,.2,1,.5,.5,.5,1},out[16]{};
 for(auto *b:{&fx.source.image,&fx.output.image}){auto p=bag(*b);mock::ss(p,kOfxImageEffectPropPixelDepth,0,kOfxBitDepthFloat);mock::ss(p,kOfxImageEffectPropComponents,0,kOfxImageComponentRGBA);mock::ss(p,kOfxImageEffectPropPreMultiplication,0,kOfxImageUnPreMultiplied);mock::si(p,kOfxImagePropRowBytes,0,-32);for(int j=0;j<4;j++)mock::si(p,kOfxImagePropBounds,j,(int[]){10,20,12,22}[j]);}
 mock::sp(bag(fx.source.image),kOfxImagePropData,0,in+8);mock::sp(bag(fx.output.image),kOfxImagePropData,0,out+8);
@@ -58,6 +58,10 @@ mock::ss(bag(fx.source.image),kOfxImageEffectPropPreMultiplication,0,kOfxImageUn
 for(int j=0;j<4;j++){for(int c=0;c<3;c++)in[4*j+c]*=2;in[4*j+3]=1;}
 // Resolve-specific source property automatically reads TIFF, no user path required.
 setI(s,"auto_metadata",1);mock::ss(bag(fx.props),"OfxImageEffectPropSrcFilePath",0,argv[1]);require(call(kOfxImageEffectActionRender,e,bag(args),nullptr)==kOfxStatOK);auto m=nss::parseMetadata(nss::readDescription(argv[1]));nss::applyMetadata(p,m);auto expected=p.pixel({in[0],in[1],in[2]});require(std::abs(out[0]-expected.x)<1e-6f);
+// Repeated frames must not reparse TIFF/metadata or repeat preparation.
+auto loaded=instance(e);auto reads=loaded->metadataReads,probes=loaded->metadataProbes,builds=loaded->preparedCache.builds;
+for(int repeat=0;repeat<3;repeat++)require(call(kOfxImageEffectActionRender,e,bag(args),nullptr)==kOfxStatOK);
+require(loaded->metadataReads==reads&&loaded->metadataProbes==probes&&loaded->preparedCache.builds==builds);
 // Button snapshots the values and preserves manual override thereafter.
 mock::Bag changed;mock::ss(bag(changed),kOfxPropName,0,"load_metadata");mock::ss(bag(changed),kOfxPropChangeReason,0,kOfxChangeUserEdited);require(call(kOfxActionInstanceChanged,e,bag(changed),nullptr)==kOfxStatOK);require(integer(s,"auto_metadata",0)==0);require(std::abs(number(s,"density_base_r",0)-.479)<1e-6);setD(s,"density_base_r",.7);require(number(s,"density_base_r",0)==.7);
 setI(s,"stock",6);mock::ss(bag(changed),kOfxPropName,0,"stock");require(call(kOfxActionInstanceChanged,e,bag(changed),nullptr)==kOfxStatOK);require(integer(s,"film_type",0)==1);require(std::abs(number(s,"positive_gam_r",0)-.550724)<1e-5);require(integer(s,"positive_film_wb",0)==1);
@@ -76,15 +80,15 @@ require(fx.params.values["positive_film_wb"].strings[kOfxParamPropChoiceOption][
 // Base gains are constant at different white points; old 0.0013 slope is gone.
 for(float white:{600.f,696.f,800.f}){
  nss::Pipeline measured,manual;measured.positive.white_code=manual.positive.white_code=white;
- manual.positive.film_wb=0;manual.positive.bal_r=1.57f;manual.positive.bal_b=1.f;
+ manual.positive.film_wb=0;manual.positive.bal_r=1.40f;manual.positive.bal_b=.8f;
  nss::Prepared a(measured),b(manual);require(a.values[22]==b.values[22]);require(a.values[24]==b.values[24]);
 }
 // Base dropdown is a visible loader, never a second hidden gain.
 mock::ss(bag(changed),kOfxPropName,0,"positive_film_wb");
 require(call(kOfxActionInstanceChanged,e,bag(changed),nullptr)==kOfxStatOK);
-require(std::abs(number(s,"positive_bal_r",0)-1.57)<1e-6&&number(s,"positive_bal_b",0)==1);
+require(std::abs(number(s,"positive_bal_r",0)-1.4)<1e-6&&std::abs(number(s,"positive_bal_b",0)-.8)<1e-6);
 require(readParams(s,0).positive.film_wb==0);
-setD(s,"positive_bal_r",1.4);require(number(s,"positive_bal_r",0)==1.4);
+setD(s,"positive_bal_r",1.25);require(number(s,"positive_bal_r",0)==1.25);
 setI(s,"positive_film_wb",0);require(call(kOfxActionInstanceChanged,e,bag(changed),nullptr)==kOfxStatOK);
 require(number(s,"positive_bal_r",0)==0&&number(s,"positive_bal_b",0)==0);
 // Missing/old files are expected statuses, never popup failures or bogus loads.
@@ -112,6 +116,14 @@ for(int film=0;film<2;film++)for(int temp=0;temp<5;temp++){
   require(std::abs(a.x-b.x)<1e-6f);require(std::abs(a.y-b.y)<1e-6f);require(std::abs(a.z-b.z)<1e-6f);
  }
 }
+// Canonical region conversion follows render scale and pixel aspect.
+mock::sd(bag(fx.source.props),kOfxImagePropPixelAspectRatio,0,2);mock::sd(bag(args),kOfxImageEffectPropRenderScale,0,.5);mock::sd(bag(args),kOfxImageEffectPropRenderScale,1,.25);
+int testWindow[]={10,20,12,22};auto requested=fetchRegion(instance(e)->src,s,0,testWindow,bag(args),false);require(requested.x1==40&&requested.x2==48&&requested.y1==80&&requested.y2==88);
+mock::sd(bag(fx.source.props),kOfxImagePropPixelAspectRatio,0,1);mock::sd(bag(args),kOfxImageEffectPropRenderScale,0,1);mock::sd(bag(args),kOfxImageEffectPropRenderScale,1,1);
+// Manual scale is visible, default1.15, immediately below Gamma B, presets stay raw.
+for(size_t i=0;i+1<sizeof(defs)/sizeof(defs[0]);i++)if(std::string(defs[i].key)=="positive_gam_b")require(std::string(defs[i+1].key)=="gamma_scale");
+setD(s,"positive_gam_r",.45);setD(s,"positive_gam_g",.54);setD(s,"positive_gam_b",.53);setD(s,"gamma_scale",1.25);
+auto scaled=readParams(s,0);require(std::abs(scaled.positive.gam_r-.5625)<1e-6);require(std::abs(scaled.positive.gam_b-.6625)<1e-6);require(number(s,"positive_gam_r",0)==.45);setD(s,"gamma_scale",1);
 // Viewer point uses SOURCE -> camera -> Density codes, not output RGB.
 setI(s,"pick_auto",1);mock::ss(bag(changed),kOfxPropName,0,"pick_auto");require(call(kOfxActionInstanceChanged,e,bag(changed),nullptr)==kOfxStatOK);setD(s,"pick_radius",0);check(param->paramSetValue(handle(s,"pick_point"),10.5,20.5));
 require(call(kOfxImageEffectActionRender,e,bag(args),nullptr)==kOfxStatOK);

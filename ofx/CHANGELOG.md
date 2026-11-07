@@ -1,8 +1,18 @@
 # NegativeScan Studio OFX — Changelog
 
-Current plugin: **0.90.1** · [Plugin release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/ofx-v0.90.1) · [Scanning app changelog](../docs/CHANGELOG.md) · [Versioning policy](../docs/VERSIONING.md)
+Current plugin: **0.90.2** · [Plugin release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/ofx-v0.90.2) · [Scanning app changelog](../docs/CHANGELOG.md) · [Versioning policy](../docs/VERSIONING.md)
 
 Plugin releases are independent from the Windows scanning app. / 插件与扫描软件独立发版。
+
+## 0.90.2 — CUDA and render setup prerelease
+
+- Keep all stock gamma preset values unchanged. Add visible Gamma scale directly below Gamma B in Positive Out, default **1.15**. Change the plugin Exposure default to **0.90**. These defaults intentionally change rendering; app/DCTL source stays unchanged. The proposed automatic ×1.25 presets are not shipped.
+- Change 500T Base from +1.57/0/+1.00 to **+1.40/0/+0.80 stops**, loaded into visible balance sliders. The user eye-tuned this under Gamma scale1.15/Exposure0.90 defaults. Re-measurement was cancelled; retain the old measured record and T5600 offsets.
+- Add runtime-loaded CUDA Driver API with embedded PTX, per-host-context JIT/module/function cache, host stream support and no full-frame CPU copy. Optional gray picking downloads only its patch; normal stream rendering remains asynchronous.
+- Cache OpenCL programs and kernels per context/device. Reuse exact Prepared constants, throttle same-file metadata mtime checks to250ms, and force immediate reload on Load.
+- Request render-window image regions, expand only for enabled gray picking, retain tiles/multi-resolution and disable host frame splitting to avoid nested CPU threading.
+- Add actual-renderer/driver diagnostics. CUDA PTX assembles offline and Driver contracts/native CUDA-source math pass tests, but real CUDA/Windows Resolve execution and FPS remain unverified. No additional CPU speedup is claimed beyond measured noise; see [validation and benchmark](../docs/OFX.md).
+- App remains v0.90. This release contains only the plugin ZIP.
 
 ## 0.90.1 — plugin-only prerelease
 

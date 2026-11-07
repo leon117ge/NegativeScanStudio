@@ -4,6 +4,7 @@
 #include "opencl_source.hpp"
 #include "prepared.hpp"
 #include <mutex>
+#include <map>
 #include <string>
 #include <cstring>
 #include <vector>
@@ -42,8 +43,12 @@ struct CLApi {
  static CLApi &get(){static CLApi a;return a;}
 };
 struct CLRender {
- std::mutex mutex;cl_context context=nullptr;cl_device_id device=nullptr;cl_program program=nullptr;std::string buildError;
- ~CLRender(){if(program)CLApi::get().clReleaseProgram(program);}
+ struct Program {
+  cl_program program=nullptr;cl_kernel kernel=nullptr;std::string error;
+  ~Program(){auto &api=CLApi::get();if(kernel)api.clReleaseKernel(kernel);if(program)api.clReleaseProgram(program);}
+ };
+ std::mutex mutex;std::map<std::pair<uintptr_t,uintptr_t>,std::unique_ptr<Program>> programs;
+ uint64_t programBuilds=0,kernelBuilds=0;
  // Optional viewer-pick prepass only: download a small rectangle, never a full frame.
  std::vector<float> readPatch(void *hostQueue,void *input,const int *bounds,int stride,const int *rect){
   auto &api=CLApi::get();if(!api.available||!hostQueue||!input||stride<=0)throw std::runtime_error("Cannot sample OpenCL source");
@@ -60,15 +65,15 @@ struct CLRender {
   auto ok=[](cl_int r){if(r!=CL_SUCCESS)throw std::runtime_error("OpenCL error "+std::to_string(r));};
   ok(api.clGetCommandQueueInfo(queue,CL_QUEUE_CONTEXT,sizeof(ctx),&ctx,nullptr));ok(api.clGetCommandQueueInfo(queue,CL_QUEUE_DEVICE,sizeof(dev),&dev,nullptr));
   std::lock_guard<std::mutex> guard(mutex);
-  if(ctx!=context||dev!=device){if(program)api.clReleaseProgram(program);program=nullptr;context=ctx;device=dev;buildError.clear();}
-  if(!buildError.empty())throw std::runtime_error(buildError);
-  if(!program){
-   cl_int error;const char *code=openclSource;program=api.clCreateProgramWithSource(ctx,1,&code,nullptr,&error);ok(error);
-   error=api.clBuildProgram(program,1,&dev,"-cl-std=CL1.2",nullptr,nullptr);
-   if(error!=CL_SUCCESS){size_t n=0;api.clGetProgramBuildInfo(program,dev,CL_PROGRAM_BUILD_LOG,0,nullptr,&n);std::string log(n,'\0');if(n)api.clGetProgramBuildInfo(program,dev,CL_PROGRAM_BUILD_LOG,n,log.data(),nullptr);buildError="OpenCL compile failed "+std::to_string(error)+": "+log;api.clReleaseProgram(program);program=nullptr;throw std::runtime_error(buildError);}
+  auto key=std::make_pair(reinterpret_cast<uintptr_t>(ctx),reinterpret_cast<uintptr_t>(dev));auto &cached=programs[key];if(!cached)cached=std::make_unique<Program>();auto &entry=*cached;
+  if(!entry.error.empty())throw std::runtime_error(entry.error);
+  if(!entry.program){
+   cl_int status;const char *code=openclSource;entry.program=api.clCreateProgramWithSource(ctx,1,&code,nullptr,&status);ok(status);++programBuilds;
+   status=api.clBuildProgram(entry.program,1,&dev,"-cl-std=CL1.2",nullptr,nullptr);
+   if(status!=CL_SUCCESS){size_t n=0;api.clGetProgramBuildInfo(entry.program,dev,CL_PROGRAM_BUILD_LOG,0,nullptr,&n);std::string log(n,'\0');if(n)api.clGetProgramBuildInfo(entry.program,dev,CL_PROGRAM_BUILD_LOG,n,log.data(),nullptr);entry.error="OpenCL compile failed "+std::to_string(status)+": "+log;throw std::runtime_error(entry.error);}
   }
-  cl_int error;cl_kernel kernel=api.clCreateKernel(program,"nss_render",&error);ok(error);
-  struct Kernel {CLApi &a;cl_kernel k;~Kernel(){a.clReleaseKernel(k);}} owner{api,kernel};
+  cl_int error;if(!entry.kernel){entry.kernel=api.clCreateKernel(entry.program,"nss_render",&error);ok(error);++kernelBuilds;}
+  auto kernel=entry.kernel;
   cl_mem constants=api.clCreateBuffer(ctx,CL_MEM_READ_ONLY|CL_MEM_COPY_HOST_PTR,sizeof(p.values),const_cast<float*>(p.values.data()),&error);ok(error);
   struct Memory {CLApi&a;cl_mem m;~Memory(){a.clReleaseMemObject(m);}} memory{api,constants};
   cl_mem source=reinterpret_cast<cl_mem>(input),dest=reinterpret_cast<cl_mem>(output);int arg=0;

@@ -48,4 +48,8 @@ T：5219 感度 + 名义 Status M gamma 0.4482/0.5266/0.5096，K0=3200；沿用 
 | D | 5000 | 0.480351 / 0.500000 / 0.539026 |
 | D | 5600 | 0.500000 / 0.500000 / 0.500000 |
 
-完整数值：[ofx_0901_base_presets.json](ofx_0901_base_presets.json)。片种 gamma 仍为独立参数。500T 默认 T，其余 stock 默认 D，均可覆盖；场景温度不自动改。Positive Out Film white balance保留，原Legacy项更名 **500T Base**，以可见balance loader写+1.57/0/+1.00，None复位0；T/D和gamma不暗改balance。500T Base测于T5600+LED gamma，保持T5600表不变，两者可叠加。[Base记录](ofx_film_bases.md)。
+完整数值：[ofx_0901_base_presets.json](ofx_0901_base_presets.json)。片种 gamma 仍为独立参数。500T 默认 T，其余 stock 默认 D，均可覆盖；场景温度不自动改。Positive Out Film white balance保留，原Legacy项更名 **500T Base**，以可见balance loader写+1.40/0/+0.80，None复位0；T/D和gamma不暗改balance。旧500T Base测于T5600+LED gamma，0.90.2改为用户眼调，保持T5600表不变，两者可叠加。[Base记录](ofx_film_bases.md)。
+
+## OFX0.90.2的500T Base更新
+
+T/D片基表（包括T5600）不变。Positive Out的500T Base loader由旧R+1.57/G0/B+1.00改为 **R+1.40/G0/B+0.80 stops**，选择后立即写入可见balance sliders，仍无隐藏叠加。新值是用户在 **Gamma scale1.15 / Exposure0.90** 默认下的眼调决定，**不是新测量/曲线拟合**；先前的重测请求已取消。旧实测记录保留于 [ofx_500t_base_measurements.json](ofx_500t_base_measurements.json)，当前表/历史见 [ofx_film_bases.md](ofx_film_bases.md)。

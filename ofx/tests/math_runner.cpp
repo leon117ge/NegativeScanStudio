@@ -7,6 +7,7 @@ int main(int argc,char **argv) {
   auto j=nss::JSON::parse(line);nss::Pipeline p;p.cameraOn=0;
 #include "json_params.inc"
   p.stage=j.value("stage",2);p.cameraOn=j.value("camera_on",0);p.cameraStrength=j.value("camera_strength",1.f);if(j.contains("camera"))p.camera=j.at("camera").get<std::array<float,9>>();
+  float scale=j.value("gamma_scale",1.f);p.positive.gam_r*=scale;p.positive.gam_g*=scale;p.positive.gam_b*=scale;
   nss::JSON out=nss::JSON::array();nss::Prepared prepared(p);
   if(j.value("dump_constants",false)){std::cout<<nss::JSON(prepared.values).dump()<<"\n";continue;}
   for(auto &v:j.at("pixels")){auto o=prepared.pixel({v[0].get<float>(),v[1].get<float>(),v[2].get<float>()});out.push_back({o.x,o.y,o.z});}

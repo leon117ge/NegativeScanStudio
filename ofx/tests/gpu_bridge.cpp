@@ -11,7 +11,7 @@ int testRender(void *queue,void *input,void *output,int width,int height,int pre
   if(!gpuInit){mock::init();static OfxHost h{nullptr,mock::fetch};setHost(&h);check(entry(kOfxActionLoad,nullptr,nullptr,nullptr));check(describe(e));check(describeContext(e));check(entry(kOfxActionCreateInstance,e,nullptr,nullptr));gpuInit=true;}
   else{gpuFx.params.values.clear();check(describeContext(e));}
   auto s=params(e);setI(s,"auto_metadata",0);auto j=nss::JSON::parse(json);
-  for(auto &d:defs)setGpuParam(s,d,j);
+  for(auto &d:defs)setGpuParam(s,d,j);setD(s,"gamma_scale",j.value("gamma_scale",1.));
   if(j.contains("pick")){setI(s,"pick_auto",1);mock::Bag change;mock::ss(bag(change),kOfxPropName,0,"pick_auto");mock::ss(bag(change),kOfxPropChangeReason,0,kOfxChangeUserEdited);check(changed(e,bag(change)));setD(s,"pick_radius",j.at("pick").at("radius").get<double>());check(param->paramSetValue(handle(s,"pick_point"),j.at("pick").at("x").get<double>(),j.at("pick").at("y").get<double>()));}
   setI(s,"stage",j.value("stage",1));setI(s,"camera_on",j.value("camera_on",0));setD(s,"camera_strength",j.value("camera_strength",1.));
   if(j.contains("camera"))for(int i=0;i<9;i++){auto key="camera_"+std::to_string(i);setD(s,key.c_str(),j.at("camera").at(i).get<double>());}
@@ -25,3 +25,5 @@ extern "C" const char *nss_test_gpu_status(){return gpuError.c_str();}
 extern "C" void nss_test_gpu_close(){if(gpuInit){auto e=reinterpret_cast<OfxImageEffectHandle>(&gpuFx);entry(kOfxActionDestroyInstance,e,nullptr,nullptr);gpuInit=false;}}
 extern "C" int nss_test_gpu(void *q,void *i,void *o,int w,int h,int p,const char *j){return testRender(q,i,o,w,h,p,j,1);}
 extern "C" int nss_test_cpu(void *i,void *o,int w,int h,int p,const char *j){return testRender(nullptr,i,o,w,h,p,j,0);}
+extern "C" unsigned long long nss_test_cl_programs(){auto e=reinterpret_cast<OfxImageEffectHandle>(&gpuFx);return instance(e)->opencl.programBuilds;}
+extern "C" unsigned long long nss_test_cl_kernels(){auto e=reinterpret_cast<OfxImageEffectHandle>(&gpuFx);return instance(e)->opencl.kernelBuilds;}
