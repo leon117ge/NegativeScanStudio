@@ -1,6 +1,10 @@
 # NegativeScan Studio OFX — Roadmap
 
-Current plugin: **0.90.3** · [Plugin changelog](CHANGELOG.md) · [Scanning app roadmap](../docs/ROADMAP.md) · [Versioning](../docs/VERSIONING.md)
+Current plugin: **0.90.4** · [Plugin changelog](CHANGELOG.md) · [Scanning app roadmap](../docs/ROADMAP.md) · [Versioning](../docs/VERSIONING.md)
+
+## Implemented in 0.90.4 (host-tested, Resolve pending)
+
+- Discoverable viewer pick group with armed image click/drag, GL crosshair/sample box, canonical coordinate handling and native handle fallback. Enable Open FX Overlay in the viewer.
 
 ## Implemented experimentally in 0.90.2
 
@@ -19,7 +23,7 @@ Current plugin: **0.90.3** · [Plugin changelog](CHANGELOG.md) · [Scanning app 
 ## Validation first
 
 1. Real Windows Resolve: plugin discovery, parameter/preset persistence, Unicode file chooser, metadata/manual override and optional source-path extension.
-2. Verify native 2D viewer handle, pixel aspect/render-scale/ROI behavior and neutral-patch results on real footage. Consider optional Bake, rectangle selection or tracking only after the fixed-point workflow is validated.
+2. Verify custom GL overlay/click/drag and native 2D fallback, pixel aspect/render-scale/ROI behavior and neutral-patch results on real footage. Consider optional Bake, rectangle selection or tracking only after the fixed-point workflow is validated.
 3. Validate OpenCL negotiation under Resolve's GPU modes, device/driver compatibility, CPU retry and actual full-frame performance. Compare against the DCTL workflow without claiming Linux CPU timings are Resolve FPS.
 
 ## One measured Base per stock

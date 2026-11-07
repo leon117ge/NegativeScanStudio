@@ -1,4 +1,4 @@
-# NegativeScan Studio OFX 0.90.3 · Windows x64
+# NegativeScan Studio OFX 0.90.4 · Windows x64
 
 插件独立更新；NSS app 仍为 **v0.90**，本 ZIP 不包含/不更新 exe。
 
@@ -7,12 +7,12 @@
 1. **退出 Resolve**，备份工程，移除旧 bundle，避免同时装两个相同插件。
 2. 解压 ZIP，把整个 `NegativeScanStudio.ofx.bundle` 复制到：
    `C:\Program Files\Common Files\OFX\Plugins\`（可能需要管理员权限）。
-3. 重启 Resolve，在 OpenFX → NegativeScan Studio 找 **NegativeScan Studio OFX 0.90.3**。
+3. 重启 Resolve，在 OpenFX → NegativeScan Studio 找 **NegativeScan Studio OFX 0.90.4**。
 4. Render engine 默认 Auto（按宿主提供的CUDA device pointer / OpenCL buffer使用）；不支持时 CPU（可检查Resolve GPU processing mode/驱动OpenCL支持；CUDA路径已实现但真机协商待测）。Show render engine 可查看最近实际路径；异常可切 CPU。
 
-Quit Resolve, back up your project and remove the previous bundle. Unzip and copy the **entire** `NegativeScanStudio.ofx.bundle` to `C:\Program Files\Common Files\OFX\Plugins\` (administrator access may be needed). Restart Resolve and add **NegativeScan Studio OFX 0.90.3**. Do not install two copies. Auto uses CUDA or OpenCL buffers when offered by the host; CPU fallback is available. No extra C++/OpenCL DLLs are bundled or required for CPU use. This plugin update leaves the v0.90 app unchanged.
+Quit Resolve, back up your project and remove the previous bundle. Unzip and copy the **entire** `NegativeScanStudio.ofx.bundle` to `C:\Program Files\Common Files\OFX\Plugins\` (administrator access may be needed). Restart Resolve and add **NegativeScan Studio OFX 0.90.4**. Do not install two copies. Auto uses CUDA or OpenCL buffers when offered by the host; CPU fallback is available. No extra C++/OpenCL DLLs are bundled or required for CPU use. This plugin update leaves the v0.90 app unchanged.
 
-**0.90.3 未在真实 Windows Resolve/物理 GPU 验收**；已测native CPU、PoCL CPU OpenCL、CUDA PTX离线组装和Driver契约mock；没有真实CUDA执行。viewer 2D handle 的呈现亦待 Resolve 测试。
+**0.90.4 未在真实 Windows Resolve/物理 GPU 验收**；已测native CPU、PoCL CPU OpenCL、CUDA PTX离线组装和Driver契约mock；没有真实CUDA执行。custom viewer overlay 的绘制与鼠标分发亦待 Resolve 测试。
 
 ## 处理链 / Pipeline
 
@@ -48,13 +48,20 @@ Stock/type/temperature changes immediately populate controls. Manual fine tuning
 
 Base校准：[测量条件与可见loader规则](https://github.com/leon117ge/NegativeScanStudio/blob/main/docs/data/ofx_film_bases.md)。
 
-## Viewer gray / white point
+## Pick gray directly on the viewer / 在画面点选灰白点
 
-开启 **Auto gray from point**（Base下拉置None、balance可见复位0，开始新中性校正），用 viewer 原生 2D point handle 拖到中性灰/白区域，或手填 canonical X/Y。Sample radius=0–32（当前 render 像素）。逐帧从 SOURCE patch 经 camera/Density In 后取平均 code，使用原 Positive gray-point 算法中性化 R/B 相对 G；不写 UI/key、不锁曝光。关闭后恢复手动 gray 参数。
+1. Select the clip/node containing NSS and open its effect settings. In the viewer’s lower-left onscreen-control dropdown, choose **Open FX Overlay** (sometimes **FX**). If overlays are hidden, toggle them on with **Shift + ~ (tilde)**. Window/Transform/Wipe mode will not send clicks to this plugin.
+2. Open the first group, **Viewer gray / white pick** (requested open by default), and enable **Pick gray on viewer**. A cyan/black crosshair and sample-radius box mark the current point.
+3. Click a neutral gray/white patch directly on the image; drag to refine. First click enables **Auto gray from point** and visibly resets Base dropdown/balances to None/0/0/0. Subsequent picks while Auto is already on preserve manual balance tweaks.
+4. Set **Sample radius** (0–32 current-render pixels). Uncheck **Pick gray on viewer** after picking to stop intercepting clicks. Auto gray continues at the saved point; disable **Auto gray from point** to return to manual gray codes. Hiding the viewer overlay does not disable correction.
 
-GPU 开启 picker 时只下载小 patch（有一次同步），默认关闭不增加该开销。不是运动追踪；避免饱和白/纯黑/有色区域。点越界/透明时回退手动 gray，Show render engine 显示 pick unavailable。无 bake 按钮/自绘 overlay，原生 handle 需宿主支持；之后手动balance可在灰点上继续微调；关闭Auto不自动恢复Base。
+中文：先选中NSS节点/效果，在viewer左下角选 **Open FX Overlay / FX**（必要时按 **Shift + ~ (tilde)** 显示），再勾首组 **Pick gray on viewer**，直接点击/拖动画面中性灰白区域。第一次点击启用Auto gray并把Base/balance可见复位；可调整Sample radius。选好后取消Pick gray on viewer防止误点，Auto仍逐帧工作。若不见十字，请确认选对效果、viewer不是Window/Transform/Wipe模式，并确认旧bundle已替换且Resolve已重启。
 
-Enable **Auto gray from point**, move the host's 2D on-screen handle onto a neutral patch, or enter canonical X/Y. Sampling happens on source pixels after camera/Density In, before Positive gain. It updates render-local gray codes each frame, not slider/keyframe values. This is a fixed point, not a tracker; GPU sampling downloads only the small patch. Native overlay availability depends on the host.
+The custom OverlayInteractV1 dynamically loads system OpenGL1.x; no OpenGL DLL is bundled and no OpenGL image-render path is required. Pen positions/XYAbsolute parameters are canonical (no double zoom/render scaling); the crosshair uses host PixelScale and the sample box uses render scale/pixel aspect. Native 2D handle and canonical X/Y remain fallback controls if the host does not dispatch custom overlay actions; editing the native point while armed also enables Auto gray. Actual Windows Resolve overlay appearance/dispatch is not yet verified.
+
+Sampling still uses **Source after camera/Density In, before Positive gain**, not the displayed framebuffer. Gray codes are render-local, not baked into UI/keyframes. Fixed point, not a tracker; avoid saturated white/black/colored/transparent patches. GPU Auto gray downloads only a small patch and synchronizes; off by default. Invalid/out-of-bounds samples retain manual gray codes and Show render engine reports pick unavailable. Turning Auto off does not restore old Base balances. Source patches at image edges are clipped even if the requested sample box extends beyond the image.
+
+Resolve’s onscreen-control procedure is documented in the [Reference Manual chapter (third-party mirror)](https://docs.imaster.org/davinci-resolve-21-manual/part-11-color-page-effects/ch.-151-using-open-fx-and-resolve-fx); this is documentation research, not a real-Resolve acceptance test.
 
 ## TIFF / JSON 加载
 

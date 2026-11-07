@@ -16,6 +16,8 @@ NSS_META_FIXTURE="$BUILD/metadata-fixture.tiff" go test ./hdrscan -run TestScanT
 "$BUILD/host_test" "$BUILD/metadata-fixture.tiff" "$SCAN"
 "$CXX" -std=c++17 -O3 -fno-math-errno -fno-trapping-math -Iofx/vendor/openfx/include -Iofx/vendor/opencl ofx/tests/cuda_contract.cpp -o "$BUILD/cuda_contract"
 "$BUILD/cuda_contract"
+"$CXX" -std=c++17 -O3 -fno-math-errno -fno-trapping-math -Iofx/vendor/openfx/include -Iofx/vendor/opencl ofx/tests/overlay_test.cpp -o "$BUILD/overlay_test"
+"$BUILD/overlay_test"
 python3 ofx/tests/check_metadata.py "$BUILD" "$SCAN"
 python3 ofx/tests/check_parity.py "$BUILD" "$SCAN"
 if [[ "${NSS_TEST_OPENCL:-0}" == 1 ]]; then

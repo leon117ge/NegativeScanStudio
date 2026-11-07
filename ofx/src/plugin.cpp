@@ -1,5 +1,7 @@
 #include "ofxImageEffect.h"
 #include "ofxProperty.h"
+#include "ofxInteract.h"
+#include "overlay_gl.hpp"
 #include "metadata.hpp"
 #include "wb_presets.hpp"
 #include "ofxGPURender.h"
@@ -23,6 +25,8 @@ OfxImageEffectSuiteV1 *effect=nullptr;
 OfxParameterSuiteV1 *param=nullptr;
 OfxMessageSuiteV1 *message=nullptr;
 OfxMultiThreadSuiteV1 *multithread=nullptr;
+OfxInteractSuiteV1 *interact=nullptr;
+OfxStatus overlayEntry(const char*,const void*,OfxPropertySetHandle,OfxPropertySetHandle);
 using nss::Pipeline;
 enum class Kind {Number,Boolean,Choice};
 struct Def {const char *key,*label;Kind kind;double def,lo,hi,step;const char *options,*group;};
@@ -92,9 +96,10 @@ void numberDef(OfxParamSetHandle s,const char *key,const char *label,double d,do
 void choiceDef(OfxParamSetHandle s,const char *key,const char *label,const char *items,int d,const char *group="") {
  auto p=define(s,key,label,kOfxParamTypeChoice,group);choices(p,items);prop->propSetInt(p,kOfxParamPropDefault,0,d);prop->propSetInt(p,kOfxParamPropAnimates,0,0);
 }
-void boolDef(OfxParamSetHandle s,const char *key,const char *label,int d,const char *group="") {auto p=define(s,key,label,kOfxParamTypeBoolean,group);prop->propSetInt(p,kOfxParamPropDefault,0,d);}
+OfxPropertySetHandle boolDef(OfxParamSetHandle s,const char *key,const char *label,int d,const char *group="") {auto p=define(s,key,label,kOfxParamTypeBoolean,group);prop->propSetInt(p,kOfxParamPropDefault,0,d);return p;}
 OfxStatus describe(OfxImageEffectHandle e) {
- auto p=properties(e);prop->propSetString(p,kOfxPropLabel,0,"NegativeScan Studio OFX 0.90.3");prop->propSetString(p,kOfxImageEffectPluginPropGrouping,0,"NegativeScan Studio");prop->propSetString(p,kOfxImageEffectPropSupportedContexts,0,kOfxImageEffectContextFilter);prop->propSetString(p,kOfxImageEffectPropSupportedPixelDepths,0,kOfxBitDepthFloat);prop->propSetString(p,kOfxImageEffectPluginRenderThreadSafety,0,kOfxImageEffectRenderFullySafe);prop->propSetInt(p,kOfxImageEffectPropSupportsTiles,0,1);prop->propSetInt(p,kOfxImageEffectPropSupportsMultiResolution,0,1);prop->propSetInt(p,kOfxImageEffectPluginPropHostFrameThreading,0,0);
+ auto p=properties(e);if(interact){OfxPluginEntryPoint *callback=overlayEntry;void *address=nullptr;static_assert(sizeof(callback)==sizeof(address));std::memcpy(&address,&callback,sizeof(address));prop->propSetPointer(p,kOfxImageEffectPluginPropOverlayInteractV1,0,address);}
+ prop->propSetString(p,kOfxPropLabel,0,"NegativeScan Studio OFX 0.90.4");prop->propSetString(p,kOfxImageEffectPluginPropGrouping,0,"NegativeScan Studio");prop->propSetString(p,kOfxImageEffectPropSupportedContexts,0,kOfxImageEffectContextFilter);prop->propSetString(p,kOfxImageEffectPropSupportedPixelDepths,0,kOfxBitDepthFloat);prop->propSetString(p,kOfxImageEffectPluginRenderThreadSafety,0,kOfxImageEffectRenderFullySafe);prop->propSetInt(p,kOfxImageEffectPropSupportsTiles,0,1);prop->propSetInt(p,kOfxImageEffectPropSupportsMultiResolution,0,1);prop->propSetInt(p,kOfxImageEffectPluginPropHostFrameThreading,0,0);
  prop->propSetString(p,kOfxImageEffectPropOpenCLRenderSupported,0,nss::CLApi::get().available?"true":"false");
  prop->propSetString(p,kOfxImageEffectPropOpenCLSupported,0,"false");
  prop->propSetString(p,kOfxImageEffectPropCudaRenderSupported,0,nss::CudaApi::get().available?"true":"false");
@@ -105,8 +110,9 @@ OfxStatus describeContext(OfxImageEffectHandle e) {
   OfxPropertySetHandle p;check(effect->clipDefine(e,name,&p));prop->propSetString(p,kOfxImageEffectPropSupportedComponents,0,kOfxImageComponentRGBA);prop->propSetInt(p,kOfxImageEffectPropSupportsTiles,0,1);
  }
  auto s=params(e);
- const char *groups[][2]={{"balance","Film base and balance"},{"metadata","Scan metadata"},{"camera","Camera calibration"},{"density","Density In"},{"positive","Positive Out"},{"render","Rendering"},{"graypick","Viewer gray / white pick"}};
- for(auto &g:groups)define(s,g[0],g[1],kOfxParamTypeGroup);
+ const char *groups[][2]={{"graypick","Viewer gray / white pick"},{"balance","Film base and balance"},{"metadata","Scan metadata"},{"camera","Camera calibration"},{"density","Density In"},{"positive","Positive Out"},{"render","Rendering"}};
+ for(auto &g:groups){auto gp=define(s,g[0],g[1],kOfxParamTypeGroup);if(std::strcmp(g[0],"graypick")==0)prop->propSetInt(gp,kOfxParamPropGroupOpen,0,1);}
+ auto armProps=boolDef(s,"pick_on_viewer","Pick gray on viewer",0,"graypick");prop->propSetInt(armProps,kOfxParamPropAnimates,0,0);prop->propSetInt(armProps,kOfxParamPropEvaluateOnChange,0,0);prop->propSetString(armProps,kOfxParamPropHint,0,"Select Open FX Overlay in the viewer, then click/drag a neutral patch. Click enables Auto gray and resets visible Base balances once.");
  boolDef(s,"pick_auto","Auto gray from point",0,"graypick");
  auto point=define(s,"pick_point","Gray / white point",kOfxParamTypeDouble2D,"graypick");
  prop->propSetString(point,kOfxParamPropDoubleType,0,kOfxParamDoubleTypeXYAbsolute);
@@ -134,7 +140,7 @@ OfxStatus describeContext(OfxImageEffectHandle e) {
   else boolDef(s,d.key,d.label,int(d.def),d.group);
  }
  auto page=define(s,"controls","Controls",kOfxParamTypePage);
- std::vector<std::string> children={"pick_auto","pick_point","pick_radius","stage","render_device","render_info","auto_metadata","metadata_file","load_metadata","metadata_status","camera_on","neutralise","camera_strength"};
+ std::vector<std::string> children={"pick_on_viewer","pick_auto","pick_point","pick_radius","stage","render_device","render_info","auto_metadata","metadata_file","load_metadata","metadata_status","camera_on","neutralise","camera_strength"};
  for(int i=0;i<9;i++)for(auto prefix:{"camera_","neutral_"})children.push_back(std::string(prefix)+std::to_string(i));
  for(auto key:{"stock","film_type","temperature"})children.push_back(key);
  for(auto &d:defs)children.push_back(d.key);
@@ -167,6 +173,7 @@ void syncReference(OfxImageEffectHandle e,OfxParamSetHandle s,double t){
  try{auto i=instance(e);auto path=stringParam(s,"metadata_file");if(path.empty())path=sourcePath(e,i);if(path.empty())return;Pipeline p;nss::applyMetadata(p,load(i,path));setD(s,"reference_base_r",p.density.base_r);setD(s,"reference_base_g",p.density.base_g);setD(s,"reference_base_b",p.density.base_b);setI(s,"camera_on",p.cameraOn);setD(s,"camera_strength",p.cameraStrength);setI(s,"neutralise",0);if(p.cameraOn)for(int a=0;a<9;a++){auto k="camera_"+std::to_string(a);setD(s,k.c_str(),p.camera[a]);}}
  catch(const std::exception &x){setS(s,"metadata_status",shortError(x));}
 }
+void clearPickedBalance(OfxParamSetHandle s){setI(s,"positive_film_wb",0);setD(s,"positive_bal_r",0);setD(s,"positive_bal_g",0);setD(s,"positive_bal_b",0);}
 OfxStatus changed(OfxImageEffectHandle e,OfxPropertySetHandle a) {
  if(str(a,kOfxPropChangeReason)!=kOfxChangeUserEdited)return kOfxStatReplyDefault;
  auto s=params(e);auto key=str(a,kOfxPropName);double time=0;prop->propGetDouble(a,kOfxPropTime,0,&time);
@@ -179,10 +186,11 @@ OfxStatus changed(OfxImageEffectHandle e,OfxPropertySetHandle a) {
   if(selected<0||selected>=int(sizeof(nss::filmBases)/sizeof(nss::filmBases[0])))throw kOfxStatErrValue;
   auto base=nss::filmBaseGains(selected);Edit edit(s,"Load film Base balance");
   setD(s,"positive_bal_r",base.r);setD(s,"positive_bal_g",base.g);setD(s,"positive_bal_b",base.b);
+ }else if(key=="pick_point"&&integer(s,"pick_on_viewer",time)&&!integer(s,"pick_auto",time)){
+  Edit edit(s,"Pick gray with host handle");clearPickedBalance(s);setI(s,"pick_auto",1);
  }else if(key=="pick_auto"&&integer(s,"pick_auto",time)){
   // A fresh neutral pick replaces Base balance, visibly; subsequent manual tweaks remain.
-  Edit edit(s,"Start picked gray balance");setI(s,"positive_film_wb",0);
-  setD(s,"positive_bal_r",0);setD(s,"positive_bal_g",0);setD(s,"positive_bal_b",0);
+  Edit edit(s,"Start picked gray balance");clearPickedBalance(s);
  }else if(key=="film_type"||key=="temperature"){
   Edit edit(s,"Film-base WB preset");syncReference(e,s,time);applyWB(s,time);
  }else if(key=="stock"){
@@ -207,6 +215,7 @@ OfxStatus changed(OfxImageEffectHandle e,OfxPropertySetHandle a) {
  }
  return kOfxStatOK;
 }
+#include "overlay.hpp"
 struct Image {
  OfxPropertySetHandle p=nullptr;float *data=nullptr;int row=0,bounds[4]{};
  ~Image(){if(p)effect->clipReleaseImage(p);}
@@ -298,6 +307,7 @@ OfxStatus entry(const char *action,const void *handle_,OfxPropertySetHandle in,O
    prop=static_cast<OfxPropertySuiteV1*>(const_cast<void*>(host->fetchSuite(host->host,kOfxPropertySuite,1)));
    effect=static_cast<OfxImageEffectSuiteV1*>(const_cast<void*>(host->fetchSuite(host->host,kOfxImageEffectSuite,1)));
    param=static_cast<OfxParameterSuiteV1*>(const_cast<void*>(host->fetchSuite(host->host,kOfxParameterSuite,1)));
+   interact=static_cast<OfxInteractSuiteV1*>(const_cast<void*>(host->fetchSuite(host->host,kOfxInteractSuite,1)));
    multithread=static_cast<OfxMultiThreadSuiteV1*>(const_cast<void*>(host->fetchSuite(host->host,kOfxMultiThreadSuite,1)));
    message=static_cast<OfxMessageSuiteV1*>(const_cast<void*>(host->fetchSuite(host->host,kOfxMessageSuite,1)));
    return prop&&effect&&param?kOfxStatOK:kOfxStatErrMissingHostFeature;
@@ -315,7 +325,7 @@ OfxStatus entry(const char *action,const void *handle_,OfxPropertySetHandle in,O
   return kOfxStatReplyDefault;
  }catch(OfxStatus s){return s;}catch(const std::bad_alloc &){return kOfxStatErrMemory;}catch(...){return kOfxStatFailed;}
 }
-OfxPlugin plugin={kOfxImageEffectPluginApi,1,"org.negativescanstudio.complete",0,9003,setHost,entry};
+OfxPlugin plugin={kOfxImageEffectPluginApi,1,"org.negativescanstudio.complete",0,9004,setHost,entry};
 }
 extern "C" {
 #ifdef _WIN32

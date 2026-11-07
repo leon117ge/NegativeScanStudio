@@ -1,6 +1,16 @@
-# NegativeScan Studio OFX 0.90.3
+# NegativeScan Studio OFX 0.90.4
 
-这是 **插件独立版本**（tag `ofx-v0.90.3`）；NSS Go app 仍为 v0.90，exe 未重建/改动。v0.90 已由用户在 Windows Resolve 加载试用；**0.90.3 CUDA/OpenCL 路径、viewer 控件尚未在真实 Resolve/物理 GPU 验收**。安装与双语说明：[ofx/README](../ofx/README.md)。
+这是 **插件独立版本**（tag `ofx-v0.90.4`）；NSS Go app 仍为 v0.90，exe 未重建/改动。v0.90 已由用户在 Windows Resolve 加载试用；**0.90.4 CUDA/OpenCL 路径、viewer 控件尚未在真实 Resolve/物理 GPU 验收**。安装与双语说明：[ofx/README](../ofx/README.md)。
+
+## 0.90.4：在画面直接点选灰白点
+
+新增OFX OverlayInteractV1（OpenGL1.x系统动态加载），首个Viewer gray / white pick组请求默认展开。**先选NSS节点/效果 → viewer左下角选择Open FX Overlay / FX → 勾Pick gray on viewer → 点击/拖动中性灰白区域**。Shift + ~ (tilde)可切换overlay显隐；Window/Transform/Wipe模式不分发本插件点击。
+
+十字保持屏幕像素大小，采样框按render scale/PAR换算。pen与pick_point均canonical XYAbsolute，不重复乘viewer zoom/render scale。首次点击启用Auto gray、可见Base/balances置None/0；Auto已启用时后续点击保留手动balance。选好可取消Pick gray on viewer，Auto仍在固定点逐帧工作；关闭Auto才回到手动gray codes。没有Bake/自动追踪。
+
+宿主OpenGL上下文仅用于绘制UI，不读framebuffer、不改变CPU/CUDA/OpenCL图像算法；push/pop恢复GL状态，不修改宿主矩阵/投影，不swap buffers。SlaveToParam触发参数变更重绘，click/drag成一组undo，PenUp/LoseFocus/异常结束编辑。保留原生2D handle/手填canonical X/Y作为fallback。真实Resolve的绘制、鼠标事件分发、HiDPI/代理/非方像素仍待验收。所有原有数值默认和app EXE均未变。
+
+参考：[OFX interact API](https://openfx.readthedocs.io/en/latest/Reference/api/file/ofxInteract_8h.html)、[Resolve onscreen controls手册章节（第三方镜像）](https://docs.imaster.org/davinci-resolve-21-manual/part-11-color-page-effects/ch.-151-using-open-fx-and-resolve-fx)。Resolve手册确认OpenFX onscreen controls/FX模式；这不代替本插件真机测试。
 
 ## 0.90.3：仅更新500T Base
 
@@ -26,11 +36,11 @@ Positive Out 保留 **Film white balance (None / 500T Base)**，是 loader，不
 
 ## Viewer 灰/白点
 
-1. 打开 `Auto gray from point`（可见balance复位0、Base下拉置None，开始新的中性校正），在 viewer 的原生 2D point handle 拖到实际中性灰/白参考；不能用任意有色物体。若宿主不显示 handle，可手填 canonical X/Y。默认点以 normalized .5/.5 声明，由宿主映射到画面中心。
+1. 按上节选择Open FX Overlay，勾Pick gray on viewer，在画面点击/拖动实际中性灰白参考。也可手动开启Auto gray from point，再用原生2D handle或手填canonical X/Y。不能用任意有色物体。默认点仍由normalized .5/.5映射到画面中心。
 2. `Sample radius (pixels)` 0–32，在 **当前 render 分辨率**上取方形 patch；图边裁切，跳过透明/非有限样本。请求 Source ROI 包含 patch，支持 nonzero bounds、render scale、PAR、premult。
 3. 每帧从 SOURCE 读样本，解 DI、应用当前 camera 与 Density In，平均得到进入 Positive Out 的密度 code（×1023）。只在 render 副本启用 `gray_on`/`gray_r/g/b`，沿用现有灰点公式使 R/B 相对 G 中性；不改 Film base，也不在render写动画 key、不改变曝光目标；之后仍可手动微调balance。
 4. CPU 直接读小 patch；OpenCL 用一次 `clEnqueueReadBufferRect` 阻塞下载小 patch，再用同样的密度算法。**仅开启 picker 时**产生这次小 readback/同步，默认关闭。不读整张 GPU 图，也不把 cl_mem 当 CPU pointer。
-5. 固定画面坐标、逐帧采样，**不是跟踪器**；移动主体、饱和白、纯黑/透明区、上游节点改变像素都会影响结果。点不在输入 bounds 或无有效像素时保留手动灰点；Show render engine 显示 `pick unavailable`。没有 bake 按钮/自绘 GL overlay，依赖宿主原生 point handle；Resolve 的实际 viewer 呈现仍待验收。
+5. 固定画面坐标、逐帧采样，**不是跟踪器**；移动主体、饱和白、纯黑/透明区、上游节点改变像素都会影响结果。点不在输入 bounds 或无有效像素时保留手动灰点；Show render engine 显示 `pick unavailable`。没有bake按钮；已实现自绘GL overlay并保留原生point fallback，Resolve实际viewer呈现/输入仍待验收。
 
 ## 数据契约
 
@@ -97,7 +107,8 @@ Auto 有效时 metadata 只覆盖 render 副本，UI 不跳动；没有/损坏 m
 ## 验证与性能
 
 - Go v0.90 writer fixture 真实写 TIFF，当前插件导入；classic/BigTIFF LE/BE、稀疏 >4GiB metadata offset、Unicode/quoted/file URL/BOM、实际旧156MB TIFF、坏 metadata 均测试。
-- 最小 OFX suite host 调用真实 Load/Describe/Create/Render/Changed/ROI/Destroy：负 row stride、非零 origin、alpha/premult、自动 metadata、立即 stock/gamma/base、反复 Load/切换不累乘、WB 正号、picker 中性化及越界 fallback。原生 viewer handle 外观未测。
+- 最小 OFX suite host 调用真实 Load/Describe/Create/Render/Changed/ROI/Destroy：负 row stride、非零 origin、alpha/premult、自动 metadata、立即 stock/gamma/base、反复 Load/切换不累乘、WB 正号、picker 中性化及越界 fallback。原生/custom viewer overlay外观未测。
+- Overlay host测试调用descriptor里的真实callback：Describe/Create/Draw/PenDown/Motion/Up/LoseFocus/Destroy，验证arm、canonical点位、首击Auto/可见balance复位、后续微调保留、RoD边界、GL命令几何/状态保护和render-scale/PAR。GL用记录mock，不是真实OpenGL/Resolve。
 - CPU 对独立 Go DCTL port：100组合×360像素×RGB =108000；旧Go隐藏WB关闭，用相同可见manual gains等效比较。最大绝对差 **9.16e-5**（HDR），实际 scan patch 最大 **6.10e-5**，scaled max **1.50e-6**。通过 `1e-5*max(1,abs(reference))`，不声称 HDR 绝对差均≤1e-5。[结果](data/ofx_0903_parity_result.json)。
 - 真实 OpenCL Render：164组合 +4个二维 picker/prepass 组合（0.90.2另验证双context program/kernel缓存），193536通道比较，最大绝对差 **2.10e-5**、scaled **9.93e-7**（相对 CPU）。[结果](data/ofx_0903_opencl_result.json)。不同 GPU 驱动仍需验收。
 - Windows x64 MinGW 静态 C++/gcc DLL 导出2个 OFX 入口，仅系统 KERNEL32/msvcrt imports；OpenCL.dll 是运行时加载，不是硬依赖。

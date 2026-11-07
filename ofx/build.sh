@@ -18,8 +18,8 @@ cp "$ROOT/ofx/tools/export_metadata.py" "$OUT/export_metadata.py"
 python3 - "$OUT" <<'PY'
 import pathlib,sys,zipfile
 out=pathlib.Path(sys.argv[1])
-with zipfile.ZipFile(out/'NegativeScanStudio_OFX_v0.90.3_Win64.zip','w',zipfile.ZIP_DEFLATED) as z:
+with zipfile.ZipFile(out/'NegativeScanStudio_OFX_v0.90.4_Win64.zip','w',zipfile.ZIP_DEFLATED) as z:
  for path in sorted(out.rglob('*')):
   if path.is_file() and path.suffix!='.zip':z.write(path,path.relative_to(out))
-print(out/'NegativeScanStudio_OFX_v0.90.3_Win64.zip')
+print(out/'NegativeScanStudio_OFX_v0.90.4_Win64.zip')
 PY

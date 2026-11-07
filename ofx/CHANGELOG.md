@@ -1,8 +1,15 @@
 # NegativeScan Studio OFX — Changelog
 
-Current plugin: **0.90.3** · [Plugin release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/ofx-v0.90.3) · [Scanning app changelog](../docs/CHANGELOG.md) · [Versioning policy](../docs/VERSIONING.md)
+Current plugin: **0.90.4** · [Plugin release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/ofx-v0.90.4) · [Scanning app changelog](../docs/CHANGELOG.md) · [Versioning policy](../docs/VERSIONING.md)
 
 Plugin releases are independent from the Windows scanning app. / 插件与扫描软件独立发版。
+
+## 0.90.4 — direct viewer gray picking
+
+- Add OFX OverlayInteractV1 with runtime-loaded OpenGL1.x: cyan/black crosshair and sample box, canonical click/drag, redraw and focus/undo lifecycle. Preserve host GL state and projection.
+- Move Viewer gray / white pick first and request it open. Arm **Pick gray on viewer**, select **Open FX Overlay / FX** in Resolve’s viewer, then click/drag a neutral patch. First click enables Auto gray and visibly resets Base balance; subsequent picks retain manual fine tuning. Disarm to prevent accidental re-picking.
+- Retain canonical XYAbsolute and host-native handle fallback; no GPU framebuffer sampling. Existing Source-patch sampling works with CPU/CUDA/OpenCL. All numeric defaults/app EXE remain unchanged.
+- Add host-side overlay click/drag/lifecycle and mocked GL geometry/state tests, including zoom/PAR/render-scale. Actual Windows Resolve/OpenGL appearance, input dispatch and physical GPU execution remain unverified.
 
 ## 0.90.3 — 500T Base eye-tuned patch
 
