@@ -1,13 +1,5 @@
-// Package lightlevel levels the film base with the RGB light: the camera
-// exposure stays fixed and only the light's R, G and B brightness change.
-// For each channel only that LED is lit, one frame is shot and the clear
-// film base is measured in the matching camera channel; the brightness is
-// scaled by target / measured and the round is repeated until every
-// channel is within tolerance.
-//
-// The camera is behind the Camera interface (Fujifilm X-T3 over USB today;
-// a monochrome industrial camera such as a Hikrobot MVS body can implement
-// it later), the light behind Light (rgblight.Client).
+// Package lightlevel levels a film base at fixed camera exposure using measured
+// channel responses, bounded secant steps and matrix-aware integer refinement.
 package lightlevel
 
 import (
@@ -19,6 +11,8 @@ import (
 	"math"
 	"sort"
 	"time"
+
+	"basetool/colorsci"
 )
 
 // Light is the part of the RGB light the leveling uses.
@@ -28,11 +22,11 @@ type Light interface {
 }
 
 // Image is one capture reduced to the channel that was lit, as a fraction
-// of the camera's raw full scale (black subtracted), on a coarse grid.
+// of linear TIFF full scale, on a fixed grid of actual demosaiced pixels.
 type Image struct {
 	W, H int
 	V    []float32
-	Clip []bool // cell contains a clipped photosite
+	Clip []bool // sampled pixel is near full scale (diagnostic)
 	Path string // file the frame came from ("" = none kept)
 }
 
@@ -41,15 +35,13 @@ type Camera interface {
 	// Name describes the camera and its fixed exposure for the log.
 	Name() string
 	// Mono reports a monochrome sensor (every pixel measures the lit
-	// channel); false = colour filter array (only the matching CFA colour
-	// is used).
+	// channel); false = a colour sensor with the matching converted channel.
 	Mono() bool
 	// Prepare sets / checks the fixed exposure once before the sequence.
 	// It must never change the exposure later.
 	Prepare() (string, error)
 	// Shoot captures a frame with only channel ch lit and returns that
-	// channel (CFA colour ch on a Bayer/X-Trans camera, all pixels on a
-	// mono camera).
+	// channel on the scan converter's linear scale (all pixels on a mono camera).
 	Shoot(ctx context.Context, ch int, prefix string) (*Image, error)
 }
 
@@ -66,21 +58,13 @@ var Centre = Rect{0.25, 0.25, 0.75, 0.75}
 type Params struct {
 	Target  float64       // base level, fraction of full scale (0.50 default)
 	Tol     float64       // relative tolerance (0.02 = ±2 %)
-	MaxIter int           // shooting rounds (default 4)
+	MaxIter int           // shooting rounds (default 10)
 	Settle  time.Duration // wait after switching the light before the shot (default 300 ms)
 	Area    Rect
 	Start   [3]int // starting brightness 1..100 per channel
-	// Targets (v0.85), when > 0, override Target per channel: used for a
-	// camera-profile pre-matrix base and the TIFF-box correction.
-	Targets [3]float64
-}
 
-// T is the target of channel c.
-func (p Params) T(c int) float64 {
-	if p.Targets[c] > 0 {
-		return p.Targets[c]
-	}
-	return p.Target
+	Matrix     colorsci.Mat3                 // known camera matrix blended by profile strength; zero = identity
+	SelectArea func([3]*Image) (Rect, error) // optional one-time auto selection
 }
 
 // Defaults fills zero fields.
@@ -92,13 +76,16 @@ func (p *Params) Defaults() {
 		p.Tol = 0.02
 	}
 	if p.MaxIter <= 0 {
-		p.MaxIter = 4
+		p.MaxIter = 10
 	}
 	if p.Settle <= 0 {
 		p.Settle = 300 * time.Millisecond
 	}
 	if p.Area.Empty() {
 		p.Area = Centre
+	}
+	if p.Matrix == (colorsci.Mat3{}) {
+		p.Matrix = colorsci.Identity
 	}
 	for i := range p.Start {
 		p.Start[i] = clampV(p.Start[i])
@@ -108,14 +95,15 @@ func (p *Params) Defaults() {
 // Reading is a measured channel.
 type Reading struct {
 	Level   float64 // median of the measure area, fraction of full scale
+	P90     float64
 	P99     float64
-	ClipPct float64 // % of cells with clipped photosites
+	ClipPct float64 // % of samples near full scale (diagnostic only)
 	Cells   int
 }
 
 // Measure reads the area of an image.
 func Measure(im *Image, a Rect) (Reading, error) {
-	if im == nil || im.W == 0 || im.H == 0 {
+	if im == nil || im.W <= 0 || im.H <= 0 || len(im.V) != im.W*im.H || (im.Clip != nil && len(im.Clip) != len(im.V)) {
 		return Reading{}, errors.New("empty image")
 	}
 	if a.Empty() {
@@ -130,7 +118,11 @@ func Measure(im *Image, a Rect) (Reading, error) {
 	for y := y0; y < y1; y++ {
 		for x := x0; x < x1; x++ {
 			i := y*im.W + x
-			v = append(v, float64(im.V[i]))
+			x := float64(im.V[i])
+			if math.IsNaN(x) || math.IsInf(x, 0) {
+				continue
+			}
+			v = append(v, x)
 			if im.Clip != nil && im.Clip[i] {
 				clip++
 			}
@@ -140,11 +132,12 @@ func Measure(im *Image, a Rect) (Reading, error) {
 		return Reading{}, errors.New("measure area is too small")
 	}
 	sort.Float64s(v)
-	return Reading{Level: v[len(v)/2], P99: v[len(v)*99/100], ClipPct: 100 * float64(clip) / float64(len(v)), Cells: len(v)}, nil
+	return Reading{Level: v[len(v)/2], P90: v[len(v)*9/10], P99: v[len(v)*99/100], ClipPct: 100 * float64(clip) / float64(len(v)), Cells: len(v)}, nil
 }
 
-// ClipLimit: more than this % of clipped cells makes a reading unusable.
-const ClipLimit = 1.0
+// BaseClipped requires a broadly saturated base, not isolated clipped photosites.
+// The near-full-scale sample percentage remains diagnostic only.
+func (r Reading) BaseClipped() bool { return r.Level >= .98 && r.P90 >= .995 }
 
 // Step is one shot.
 type Step struct {
@@ -160,7 +153,7 @@ type Step struct {
 func (s Step) String() string {
 	t := fmt.Sprintf("round %d %s at %d: base %.4f FS", s.Round, "RGB"[s.Channel:s.Channel+1], s.Value, s.Reading.Level)
 	if s.Reading.ClipPct > 0 {
-		t += fmt.Sprintf(" (%.1f%% clipped)", s.Reading.ClipPct)
+		t += fmt.Sprintf(" (%.1f%% near-FS samples)", s.Reading.ClipPct)
 	}
 	if s.OK && s.Note == "" {
 		t += " - within tolerance"
@@ -177,31 +170,45 @@ func (s Step) String() string {
 type Result struct {
 	Values    [3]int     // final brightness
 	Readings  [3]float64 // last measured base per channel
-	Done      [3]bool    // within tolerance (or the closest 1-step value)
+	Done      [3]bool    // final after-matrix channels within the requested tolerance
 	Limited   [3]bool    // would need more than 100
-	Needed    [3]float64 // brightness the last reading asks for (unclamped)
+	Needed    [3]float64 // proportional estimate only, never a measured code
+	Boundary  [3]float64 // actual reading at the unreachable bound
 	TooBright [3]bool    // still above target at brightness 1
 	Images    [3]*Image
 	Rounds    int
 	Steps     []Step
 	Camera    string
+	Post      [3]float64
+	Verified  bool // a fresh full R/G/B capture, never cached prediction
+	Captured  [3]bool
+	Reason    string
+	Area      Rect
 }
 
 // Converged reports all three channels within tolerance.
-func (r Result) Converged() bool { return r.Done[0] && r.Done[1] && r.Done[2] }
+func (r Result) Converged() bool { return r.Verified && r.Done[0] && r.Done[1] && r.Done[2] }
 
 // Problems lists what the user must act on.
 func (r Result) Problems() []string {
 	var p []string
+	if r.Converged() {
+		return nil
+	}
+	if r.Reason != "" {
+		p = append(p, r.Reason)
+	}
 	for c := 0; c < 3; c++ {
 		n := "RGB"[c : c+1]
 		switch {
 		case r.Limited[c]:
-			p = append(p, fmt.Sprintf("%s would need brightness %.0f (max 100): base %.3f FS at 100", n, r.Needed[c], r.Readings[c]))
+			p = append(p, fmt.Sprintf("%s too dark at brightness 100 (base %.5f FS); increase camera exposure", n, r.Boundary[c]))
 		case r.TooBright[c]:
-			p = append(p, fmt.Sprintf("%s is still above target at brightness 1 (base %.3f FS)", n, r.Readings[c]))
+			p = append(p, fmt.Sprintf("%s too bright at brightness 1 (base %.5f FS); reduce camera exposure", n, r.Boundary[c]))
+		case !r.Captured[c]:
+			p = append(p, n+" has no measured frame")
 		case !r.Done[c]:
-			p = append(p, fmt.Sprintf("%s not within tolerance after %d rounds (base %.3f FS at %d)", n, r.Rounds, r.Readings[c], r.Values[c]))
+			p = append(p, fmt.Sprintf("%s after-profile base %.5f FS at %d (not within tolerance)", n, r.Post[c], r.Values[c]))
 		}
 	}
 	return p
@@ -215,104 +222,6 @@ func clampV(v int) int {
 		return 100
 	}
 	return v
-}
-
-// Run levels the three channels. progress (may be nil) gets each step and
-// status line. The light is left with the final values and the enables in
-// restore (normally the state before the run).
-func Run(ctx context.Context, l Light, cam Camera, p Params, restore [3]bool, progress func(string)) (Result, error) {
-	p.Defaults()
-	say := func(f string, a ...any) {
-		if progress != nil {
-			progress(fmt.Sprintf(f, a...))
-		}
-	}
-	res := Result{Values: p.Start, Camera: cam.Name()}
-	exp, err := cam.Prepare()
-	if err != nil {
-		return res, fmt.Errorf("camera: %w", err)
-	}
-	say("Fixed camera exposure: %s (not changed during leveling)", exp)
-	// the light is restored to the final values with the original enables,
-	// also after an error or cancel
-	defer func() {
-		if err := l.SetAll(restore, res.Values); err != nil {
-			say("Could not restore the light: %v", err)
-		}
-	}()
-	for round := 1; round <= p.MaxIter; round++ {
-		res.Rounds = round
-		todo := false
-		for c := 0; c < 3; c++ {
-			if res.Done[c] || res.Limited[c] || res.TooBright[c] {
-				continue
-			}
-			todo = true
-			if err := ctx.Err(); err != nil {
-				return res, err
-			}
-			var on [3]bool
-			on[c] = true
-			if err := l.SetAll(on, res.Values); err != nil {
-				return res, fmt.Errorf("light: %w", err)
-			}
-			select {
-			case <-ctx.Done():
-				return res, ctx.Err()
-			case <-time.After(p.Settle):
-			}
-			im, err := cam.Shoot(ctx, c, fmt.Sprintf("light_%c%d_", "RGB"[c], round))
-			if err != nil {
-				return res, fmt.Errorf("%c capture: %w", "RGB"[c], err)
-			}
-			res.Images[c] = im
-			rd, err := Measure(im, p.Area)
-			if err != nil {
-				return res, fmt.Errorf("%c: %w", "RGB"[c], err)
-			}
-			st := Step{Round: round, Channel: c, Value: res.Values[c], Reading: rd}
-			res.Readings[c] = rd.Level
-			cur := float64(res.Values[c])
-			switch {
-			case rd.ClipPct > ClipLimit:
-				st.Next = clampV(res.Values[c] / 2)
-				st.Note = "clipped, halving"
-				res.Needed[c] = cur / 2
-			case rd.Level < 0.002:
-				st.Next = clampV(res.Values[c] * 4)
-				st.Note = "almost no signal"
-				res.Needed[c] = cur * 4
-			default:
-				res.Needed[c] = cur * p.T(c) / rd.Level
-				st.Next = clampV(int(math.Round(res.Needed[c])))
-				switch {
-				case math.Abs(rd.Level/p.T(c)-1) <= p.Tol:
-					st.OK, st.Next = true, res.Values[c]
-				case res.Values[c] == 100 && res.Needed[c] > 100:
-					res.Limited[c] = true
-					st.Note = "needs more than 100"
-				case res.Values[c] == 1 && res.Needed[c] < 1:
-					res.TooBright[c] = true
-					st.Note = "too bright even at 1"
-				case st.Next == res.Values[c]:
-					st.OK = true
-					st.Note = "closest brightness step"
-				}
-			}
-			res.Done[c] = st.OK
-			res.Values[c] = st.Next
-			res.Steps = append(res.Steps, st)
-			say("%s", st)
-		}
-		if !todo {
-			res.Rounds = round - 1
-			break
-		}
-		if res.Converged() {
-			break
-		}
-	}
-	return res, nil
 }
 
 // Composite builds a colour preview from the three channel captures, each

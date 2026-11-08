@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"basetool/hdrscan"
+	"basetool/lightlevel"
+	"basetool/scanmeta"
 )
 
 // Base uses linear full-scale units (not preview/JPEG values or light percentages).
@@ -68,4 +70,63 @@ func appendLevelingLog(path string, r levelingRecord) error {
 		return err
 	}
 	return f.Close()
+}
+
+// Failed attempts have a separate schema; existing successful CSVs remain valid.
+// Blank fields explicitly mean no frame was captured, never a measured zero.
+func appendLevelingFailure(path string, r levelingRecord, result lightlevel.Result, target, tol float64, reason string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	w := csv.NewWriter(f)
+	w.UseCRLF = true
+	if st.Size() == 0 {
+		if err = w.Write([]string{"time_Asia_Shanghai", "version", "mode", "box_x0", "box_y0", "box_x1", "box_y1", "light_R", "light_G", "light_B", "base_R", "base_G", "base_B", "camera_profile", "reason", "rounds", "target_FS", "relative_tolerance", "final_RGB_captured"}); err != nil {
+			return err
+		}
+	}
+	row := []string{r.Time.In(time.FixedZone("Asia/Shanghai", 8*3600)).Format(time.RFC3339), r.Version, r.Mode}
+	for _, v := range []float64{r.Box.X0, r.Box.Y0, r.Box.X1, r.Box.Y1} {
+		row = append(row, strconv.FormatFloat(v, 'f', 6, 64))
+	}
+	for c, v := range r.Values {
+		value := ""
+		if result.Captured[c] {
+			value = strconv.Itoa(v)
+		}
+		row = append(row, value)
+	}
+	for _, v := range r.Base {
+		value := ""
+		if result.Captured == [3]bool{true, true, true} {
+			value = strconv.FormatFloat(v, 'f', 8, 64)
+		}
+		row = append(row, value)
+	}
+	row = append(row, r.Profile, reason, strconv.Itoa(result.Rounds), strconv.FormatFloat(target, 'f', 5, 64), strconv.FormatFloat(tol, 'f', 5, 64), strconv.FormatBool(result.Verified))
+	if err = w.Write(row); err != nil {
+		return err
+	}
+	w.Flush()
+	if err = w.Error(); err != nil {
+		return err
+	}
+	return f.Close()
+}
+
+// Only an accepted measured record can replace the last metadata reference.
+func acceptedLeveling(previous *scanmeta.Leveling, r *levelingRecord) *scanmeta.Leveling {
+	if r == nil || !r.Measured {
+		return previous
+	}
+	return &scanmeta.Leveling{Base: r.Base, Values: r.Values, At: r.Time.Format(time.RFC3339)}
 }

@@ -4,17 +4,17 @@
 
 | Product | Current version | Download / release | Documentation |
 |---|---|---|---|
-| **NegativeScan Studio** — scanning app | **v0.91** | [App release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/v0.91) · [Windows x64 EXE](https://github.com/leon117ge/NegativeScanStudio/releases/download/v0.91/NegativeScanStudio_v0.91.exe) | [Hardware](docs/HARDWARE.md) · [App changelog](docs/CHANGELOG.md) · [App roadmap](docs/ROADMAP.md) |
+| **NegativeScan Studio** — scanning app | **v0.92 local test** | [App release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/v0.91) · [Windows x64 EXE](https://github.com/leon117ge/NegativeScanStudio/releases/download/v0.91/NegativeScanStudio_v0.91.exe) | [Hardware](docs/HARDWARE.md) · [App changelog](docs/CHANGELOG.md) · [App roadmap](docs/ROADMAP.md) |
 | **NegativeScan Studio OFX** — Resolve plugin | **0.90.6** | [Plugin release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/ofx-v0.90.6) · [Windows x64 ZIP](https://github.com/leon117ge/NegativeScanStudio/releases/download/ofx-v0.90.6/NegativeScanStudio_OFX_v0.90.6_Win64.zip) | [Install / usage](ofx/README.md) · [Plugin changelog](ofx/CHANGELOG.md) · [Plugin roadmap](ofx/ROADMAP.md) |
 
-Both current releases are **prereleases**. Download the EXE for scanning, the OFX ZIP for Resolve, or both. The old OFX ZIP on the app v0.90 release is retained as history; use the separate plugin release above for the current plugin.
+App v0.92 is a local hardware-test build, not a published release. The links above still download app v0.91 and OFX 0.90.6. Both published releases are **prereleases**. Download the EXE for scanning, the OFX ZIP for Resolve, or both. The old OFX ZIP on the app v0.90 release is retained as history; use the separate plugin release above for the current plugin.
 
 ## 1. NegativeScan Studio — Windows scanning app
 
 Camera-scanning/capture software written in Go with a [walk](https://github.com/lxn/walk) desktop GUI. The current hardware workflow targets a Fujifilm X-T3 and CuteNewDesign RGB Light Air; see [hardware support and limits](docs/HARDWARE.md).
 
 - Tethered camera control (PTP/WPD), live-view film-base selection and RGB-light control.
-- Film-base metering and closed-loop light leveling; scanning configuration and film-base presets.
+- Film-base metering and light leveling with 10 default solve rounds, measured response slopes, matrix-aware integer refinement, and fresh verification. [Algorithm and limits](docs/LIGHT_LEVELING.md).
 - HDR/bracketed capture, trichrome/RGB-light capture and merge, linear RAW-to-TIFF conversion through LibRaw.
 - Crop, merge, hair/dust removal, camera-matrix calibration, Develop preview. The app UI, prompts, and log messages are English only.
 - HDR/trichrome TIFFs carry `nss.scan/1` provenance. The default-on **Film base for metadata: Last leveling (after profile)** option writes the accepted Light-page result and displays its RGB and time. It never re-measures the scene as film base.
@@ -22,7 +22,7 @@ Camera-scanning/capture software written in Go with a [walk](https://github.com/
 
 **Use:** download `NegativeScanStudio_v0.91.exe` from the app release and run on Windows x64 with the appropriate camera/light setup. This is the capture app, not a Resolve plugin. App and plugin updates are independent.
 
-[Design](docs/DESIGN.md) · [Algorithms](docs/ALGORITHMS.md) · [500T Develop preview](docs/500T_USAGE.md) · [v0.91 verification](docs/QA_v0.91.md)
+[Design](docs/DESIGN.md) · [Algorithms](docs/ALGORITHMS.md) · [500T Develop preview](docs/500T_USAGE.md) · [v0.92 verification](docs/QA_v0.92.md)
 
 ## 2. NegativeScan Studio OFX — DaVinci Resolve plugin
 

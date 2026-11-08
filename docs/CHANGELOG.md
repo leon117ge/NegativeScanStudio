@@ -1,8 +1,22 @@
 # NegativeScan Studio app — Changelog / 扫描软件更新日志
 
-Current app: **v0.91** · [App release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/v0.91) · [OFX plugin changelog](../ofx/CHANGELOG.md) · [Versioning policy](VERSIONING.md)
+Current local test app: **v0.92**, not published. Latest published app: **v0.91** · [App release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/v0.91) · [OFX plugin changelog](../ofx/CHANGELOG.md) · [Versioning policy](VERSIONING.md)
 
 This file tracks the scanning app, not plugin-only releases. / 本文件只记录扫描软件。
+
+## v0.92 local test build
+
+- Replace the proportional-only light loop with measured secant slopes, bounded steps, repeated-code detection, and bracketed bisection. Use the known camera matrix with the measured responses.
+- Use the same linear conversion, sampled pixels, locked rectangle, and median for control and TIFF verification. Ignore isolated clipped samples when the film base itself is not saturated.
+- Default to 10 solve rounds. Migrate the legacy four-round default once without overwriting other chosen limits.
+- Measure neighbouring integer codes and compare cached RGB combinations in after-profile space. Track the best measured combination separately from the next trial.
+- Require fresh full R/G/B verification and retain the final TIFF check with one corrective pass. A result outside the default 0.49 to 0.51 interval is not LEVELLED.
+- Report unreachable bounds and closest measured results. Append failed or stopped attempts to `leveling_failures.csv`.
+- Preserve the previous accepted metadata base after a failed run. Only a successful measured run replaces it.
+- Add regression tests for clipping bounce, integer limits, nonlinear response, noise, bad starts, unreachable channels, matrix coupling, final drift, identical TIFF statistics, and failed-run logs.
+- Build locally for hardware testing. No v0.92 tag, push, or release yet. OFX stays at 0.90.6 with no plugin source changes.
+
+See [leveling algorithm and limits](LIGHT_LEVELING.md) and [verification](QA_v0.92.md).
 
 ## v0.91
 

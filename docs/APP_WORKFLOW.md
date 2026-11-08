@@ -1,4 +1,4 @@
-# App v0.91 workflow reference
+# App v0.92 local-test workflow reference
 
 The app has four modules. Resolve conversion belongs to the independently versioned OFX plugin.
 
@@ -9,6 +9,14 @@ Camera connection, live view, clear-base metering, RGB light control, and auto f
 **Chart calibration...** is on the Camera page. It fits and saves a camera/light profile from a transmission chart. The profile remains available for leveling. The profile is recorded as pending metadata, not baked into scan TIFF pixels. Calibration DCTL export is removed.
 
 The Light page's minimal 500T illuminant calculator sends offsets only to Develop. It has no global export setting or DCTL-only saved-stock list.
+
+## Light leveling in v0.92
+
+The default solve limit is 10 rounds. Rectangle keeps the selected clear-base patch throughout control and TIFF verification. The solver uses measured response slopes, bounded updates, and an integer neighbour search. It always captures a fresh final R/G/B set.
+
+The default after-profile acceptance interval is 0.49 to 0.51 in each channel. A result outside tolerance displays `NOT LEVELLED` and a reason. Code 1 or 100 range limits report the exposure change needed. Failed or stopped runs append to `leveling_failures.csv` and do not replace the previous accepted metadata reference. The previous reference still requires matching light values.
+
+Neighbour refinement and verification are separate bounded phases after coarse solving. Real-camera frames use the linear converter for consistent measurement, so this build may take longer. [Algorithm and limits](LIGHT_LEVELING.md).
 
 ## HDR Scan
 
@@ -26,7 +34,7 @@ cannot recover a timestamp that was never saved.
 
 Normal captures do not measure the merged image to obtain Film base. The
 explicit Light-page leveling verification still measures its calibration TIFFs.
-Turning the option off omits `film_base`. Missing, invalid, failed, or mismatched
+Turning the option off omits `film_base`. Missing, invalid, or mismatched
 lamp-drive references also omit it. There is no scene-content or fixed-0.5 fallback.
 Re-level after changing the roll, exposure, camera profile, or optical setup.
 
@@ -34,7 +42,7 @@ TIFF ImageDescription tag 270 keeps `nss.scan/1` JSON. App v0.91 writes the
 accepted normalized base unchanged, with `base_source: "light leveling (after profile)"`
 and additive `film_base_space: "after_profile"`. Lamp drive remains separate in
 `light_rgb`. A pending camera matrix is not marked baked into TIFF pixels.
-Use independent OFX 0.90.5 for these new references. The plugin does not apply
+Use independent OFX 0.90.5 or newer for these references. The current plugin remains 0.90.6. The plugin does not apply
 the matrix to an after-profile base twice, but still applies it to pending pixels.
 Unmarked legacy metadata retains its pre-profile meaning. Existing TIFFs are not repaired.
 
@@ -52,6 +60,6 @@ The retired DCTL page's file measurement/preset editor, WB export editor, Mask &
 
 Built-in app labels, tooltips, dialogs, status messages, logs, and defaults use English. User-entered roll/preset names, imported metadata, paths, operating-system dialogs, and device-provided errors can contain other languages. The app does not rename user data or change metadata to enforce English.
 
-The Windows GUI and real camera/light interaction still need hardware acceptance. See [verification](QA_v0.91.md).
+The Windows GUI and real camera/light interaction still need hardware acceptance. See [verification](QA_v0.92.md).
 
 The root `template.dctl` and `template_core.dctl` remain unchanged as inputs to `ofx/tools/generate.py`. They are not app assets or app export features. Removing them would break OFX regeneration, so app-only cleanup does not delete them.

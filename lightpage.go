@@ -23,7 +23,6 @@ import (
 	"basetool/filmdb"
 	"basetool/hdrscan"
 	"basetool/lightlevel"
-	"basetool/rawconv"
 	"basetool/rgblight"
 	"basetool/scanconfig"
 	"basetool/scanmeta"
@@ -49,6 +48,7 @@ type lightConfig struct {
 	ISO             int                `json:"iso"`    // index into isoVals
 	Target          int                `json:"target"` // index into targetVals
 	Tol             float64            `json:"tol_pct"`
+	SolverVersion   int                `json:"solver_version,omitempty"`
 	MaxIter         int                `json:"max_iter"`
 	SettleMS        int                `json:"settle_ms"`
 	Area            lightlevel.Rect    `json:"area"`
@@ -62,7 +62,7 @@ type lightConfig struct {
 func lightConfigFile() string { return filepath.Join(configDir(), "rgb_light.json") }
 
 func loadLightConfig(isoIdx int) lightConfig {
-	c := lightConfig{UseLastLeveling: true, Values: [3]int{50, 50, 50}, ISO: isoIdx, Target: 0, Tol: 2, MaxIter: 4, SettleMS: 300, Area: lightlevel.Centre, AutoLoad: true}
+	c := lightConfig{UseLastLeveling: true, Values: [3]int{50, 50, 50}, ISO: isoIdx, Target: 0, Tol: 2, MaxIter: 10, SettleMS: 300, Area: lightlevel.Centre, AutoLoad: true}
 	if b, err := os.ReadFile(lightConfigFile()); err == nil {
 		json.Unmarshal(b, &c)
 	}
@@ -80,8 +80,12 @@ func loadLightConfig(isoIdx int) lightConfig {
 	if c.Tol <= 0 || c.Tol > 20 {
 		c.Tol = 2
 	}
+	if c.SolverVersion == 0 && c.MaxIter == 4 {
+		c.MaxIter = 10
+	}
+	c.SolverVersion = 92
 	if c.MaxIter < 1 || c.MaxIter > 10 {
-		c.MaxIter = 4
+		c.MaxIter = 10
 	}
 	if c.SettleMS < 0 || c.SettleMS > 5000 {
 		c.SettleMS = 300
@@ -677,16 +681,18 @@ func (x *xt3Camera) Shoot(ctx context.Context, ch int, prefix string) (*lightlev
 	if err != nil {
 		return nil, err
 	}
-	f, err := rawconv.ReadRawFrame(p)
+	f, err := hdrscan.Load(p)
 	if err != nil {
-		return nil, fmt.Errorf("%s is not a readable RAW (set RAW or RAW+JPEG): %w", filepath.Base(p), err)
+		return nil, fmt.Errorf("%s is not a readable linear RAW: %w", filepath.Base(p), err)
 	}
-	w, h, v, cl := f.ChannelPlane(ch, 16)
+	defer f.Free()
+	im := hdrscan.LevelingImage(f, ch)
+	im.Path = p
 	if x.last[ch] != "" && x.last[ch] != p {
 		os.Remove(x.last[ch]) // keep only the latest frame per channel
 	}
 	x.last[ch] = p
-	return &lightlevel.Image{W: w, H: h, V: v, Clip: cl, Path: p}, nil
+	return im, nil
 }
 
 func (u *LightUI) params() (lightlevel.Params, error) {
@@ -722,7 +728,7 @@ func (u *LightUI) params() (lightlevel.Params, error) {
 		return p, err
 	}
 	if pl.on {
-		pr.Targets = pl.pre
+		pr.Matrix = pl.m.Lerp(pl.k)
 	}
 	u.lastPlan = pl
 	return pr, nil
@@ -791,10 +797,12 @@ func (u *LightUI) startLevel() {
 		h.busy = true
 		h.updateButtons()
 	}
+	if baseNorm.Empty() {
+		p.SelectArea = hdrscan.FindLevelingArea
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	u.cancel = cancel
 	u.lastSuccess = nil
-	u.cfg.Leveling = nil
 	u.saveCfg()
 	u.busy, u.level = true, true
 	u.lastTgt = p.Target
@@ -804,10 +812,10 @@ func (u *LightUI) startLevel() {
 		p.Target, p.Tol*100, p.MaxIter, p.Settle, p.Start[0], p.Start[1], p.Start[2])
 	u.log("Camera: %s", cam.Name())
 	if !baseNorm.Empty() {
-		u.log("Film base: manual rectangle %.0f-%.0f%% x %.0f-%.0f%% (RAW measure and TIFF check; not the auto cluster).",
+		u.log("Film base: manual rectangle %.0f-%.0f%% x %.0f-%.0f%% (fixed samples and median for control and TIFF check).",
 			baseNorm.X0*100, baseNorm.X1*100, baseNorm.Y0*100, baseNorm.Y1*100)
 	} else {
-		u.log("Film base: auto-detect in the trichrome TIFF (rebate / gaps / sprocket area). RAW measure uses the centre 50%% box. Choose Rectangle and drag a small patch if that cluster is too large.")
+		u.log("Film base: detect once from the initial RGB captures, then lock the same rectangle for control and TIFF check.")
 	}
 	pl := u.lastPlan
 	if pl.on {
@@ -815,7 +823,6 @@ func (u *LightUI) startLevel() {
 	} else {
 		u.log("Apply camera profile: off (or no profile enabled) - target %.2f in the plain trichrome TIFF.", pl.want)
 	}
-	leak := h.leak()
 	sess := h.sess
 	fixedSh := h.fixedShutter()
 	worker.do(func() {
@@ -834,12 +841,16 @@ func (u *LightUI) startLevel() {
 		// v0.85: check in the real trichrome TIFF (same converter and
 		// clear-base box as Density_In's auto base), one corrective pass
 		post, inTIFF := pl.post(res.Readings), false
+		if !res.Area.Empty() {
+			baseNorm = toScanRect(res.Area)
+		}
 		if x, ok := cam.(*xt3Camera); ok && err == nil && res.Converged() {
 			for pass := 0; pass < 2; pass++ {
 				u.log("TIFF check %d: converting the last R/G/B leveling RAWs with the trichrome scan pipeline ...", pass+1)
-				base, n, verr := tiffBase(ctx, x.last, tmpDir, leak, baseNorm)
+				base, n, verr := tiffBase(ctx, x.last, tmpDir, baseNorm)
 				if verr != nil {
-					u.log("TIFF check not possible: %v - the result below is the leveling-box reading.", verr)
+					err = fmt.Errorf("final TIFF verification unavailable: %w; no new base accepted", verr)
+					u.log("%v", err)
 					break
 				}
 				post, inTIFF = pl.post(base), true
@@ -850,10 +861,8 @@ func (u *LightUI) startLevel() {
 				}
 				p2 := p
 				p2.Start = res.Values
-				for ch := 0; ch < 3; ch++ {
-					p2.Targets[ch] = res.Readings[ch] * pl.pre[ch] / base[ch]
-				}
-				u.log("Correcting: the leveling box reads %s where the TIFF base box reads %s - new box targets %s.", f3(res.Readings), f3(base), f3(p2.Targets))
+				p2.Area, p2.SelectArea = res.Area, nil
+				u.log("Correcting: fresh measured-response pass after TIFF verification; same locked pixels, statistic and after-profile target.")
 				r2, e2 := lightlevel.Run(ctx, busyOnceLight{c}, cam, p2, restore, func(s string) { u.log("%s", s) })
 				res, err = r2, e2
 				post, inTIFF = pl.post(res.Readings), false
@@ -863,7 +872,7 @@ func (u *LightUI) startLevel() {
 			}
 		}
 		if err == nil && res.Converged() && inTIFF && pl.worstDev(post) > p.Tol {
-			err = fmt.Errorf("final TIFF base is still %.2f%% from target (tolerance %.2f%%); no measured base accepted", 100*pl.worstDev(post), 100*p.Tol)
+			err = fmt.Errorf("closest reachable: final TIFF base is still %.2f%% from target (tolerance %.2f%%); no new base accepted", 100*pl.worstDev(post), 100*p.Tol)
 		}
 		if err == nil && ctx.Err() != nil {
 			err = ctx.Err()
@@ -878,8 +887,8 @@ func (u *LightUI) startLevel() {
 		}
 		var record *levelingRecord
 		if err == nil && res.Converged() {
-			mode, source := "Auto", "RAW estimate (TIFF check unavailable)"
-			if !baseNorm.Empty() {
+			mode, source := "Auto", "Control verification"
+			if p.SelectArea == nil {
 				mode = "Rectangle"
 			}
 			if inTIFF {
@@ -892,6 +901,21 @@ func (u *LightUI) startLevel() {
 				Values: res.Values, Base: post, Profile: pl.label(), Source: source, Measured: inTIFF || !realCam}
 			if e := appendLevelingLog(filepath.Join(configDir(), "leveling_log.csv"), *record); e != nil {
 				u.log("WARNING: leveling_log.csv could not be appended: %v", e)
+			}
+		}
+		if record == nil {
+			why := strings.Join(res.Problems(), "; ")
+			if err != nil {
+				why = err.Error()
+			}
+			attempt := levelingRecord{Time: time.Now(), Version: appVersion, Mode: "Rectangle", Box: baseNorm, Values: res.Values, Base: post, Profile: pl.label(), Source: "Failed or incomplete verification"}
+			if p.SelectArea != nil {
+				attempt.Mode = "Auto"
+			}
+			if e := appendLevelingFailure(filepath.Join(configDir(), "leveling_failures.csv"), attempt, res, p.Target, p.Tol, why); e != nil {
+				u.log("WARNING: leveling_failures.csv could not be appended: %v", e)
+			} else {
+				u.log("Failed attempt recorded in leveling_failures.csv: %s", why)
 			}
 		}
 		var exp camera.Exposure
@@ -918,8 +942,8 @@ func (u *LightUI) startLevel() {
 			}
 			u.lastPost, u.lastTIFF = post, inTIFF
 			u.lastSuccess = record
+			u.cfg.Leveling = acceptedLeveling(u.cfg.Leveling, record)
 			if record != nil {
-				u.cfg.Leveling = &scanmeta.Leveling{Base: post, Values: res.Values, At: record.Time.Format(time.RFC3339)}
 				u.cfg.Values = res.Values
 			}
 			u.saveCfg()
@@ -928,7 +952,7 @@ func (u *LightUI) startLevel() {
 				// v0.82: hand the levelled light + exposure to the frame-0 lock
 				h.takeHandoff(baseHandoff{ISO: exp.ISO, Shutter: exp.Shutter, Values: res.Values, Source: "RGB light leveling " + time.Now().Format("15:04:05")})
 			} else if released {
-				h.say("Light levelled on the Light page - frame 0 lock released, meter the base again.")
+				h.say("Light changed on the Light page - no new base accepted; frame 0 lock released, meter the base again.")
 			}
 			h.updateButtons()
 			u.updateButtons()
@@ -982,9 +1006,7 @@ func (u *LightUI) showResult(res lightlevel.Result, err error, exp camera.Exposu
 	}
 	setLightStatusN(3, u.resLbl, t)
 	u.log("Result: %s (%s)", t, pl.label())
-	if res.Converged() && u.lastSuccess != nil && !u.lastSuccess.Measured {
-		u.log("TIFF verification is unavailable: the saved after-profile leveling uses the RAW estimate. Check the conversion log and level again if needed.")
-	}
+
 	u.updateButtons()
 	limited := res.Limited[0] || res.Limited[1] || res.Limited[2]
 	if limited || res.TooBright[0] || res.TooBright[1] || res.TooBright[2] {
@@ -1027,15 +1049,7 @@ func (u *LightUI) setImages(im [3]*lightlevel.Image, target float64, res lightle
 }
 
 // valueShot is the brightness of the channel's last capture.
-func valueShot(r lightlevel.Result, ch int) int {
-	v := r.Values[ch]
-	for _, s := range r.Steps {
-		if s.Channel == ch {
-			v = s.Value
-		}
-	}
-	return v
-}
+func valueShot(r lightlevel.Result, ch int) int { return r.Values[ch] }
 
 func (u *LightUI) setBmp(dst **walk.Bitmap, img image.Image) {
 	b, err := walk.NewBitmapFromImage(img)
@@ -1309,13 +1323,13 @@ func (u *LightUI) Page() TabPage {
 							}},
 							Label{Text: "Film base", MinSize: Size{Width: 96}},
 							ComboBox{AssignTo: &u.areaCB, Model: []string{"Auto: find the base (rebate, gaps, sprocket area)", "Rectangle drawn on the image"}, CurrentIndex: u.cfg.AreaMode, OnCurrentIndexChanged: u.areaModeChanged,
-								ToolTipText: "Auto measures the detected rebate / gap / sprocket cluster in the trichrome TIFF - that area can be large.\nRectangle: drag a small patch of clear film base on the preview (or on Camera live view), the same orange box as white-light metering.\nLeveling then reads only that patch for the RAW measure and the TIFF check."},
+								ToolTipText: "Auto detects a base region once from the initial RGB captures, then locks it.\nRectangle: drag a small patch of clear film base on the preview or Camera live view.\nControl and the final TIFF check use the same sampled pixels and median."},
 							Label{Text: "Camera profile", MinSize: Size{Width: 96}},
 							CheckBox{AssignTo: &u.camCB, Text: "Apply camera profile (base after the matrix)", Checked: !u.cfg.NoCam,
-								ToolTipText: "v0.85: with a camera profile enabled (Chart calibration), leveling aims at the film base AFTER the CameraCal matrix,\nso the film-base reference can stay at 0.5/0.5/0.5. After leveling the last R/G/B RAWs go through the real trichrome\nTIFF converter and clear-base measurement; if that base is off by more than the tolerance, one corrective pass runs."},
+								ToolTipText: "v0.85: with a camera profile enabled (Chart calibration), leveling aims at the film base AFTER the CameraCal matrix,\nso the film-base reference can stay at 0.5/0.5/0.5. Measured slopes and an integer neighbour search use that matrix.\nFresh R/G/B captures and a TIFF check must both pass; failed runs never replace the saved base."},
 							Composite{ColumnSpan: 2, Layout: HBox{MarginsZero: true, Spacing: 4}, Children: []Widget{
 								PushButton{AssignTo: &u.startBtn, Text: "Start leveling", Enabled: false, Font: bold, MinSize: Size{Height: 26}, OnClicked: u.startLevel,
-									ToolTipText: "For R, G and B in turn: only that channel on, wait the settle time, shoot one RAW at the fixed exposure and measure the base\nin that colour channel; brightness = current x target / measured, repeated until all three are within tolerance.\nFilm base: Auto (large detected cluster) or a rectangle you drag on the preview / Camera live view."},
+									ToolTipText: "Fixed exposure. Measure each channel response, use bounded secant / bisection steps, then test neighbouring integer light codes through the camera matrix.\nFresh R/G/B captures and a calibration TIFF must pass the tolerance before a new base is accepted.\nThe round limit covers coarse solving; neighbour refinement and final verification are separate bounded phases."},
 								PushButton{AssignTo: &u.stopBtn, Text: "Stop", Enabled: false, OnClicked: func() {
 									if u.cancel != nil {
 										u.cancel()

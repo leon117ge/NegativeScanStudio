@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"basetool/basestat"
 	"basetool/camera"
+	"basetool/lightlevel"
 	"basetool/rgblight"
 )
 
@@ -173,18 +173,24 @@ func TestTrichromeSingleAndHDR(t *testing.T) {
 			}
 			// Only the explicit Light-page calibration check measures the TIFF.
 			measureTriBase(res, p.Pix, p, ProcessOptions{})
-			if res.BaseErr != "" || res.BaseN < 100 {
+			if res.BaseErr != "" || res.BaseN < 4 {
 				t.Fatalf("base not measured: %q n=%d", res.BaseErr, res.BaseN)
 			}
 			if res.BaseRegion.Rect.Empty() || !res.BaseRegion.Rect.In(image.Rect(0, 0, p.W, p.H)) {
 				t.Fatalf("base region %v", res.BaseRegion.Rect)
 			}
-			again, _, _, err := basestat.Measure(basestat.PlaneGetter(p.Pix, p.W), p.W, p.H, res.BaseRegion, 20)
-			if err != nil {
-				t.Fatal(err)
-			}
+			area := lightlevel.Rect{X0: float64(res.BaseRegion.Rect.Min.X) / float64(p.W), Y0: float64(res.BaseRegion.Rect.Min.Y) / float64(p.H), X1: float64(res.BaseRegion.Rect.Max.X) / float64(p.W), Y1: float64(res.BaseRegion.Rect.Max.Y) / float64(p.H)}
+			var again [3]float64
 			for c := 0; c < 3; c++ {
-				if res.Base[c] <= 0.02 || res.Base[c] >= 1 || math.Abs(again[c]-res.Base[c]) > 1.0/65535 {
+				rd, err := lightlevel.Measure(LevelingImage(p, c), area)
+				if err != nil {
+					t.Fatal(err)
+				}
+				again[c] = rd.Level
+			}
+
+			for c := 0; c < 3; c++ {
+				if res.Base[c] <= 0.02 || res.Base[c] >= 1 || math.Abs(again[c]-res.Base[c]) > 1e-12 {
 					t.Fatalf("base %v, re-read from the TIFF %v", res.Base, again)
 				}
 			}

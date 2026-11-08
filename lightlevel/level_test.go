@@ -3,6 +3,7 @@ package lightlevel
 import (
 	"context"
 	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -58,7 +59,7 @@ func TestLevelConverges(t *testing.T) {
 			t.Fatalf("exposure prepared %d times", cam.prepare)
 		}
 		for ch := 0; ch < 3; ch++ {
-			if e := math.Abs(res.Readings[ch]/target - 1); e > 0.02 && !closestStep(res, ch) {
+			if e := math.Abs(res.Readings[ch]/target - 1); e > 0.02 {
 				t.Fatalf("target %.2f ch %d reading %.4f", target, ch, res.Readings[ch])
 			}
 		}
@@ -83,15 +84,6 @@ func TestLevelConverges(t *testing.T) {
 	}
 }
 
-func closestStep(r Result, ch int) bool {
-	for _, s := range r.Steps {
-		if s.Channel == ch && s.Note == "closest brightness step" {
-			return true
-		}
-	}
-	return false
-}
-
 func TestLevelNeedsMoreThan100(t *testing.T) {
 	d, c := setup(t)
 	cam := NewSynth(d.Lights)
@@ -106,7 +98,7 @@ func TestLevelNeedsMoreThan100(t *testing.T) {
 	if !res.Done[0] || !res.Done[1] {
 		t.Fatalf("R/G should still converge: %v", res.Problems())
 	}
-	if len(res.Problems()) != 1 {
+	if !res.Verified || !strings.Contains(strings.Join(res.Problems(), "; "), "increase camera exposure") {
 		t.Fatalf("problems %v", res.Problems())
 	}
 	if on, _ := d.Lights(); on != [3]bool{} {
@@ -122,7 +114,7 @@ func TestLevelClipAndCancel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Steps[0].Note != "clipped, halving" || !res.Done[0] {
+	if !res.Steps[0].Reading.BaseClipped() || !res.Done[0] {
 		t.Fatalf("clip handling: %v / %v", res.Steps[0], res.Problems())
 	}
 	ctx, cancel := context.WithCancel(context.Background())

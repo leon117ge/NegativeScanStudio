@@ -1,14 +1,9 @@
 package main
 
-// v0.85: light leveling for the trichrome TIFF + camera profile.
-//
-// The leveling loop measures the RAW own-channel plane (median of the
-// Light-page measure box, centre 50 % by default). FilmScan_Density_In's
-// film base is measured differently: LibRaw-demosaiced trichrome TIFF,
-// clear-base box found in the image (light-leak rejection, median), and
-// since v0.84 the camera-profile matrix on top. levelCam closes that gap:
-// per-channel targets for the matrix, then a check of the last leveling
-// RAWs through the real trichrome pipeline and one corrective pass.
+// Leveling targets the film base after the selected camera matrix. Control
+// frames and the final trichrome TIFF use the same linear converter, locked
+// rectangle, sampled pixels, and spatial median. The matrix is known, so its
+// inverse supplies the continuous pre-profile target for measured responses.
 
 import (
 	"context"
@@ -82,7 +77,7 @@ func (pl camPlan) worstDev(v [3]float64) float64 {
 // tiffBase runs one RAW per channel through hdrscan.ProcessTrichrome (the
 // scan's own converter, merge and clear-base measurement) and returns the
 // pre-matrix base. The TIFF is written to dir and removed.
-func tiffBase(ctx context.Context, raws [3]string, dir string, leak float64, box hdrscan.Rect) ([3]float64, int, error) {
+func tiffBase(ctx context.Context, raws [3]string, dir string, box hdrscan.Rect) ([3]float64, int, error) {
 	var rs [3][]string
 	for c, r := range raws {
 		if r == "" {
@@ -90,7 +85,7 @@ func tiffBase(ctx context.Context, raws [3]string, dir string, leak float64, box
 		}
 		rs[c] = []string{r}
 	}
-	res, err := hdrscan.ProcessTrichrome(rs, nil, hdrscan.ProcessOptions{MeasureLevelingBase: true, Ctx: ctx, OutDir: dir, Software: appVersion + " leveling check", LeakPct: leak, BaseNorm: box})
+	res, err := hdrscan.ProcessTrichrome(rs, nil, hdrscan.ProcessOptions{MeasureLevelingBase: true, Ctx: ctx, OutDir: dir, Software: appVersion + " leveling check", BaseNorm: box})
 	if err != nil {
 		return [3]float64{}, 0, err
 	}

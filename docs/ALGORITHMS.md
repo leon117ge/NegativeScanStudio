@@ -10,14 +10,9 @@
 - 自动模式：`hdrscan` 在画面中找最亮且均匀的片基区域。
 - 手选（v0.87 起）：用户在实时画面上拖一个矩形（归一化坐标 `lightlevel.Rect`），设为 Rectangle 模式后只测该框；未画框时拒绝调平。Auto 模式记录的归一化框为全零。
 
-## 2. 片基闭环调平（`lightlevel`）
-- 相机曝光固定，只改灯的 R/G/B 亮度（1..100）。
-- 每轮每个通道单独点亮该 LED 拍一张，在对应相机通道测片基中位数（同时记录 P99 与削顶比例）。
-- 新亮度 = 旧亮度 × 目标 / 实测；重复直到全部通道在容差内。
-- 默认参数：Target 0.50 FS、Tol ±2 %、MaxIter 4、Settle 300 ms、测量区默认中心 25–75 %。
-- v0.85：`Targets[3]` 可逐通道覆盖目标（用于相机 profile 矩阵前片基与 TIFF 框修正）。
-- 亮度到 1 仍超目标会报告 TooBright。
-- v0.88：最终结果复核用实际 trichrome TIFF；结果写入 CSV 日志，可一键写入 `FilmScan_Density_In` 的 `base_r/g/b` 与 “Light leveling” 片基预设；复核失败、停止或不收敛不写入。
+## 2. Film-base light leveling in v0.92
+
+The current solver uses measured slopes, bounded secant steps, bisection, matrix-aware integer refinement, and a fresh final RGB capture. Control and the calibration TIFF use the same pixels and median. The default limit is 10 coarse rounds. See [the complete leveling reference](LIGHT_LEVELING.md).
 
 ## 3. 相机色卡校准（`colorsci/camcal.go`, `chartcal.go`, v0.84）
 - 24 块透射色卡（4×6，A 行为中性灰阶 A1–A6），参考数据为 IT8.7/1 CGATS（XYZ D50 或 Lab）。

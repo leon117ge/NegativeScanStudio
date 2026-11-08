@@ -41,3 +41,21 @@ func TestLastLevelingOptionSurvivesRestart(t *testing.T) {
 		t.Fatal("legacy config default or unknown-base handling changed")
 	}
 }
+
+func TestLevelingRoundDefaultMigration(t *testing.T) {
+	t.Setenv("APPDATA", t.TempDir())
+	if c := loadLightConfig(0); c.MaxIter != 10 {
+		t.Fatal(c.MaxIter)
+	}
+	for _, tc := range []struct {
+		json string
+		want int
+	}{{`{"max_iter":4}`, 10}, {`{"max_iter":3}`, 3}, {`{"max_iter":4,"solver_version":92}`, 4}} {
+		if err := os.WriteFile(lightConfigFile(), []byte(tc.json), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if c := loadLightConfig(0); c.MaxIter != tc.want {
+			t.Fatalf("%s -> %d", tc.json, c.MaxIter)
+		}
+	}
+}

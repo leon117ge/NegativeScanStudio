@@ -12,6 +12,7 @@ import (
 
 	"basetool/basestat"
 	"basetool/camera"
+	"basetool/lightlevel"
 	"basetool/rawconv"
 )
 
@@ -360,14 +361,24 @@ func measureTriBase(res *TriResult, out []uint16, p0 *Plane, o ProcessOptions) {
 		res.BaseErr = "no clear base area (meter the base or keep film border in the frame)"
 		return
 	}
-	leak := o.LeakPct
-	if leak <= 0 {
-		leak = 20
-	}
 	res.BaseRegion = reg
-	var err error
-	res.Base, _, res.BaseN, err = basestat.Measure(basestat.PlaneGetter(out, p0.W), p0.W, p0.H, reg, leak)
-	if err != nil {
-		res.BaseErr = err.Error()
+	// Use precisely the control loop's pixels and median, not a second
+	// differently filtered statistic. Auto is resolved once by the caller.
+	area := lightlevel.Rect{X0: float64(reg.Rect.Min.X) / float64(p0.W), Y0: float64(reg.Rect.Min.Y) / float64(p0.H), X1: float64(reg.Rect.Max.X) / float64(p0.W), Y1: float64(reg.Rect.Max.Y) / float64(p0.H)}
+	if !o.BaseNorm.Empty() {
+		area = lightlevel.Rect{X0: o.BaseNorm.X0, Y0: o.BaseNorm.Y0, X1: o.BaseNorm.X1, Y1: o.BaseNorm.Y1}
+	}
+	combined := &Plane{W: p0.W, H: p0.H, Pix: out}
+	for c := 0; c < 3; c++ {
+		rd, err := lightlevel.Measure(LevelingImage(combined, c), area)
+		if err != nil {
+			res.BaseErr = err.Error()
+			return
+		}
+		if rd.BaseClipped() {
+			res.BaseErr = fmt.Sprintf("%c film base is clipped in the calibration TIFF; reduce exposure", "RGB"[c])
+			return
+		}
+		res.Base[c], res.BaseN = rd.Level, rd.Cells
 	}
 }
