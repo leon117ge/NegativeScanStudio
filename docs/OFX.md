@@ -1,6 +1,12 @@
-# NegativeScan Studio OFX 0.90.5
+# NegativeScan Studio OFX 0.90.6
 
-This independently versioned plugin patch uses tag `ofx-v0.90.5`. App v0.91 has its own executable and tag. The metadata patch passes native CPU and mock-host tests. Real Windows Resolve and physical GPU acceptance remain outstanding. [Installation](../ofx/README.md).
+This independently versioned plugin patch uses tag `ofx-v0.90.6`. App v0.91 has its own executable and tag. The metadata patch passes native CPU and mock-host tests. Real Windows Resolve and physical GPU acceptance remain outstanding. [Installation](../ofx/README.md).
+
+## 0.90.6 Ektar 100
+
+Ektar 100 appends a stock option without changing previous indices. It writes visible gamma R/G/B 0.580572786/0.579564388/0.663740443, defaults T/D to D, and keeps manual overrides. Values are interpolated OLS slopes from Kodak E-4046, January 2025, page 4 daylight Status M vector paths, using the existing logH -1.5..0 method. [Source, axes, PDF hash, residuals and alternate windows](data/ofx_stock_gamma_readings.json).
+
+No uncalibrated Base placeholders exist, so no Ektar Base is invented. Existing Base, scale 1.15, Exposure 0.90 and all rendering kernels remain unchanged. Scanning app stays v0.91. Full CPU/mock-host suite and offline CUDA assembly checks are run; real Windows Resolve/GPU/overlay and actual Ektar scans need acceptance testing.
 
 ## 0.90.5 after-profile metadata
 

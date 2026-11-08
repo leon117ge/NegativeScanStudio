@@ -157,5 +157,58 @@
         ]
       }
     ]
+  },
+  {
+    "stock": "Ektar 100",
+    "source": "https://www.kodakprofessional.com/sites/default/files/2025-07/e4046.pdf",
+    "revision": "January 2025 E-4046, revised 1/25",
+    "page": 4,
+    "pdf_sha256": "38a41d47ad006cd563793033f83c8f9ef6cdd3c8300695c31facfc71d368f8db",
+    "path_ids_RGB": [
+      33,
+      32,
+      31
+    ],
+    "axis": {
+      "x0": 81.1929931640625,
+      "x1": 265.697998046875,
+      "logH0": -3,
+      "logH1": 2,
+      "yD0": 292.4079895019531,
+      "yD4": 107.92399597167969
+    },
+    "midscale_logH": [
+      -1.5,
+      0
+    ],
+    "channels": [
+      {
+        "channel": "R",
+        "gamma": 0.5805727857935677,
+        "rms_density": 0.006740982365957206,
+        "alternate_gamma": [
+          0.5687682321490016,
+          0.5461345795977939
+        ]
+      },
+      {
+        "channel": "G",
+        "gamma": 0.579564388189589,
+        "rms_density": 0.003254890600150406,
+        "alternate_gamma": [
+          0.580867751271855,
+          0.5502679002752981
+        ]
+      },
+      {
+        "channel": "B",
+        "gamma": 0.6637404427914253,
+        "rms_density": 0.0030048192156993826,
+        "alternate_gamma": [
+          0.662079795393491,
+          0.651124729721156
+        ]
+      }
+    ]
   }
 ]

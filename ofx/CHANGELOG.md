@@ -1,8 +1,20 @@
 # NegativeScan Studio OFX — Changelog
 
-Current plugin: **0.90.5** · [Plugin release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/ofx-v0.90.5) · [Scanning app changelog](../docs/CHANGELOG.md) · [Versioning policy](../docs/VERSIONING.md)
+Current plugin: **0.90.6** · [Plugin release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/ofx-v0.90.6) · [Scanning app changelog](../docs/CHANGELOG.md) · [Versioning policy](../docs/VERSIONING.md)
 
-Plugin releases are independent from the Windows scanning app. / 插件与扫描软件独立发版。
+Plugin releases are independent from the Windows scanning app.
+
+## 0.90.6 — Ektar 100
+
+- Add Kodak Ektar 100 to Film stock gamma preset. Selecting it writes R **0.580572786**, G **0.579564388**, B **0.663740443** into the visible gamma sliders and defaults Film type to **D**; manual T/D override remains available.
+- Gamma is a project estimate from Kodak E-4046 (January 2025, revised 1/25), page 4, daylight Status M characteristic vector curves; not Kodak-tabulated channel constants. Use the same 61-point, logH -1.5..0, interpolated OLS method as the other still stocks. See docs/data/ofx_stock_gamma_readings.json for full source, PDF SHA-256, axes, residuals and alternate fit windows.
+- No Ektar Base preset is added: the existing table has only the calibrated/eye-tuned 500T Base, with no uncalibrated placeholders. Existing Base, gamma presets, Gamma scale **1.15**, Exposure **0.90**, and CPU/CUDA/OpenCL kernels are unchanged.
+- Plugin-only release; scanning app stays **v0.91**.
+
+## Validation
+Native CPU math/parity, mock OFX lifecycle/render/preset/metadata/overlay, CUDA Driver contract and offline PTX assembly checks. Real Windows Resolve, physical GPU/PTX execution, host GPU negotiation and viewer behavior remain untested. Ektar rendering needs user acceptance against real scans; curve extraction is not per-roll calibration.
+
+Source: https://www.kodakprofessional.com/sites/default/files/2025-07/e4046.pdf
 
 ## 0.90.5 — app leveling metadata coordinates
 

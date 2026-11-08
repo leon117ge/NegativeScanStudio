@@ -5,7 +5,7 @@
 | Product | Current version | Download / release | Documentation |
 |---|---|---|---|
 | **NegativeScan Studio** — scanning app | **v0.91** | [App release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/v0.91) · [Windows x64 EXE](https://github.com/leon117ge/NegativeScanStudio/releases/download/v0.91/NegativeScanStudio_v0.91.exe) | [Hardware](docs/HARDWARE.md) · [App changelog](docs/CHANGELOG.md) · [App roadmap](docs/ROADMAP.md) |
-| **NegativeScan Studio OFX** — Resolve plugin | **0.90.5** | [Plugin release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/ofx-v0.90.5) · [Windows x64 ZIP](https://github.com/leon117ge/NegativeScanStudio/releases/download/ofx-v0.90.5/NegativeScanStudio_OFX_v0.90.5_Win64.zip) | [Install / usage](ofx/README.md) · [Plugin changelog](ofx/CHANGELOG.md) · [Plugin roadmap](ofx/ROADMAP.md) |
+| **NegativeScan Studio OFX** — Resolve plugin | **0.90.6** | [Plugin release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/ofx-v0.90.6) · [Windows x64 ZIP](https://github.com/leon117ge/NegativeScanStudio/releases/download/ofx-v0.90.6/NegativeScanStudio_OFX_v0.90.6_Win64.zip) | [Install / usage](ofx/README.md) · [Plugin changelog](ofx/CHANGELOG.md) · [Plugin roadmap](ofx/ROADMAP.md) |
 
 Both current releases are **prereleases**. Download the EXE for scanning, the OFX ZIP for Resolve, or both. The old OFX ZIP on the app v0.90 release is retained as history; use the separate plugin release above for the current plugin.
 
@@ -18,7 +18,7 @@ Camera-scanning/capture software written in Go with a [walk](https://github.com/
 - HDR/bracketed capture, trichrome/RGB-light capture and merge, linear RAW-to-TIFF conversion through LibRaw.
 - Crop, merge, hair/dust removal, camera-matrix calibration, Develop preview. The app UI, prompts, and log messages are English only.
 - HDR/trichrome TIFFs carry `nss.scan/1` provenance. The default-on **Film base for metadata: Last leveling (after profile)** option writes the accepted Light-page result and displays its RGB and time. It never re-measures the scene as film base.
-- The accepted reference survives restart and scan-preset recall. Off, unknown, or mismatched light values omit `film_base`. After-profile metadata requires the independent OFX 0.90.5 patch; older unmarked scans keep their original interpretation.
+- The accepted reference survives restart and scan-preset recall. Off, unknown, or mismatched light values omit `film_base`. After-profile metadata requires OFX 0.90.5 or newer; older unmarked scans keep their original interpretation.
 
 **Use:** download `NegativeScanStudio_v0.91.exe` from the app release and run on Windows x64 with the appropriate camera/light setup. This is the capture app, not a Resolve plugin. App and plugin updates are independent.
 
@@ -40,9 +40,9 @@ A separate C++/OpenFX product for developing linear negative scans inside Resolv
 C:\Program Files\Common Files\OFX\Plugins\
 ```
 
-Restart Resolve and find **NegativeScan Studio OFX 0.90.5** under OpenFX → NegativeScan Studio. Back up projects and remove duplicate/older bundles before replacing them. See the [bilingual installation guide](ofx/README.md).
+Restart Resolve and find **NegativeScan Studio OFX 0.90.6** under OpenFX → NegativeScan Studio. Back up projects and remove duplicate/older bundles before replacing them. See the [installation guide](ofx/README.md).
 
-**Validation limits:** 0.90.5 passes native CPU, mock-host loader/render/overlay, offline PTX assembly, and mocked CUDA contract tests. Real Windows Resolve, physical GPU execution, overlay appearance/input, and host GPU negotiation remain untested for this patch. Rendering kernels are unchanged from 0.90.4. CPU mode is available. [Implementation, tests and limitations](docs/OFX.md).
+**Validation limits:** 0.90.6 passes native CPU, mock-host loader/render/overlay, offline PTX assembly, and mocked CUDA contract tests. Real Windows Resolve, physical GPU execution, overlay appearance/input, and host GPU negotiation remain untested for this patch. Rendering kernels are unchanged from 0.90.5. CPU mode is available. [Implementation, tests and limitations](docs/OFX.md).
 
 ## How the two products connect
 

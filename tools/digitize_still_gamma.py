@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Extract Kodak official PDF polyline characteristic curves and fit midscale gamma.
-Usage: python tools/digitize_still_gamma.py DIRECTORY_WITH_portra_ultramax_gold_PDFs
+Usage: python tools/digitize_still_gamma.py DIRECTORY_WITH_portra_ultramax_gold_ektar_PDFs
 Requires pymupdf, numpy. PDF charts inspected manually; path IDs are edition-specific.
 """
 import pathlib,sys,hashlib,csv,json
@@ -9,7 +9,8 @@ root=pathlib.Path(__file__).resolve().parents[1];src=pathlib.Path(sys.argv[1])
 config=[
  ('ultramax','UltraMax 400','February 2016 E-7023','https://kodakprofessional.com/sites/default/files/wysiwyg/pro/resources/E7023_max_400.pdf',[35,34,33],81.09,265.904,-4,1,297.352,112.746),
  ('portra','Portra 400','January 2025 E-4050, revised 1-25','https://www.kodakprofessional.com/sites/default/files/2025-07/e4050.pdf',[36,35,34],81.163,265.626,-4,1,287.368,102.853),
- ('gold','Gold 200','June 2023 E-7022, revised 06-23','https://www.kodakprofessional.com/sites/default/files/wysiwyg/pro/resources/E7022%20Gold%20tech%20sheet.pdf',[38,37,36],81.6768,266.18448,-3,1,256.4328,71.92512)]
+ ('gold','Gold 200','June 2023 E-7022, revised 06-23','https://www.kodakprofessional.com/sites/default/files/wysiwyg/pro/resources/E7022%20Gold%20tech%20sheet.pdf',[38,37,36],81.6768,266.18448,-3,1,256.4328,71.92512),
+ ('ektar','Ektar 100','January 2025 E-4046, revised 1/25','https://www.kodakprofessional.com/sites/default/files/2025-07/e4046.pdf',[33,32,31],81.1929931640625,265.697998046875,-3,2,292.4079895019531,107.92399597167969)]
 result=[]
 for key,name,rev,url,ids,x0,x1,h0,h1,y0,y1 in config:
  pdf=src/(key+'.pdf');page=pymupdf.open(pdf)[3];drawings=page.get_drawings();channels=[];rows=[]

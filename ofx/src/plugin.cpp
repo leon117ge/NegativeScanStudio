@@ -99,7 +99,7 @@ void choiceDef(OfxParamSetHandle s,const char *key,const char *label,const char 
 OfxPropertySetHandle boolDef(OfxParamSetHandle s,const char *key,const char *label,int d,const char *group="") {auto p=define(s,key,label,kOfxParamTypeBoolean,group);prop->propSetInt(p,kOfxParamPropDefault,0,d);return p;}
 OfxStatus describe(OfxImageEffectHandle e) {
  auto p=properties(e);if(interact){OfxPluginEntryPoint *callback=overlayEntry;void *address=nullptr;static_assert(sizeof(callback)==sizeof(address));std::memcpy(&address,&callback,sizeof(address));prop->propSetPointer(p,kOfxImageEffectPluginPropOverlayInteractV1,0,address);}
- prop->propSetString(p,kOfxPropLabel,0,"NegativeScan Studio OFX 0.90.5");prop->propSetString(p,kOfxImageEffectPluginPropGrouping,0,"NegativeScan Studio");prop->propSetString(p,kOfxImageEffectPropSupportedContexts,0,kOfxImageEffectContextFilter);prop->propSetString(p,kOfxImageEffectPropSupportedPixelDepths,0,kOfxBitDepthFloat);prop->propSetString(p,kOfxImageEffectPluginRenderThreadSafety,0,kOfxImageEffectRenderFullySafe);prop->propSetInt(p,kOfxImageEffectPropSupportsTiles,0,1);prop->propSetInt(p,kOfxImageEffectPropSupportsMultiResolution,0,1);prop->propSetInt(p,kOfxImageEffectPluginPropHostFrameThreading,0,0);
+ prop->propSetString(p,kOfxPropLabel,0,"NegativeScan Studio OFX 0.90.6");prop->propSetString(p,kOfxImageEffectPluginPropGrouping,0,"NegativeScan Studio");prop->propSetString(p,kOfxImageEffectPropSupportedContexts,0,kOfxImageEffectContextFilter);prop->propSetString(p,kOfxImageEffectPropSupportedPixelDepths,0,kOfxBitDepthFloat);prop->propSetString(p,kOfxImageEffectPluginRenderThreadSafety,0,kOfxImageEffectRenderFullySafe);prop->propSetInt(p,kOfxImageEffectPropSupportsTiles,0,1);prop->propSetInt(p,kOfxImageEffectPropSupportsMultiResolution,0,1);prop->propSetInt(p,kOfxImageEffectPluginPropHostFrameThreading,0,0);
  prop->propSetString(p,kOfxImageEffectPropOpenCLRenderSupported,0,nss::CLApi::get().available?"true":"false");
  prop->propSetString(p,kOfxImageEffectPropOpenCLSupported,0,"false");
  prop->propSetString(p,kOfxImageEffectPropCudaRenderSupported,0,nss::CudaApi::get().available?"true":"false");
@@ -129,7 +129,7 @@ OfxStatus describeContext(OfxImageEffectHandle e) {
  p=define(s,"metadata_status","File status",kOfxParamTypeString,"metadata");prop->propSetString(p,kOfxParamPropDefault,0,"Choose TIFF or JSON");prop->propSetInt(p,kOfxParamPropEnabled,0,0);prop->propSetInt(p,kOfxParamPropAnimates,0,0);prop->propSetInt(p,kOfxParamPropEvaluateOnChange,0,0);
  boolDef(s,"camera_on","Enable camera calibration",1,"camera");boolDef(s,"neutralise","Neutralise grey - bake white balance",0,"camera");numberDef(s,"camera_strength","Camera strength",1,0,1,"camera");
  for(int i=0;i<9;i++)for(auto prefix:{"camera_","neutral_"}) {auto k=std::string(prefix)+std::to_string(i);numberDef(s,k.c_str(),k.c_str(),i%4==0?1:0,-16,16,"camera");}
- choiceDef(s,"stock","Film stock gamma preset","Legacy defaults / manual|Vision3 500T 5219 Status M|Vision3 500T LED estimate|Vision3 250D 5207|UltraMax 400|Portra 400|Gold 200",0,"balance");
+ choiceDef(s,"stock","Film stock gamma preset","Legacy defaults / manual|Vision3 500T 5219 Status M|Vision3 500T LED estimate|Vision3 250D 5207|UltraMax 400|Portra 400|Gold 200|Ektar 100",0,"balance");
  choiceDef(s,"film_type","Film balance (overridable)","T - tungsten|D - daylight",0,"balance");choiceDef(s,"temperature","Scene illuminant (Planck approx.)","3200 K|3800 K|4400 K|5000 K|5600 K",0,"balance");
  for(auto key:{"reference_base_r","reference_base_g","reference_base_b"}){
   auto hidden=define(s,key,key,kOfxParamTypeDouble,"balance");prop->propSetDouble(hidden,kOfxParamPropDefault,0,.5);prop->propSetInt(hidden,kOfxParamPropSecret,0,1);prop->propSetInt(hidden,kOfxParamPropAnimates,0,0);
@@ -198,7 +198,7 @@ OfxStatus changed(OfxImageEffectHandle e,OfxPropertySetHandle a) {
   static const float gammas[][3]={{.55f,.635f,.62f},{.4482f,.5266f,.5096f},{.45f,.54f,.53f},{.48148148f,.56018519f,.54166667f},
 #include "still_gammas.inc"
   };
-  if(stock<0||stock>6)throw kOfxStatErrValue;
+  if(stock<0||stock>=int(sizeof(gammas)/sizeof(gammas[0])))throw kOfxStatErrValue;
   Edit edit(s,"Film stock gamma");
   for(int c=0;c<3;c++){auto k=std::string("positive_gam_")+"rgb"[c];setD(s,k.c_str(),gammas[stock][c]);}
   if(stock){syncReference(e,s,time);setI(s,"film_type",stock<=2?0:1);applyWB(s,time);}
@@ -325,7 +325,7 @@ OfxStatus entry(const char *action,const void *handle_,OfxPropertySetHandle in,O
   return kOfxStatReplyDefault;
  }catch(OfxStatus s){return s;}catch(const std::bad_alloc &){return kOfxStatErrMemory;}catch(...){return kOfxStatFailed;}
 }
-OfxPlugin plugin={kOfxImageEffectPluginApi,1,"org.negativescanstudio.complete",0,9005,setHost,entry};
+OfxPlugin plugin={kOfxImageEffectPluginApi,1,"org.negativescanstudio.complete",0,9006,setHost,entry};
 }
 extern "C" {
 #ifdef _WIN32

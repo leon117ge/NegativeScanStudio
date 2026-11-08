@@ -48,3 +48,15 @@ Film Stock 选项填 gamma 并默认500T=T、其它=D，用户可覆盖 T/D。�
 ## OFX0.90.2的可见scale
 
 本页官方曲线读取值与预设数值均保持不变，没有统一乘1.25。Positive Out的Gamma scale位于Gamma B下，默认1.15，作为用户选择的扫描观感/对比因子。实际render gamma=可见R/G/B×scale。Exposure默认0.90。它们不是乳剂gamma重新测量，亦不更新T/D积分表。纯公式验证用scale1，或给参考同一effective gamma。旧500T Base测量对应scale1；0.90.2当前Base1.40/0/.80为新默认下用户眼调，未重新测量。
+
+## OFX 0.90.6: Ektar 100
+
+# NegativeScan Studio OFX 0.90.6
+
+- Add Kodak Ektar 100 to Film stock gamma preset. Selecting it writes R **0.580572786**, G **0.579564388**, B **0.663740443** into the visible gamma sliders and defaults Film type to **D**; manual T/D override remains available.
+- Gamma is a project estimate from Kodak E-4046 (January 2025, revised 1/25), page 4, daylight Status M characteristic vector curves; not Kodak-tabulated channel constants. Use the same 61-point, logH -1.5..0, interpolated OLS method as the other still stocks. See docs/data/ofx_stock_gamma_readings.json for full source, PDF SHA-256, axes, residuals and alternate fit windows.
+- No Ektar Base preset is added: the existing table has only the calibrated/eye-tuned 500T Base, with no uncalibrated placeholders. Existing Base, gamma presets, Gamma scale **1.15**, Exposure **0.90**, and CPU/CUDA/OpenCL kernels are unchanged.
+- Plugin-only release; scanning app stays **v0.91**.
+
+
+PDF SHA-256: `38a41d47ad006cd563793033f83c8f9ef6cdd3c8300695c31facfc71d368f8db`. RGB paths: 33/32/31. Axis calibration and alternative windows are recorded in the JSON; raw vertices in `colorsci/data/ektar_characteristic.csv`. Estimated engineering uncertainty about +/-0.03, not a confidence interval or batch guarantee. D illumination still uses the existing 5207 approximation, not Ektar spectral calibration.

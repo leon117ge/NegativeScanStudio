@@ -47,7 +47,7 @@ void init(){props.propSetInt=si;props.propSetDouble=sd;props.propSetString=ss;pr
 }
 int main(int argc,char **argv){require(argc==3);mock::init();OfxHost h{nullptr,mock::fetch};OfxGetPlugin(0)->setHost(&h);require(OfxGetNumberOfPlugins()==1&&OfxGetPlugin(1)==nullptr);auto call=OfxGetPlugin(0)->mainEntry;mock::Effect fx;auto e=reinterpret_cast<OfxImageEffectHandle>(&fx);auto bag=[](mock::Bag &b){return reinterpret_cast<OfxPropertySetHandle>(&b);};
 require(call(kOfxActionLoad,nullptr,nullptr,nullptr)==kOfxStatOK);require(call(kOfxActionDescribe,e,nullptr,nullptr)==kOfxStatOK);require(call(kOfxImageEffectActionDescribeInContext,e,nullptr,nullptr)==kOfxStatOK);require(fx.params.values.count("cross")==0);require(fx.params.values.count("cross_strength")==0);require(fx.params.values.count("density_cast_on")==0);require(fx.params.values.count("apply_wb")==0);require(fx.params.values.count("positive_film_wb")==1);require(call(kOfxActionCreateInstance,e,nullptr,nullptr)==kOfxStatOK);
-auto s=reinterpret_cast<OfxParamSetHandle>(&fx.params);require(std::abs(number(s,"positive_bal_r",0)-1.07)<1e-9&&number(s,"positive_bal_g",0)==0&&std::abs(number(s,"positive_bal_b",0)-.67)<1e-9);require(OfxGetPlugin(0)->pluginVersionMinor==9005);require(number(s,"gamma_scale",0)==1.15);require(number(s,"positive_expo",0)==.9);require(fx.params.values["gamma_scale"].strings[kOfxParamPropParent][0]=="positive");setI(s,"auto_metadata",0);require(number(s,"positive_gam_r",0)==.55);require(number(s,"density_base_r",0)==.5);require(number(s,"density_base_g",0)==.5);require(number(s,"density_base_b",0)==.5);require(integer(s,"positive_film_wb",0)==1);
+auto s=reinterpret_cast<OfxParamSetHandle>(&fx.params);require(std::abs(number(s,"positive_bal_r",0)-1.07)<1e-9&&number(s,"positive_bal_g",0)==0&&std::abs(number(s,"positive_bal_b",0)-.67)<1e-9);require(OfxGetPlugin(0)->pluginVersionMinor==9006);require(number(s,"gamma_scale",0)==1.15);require(number(s,"positive_expo",0)==.9);require(fx.params.values["gamma_scale"].strings[kOfxParamPropParent][0]=="positive");setI(s,"auto_metadata",0);require(number(s,"positive_gam_r",0)==.55);require(number(s,"density_base_r",0)==.5);require(number(s,"density_base_g",0)==.5);require(number(s,"density_base_b",0)==.5);require(integer(s,"positive_film_wb",0)==1);
 float in[16]={.03,.04,.05,1,.1,.2,.3,1,.4,.3,.2,1,.5,.5,.5,1},out[16]{};
 for(auto *b:{&fx.source.image,&fx.output.image}){auto p=bag(*b);mock::ss(p,kOfxImageEffectPropPixelDepth,0,kOfxBitDepthFloat);mock::ss(p,kOfxImageEffectPropComponents,0,kOfxImageComponentRGBA);mock::ss(p,kOfxImageEffectPropPreMultiplication,0,kOfxImageUnPreMultiplied);mock::si(p,kOfxImagePropRowBytes,0,-32);for(int j=0;j<4;j++)mock::si(p,kOfxImagePropBounds,j,(int[]){10,20,12,22}[j]);}
 mock::sp(bag(fx.source.image),kOfxImagePropData,0,in+8);mock::sp(bag(fx.output.image),kOfxImagePropData,0,out+8);
@@ -69,6 +69,16 @@ require(loaded->metadataReads==reads&&loaded->metadataProbes==probes&&loaded->pr
 // Button snapshots the values and preserves manual override thereafter.
 mock::Bag changed;mock::ss(bag(changed),kOfxPropName,0,"load_metadata");mock::ss(bag(changed),kOfxPropChangeReason,0,kOfxChangeUserEdited);require(call(kOfxActionInstanceChanged,e,bag(changed),nullptr)==kOfxStatOK);require(integer(s,"auto_metadata",0)==0);require(std::abs(number(s,"density_base_r",0)-.479)<1e-6);setD(s,"density_base_r",.7);require(number(s,"density_base_r",0)==.7);
 setI(s,"stock",6);mock::ss(bag(changed),kOfxPropName,0,"stock");require(call(kOfxActionInstanceChanged,e,bag(changed),nullptr)==kOfxStatOK);require(integer(s,"film_type",0)==1);require(std::abs(number(s,"positive_gam_r",0)-.550724)<1e-5);require(integer(s,"positive_film_wb",0)==1);
+// Ektar appends a stable option, loads visible gamma, defaults to D, permits manual T.
+setI(s,"stock",7);require(call(kOfxActionInstanceChanged,e,bag(changed),nullptr)==kOfxStatOK);
+require(integer(s,"film_type",0)==1);
+require(std::abs(number(s,"positive_gam_r",0)-0.580572786)<1e-7);
+require(std::abs(number(s,"positive_gam_g",0)-0.579564388)<1e-7);
+require(std::abs(number(s,"positive_gam_b",0)-0.663740443)<1e-7);
+require(integer(s,"positive_film_wb",0)==1);
+setI(s,"film_type",0);mock::ss(bag(changed),kOfxPropName,0,"film_type");
+require(call(kOfxActionInstanceChanged,e,bag(changed),nullptr)==kOfxStatOK);require(integer(s,"film_type",0)==0);
+
 setI(s,"film_type",0);mock::ss(bag(changed),kOfxPropName,0,"film_type");require(call(kOfxActionInstanceChanged,e,bag(changed),nullptr)==kOfxStatOK);require(integer(s,"film_type",0)==0);
 // T/D presets change film base immediately, from baseline, never compound.
 for(int film=0;film<2;film++)for(int temp=0;temp<5;temp++){
