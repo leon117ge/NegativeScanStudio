@@ -44,6 +44,9 @@ func TestLastLevelingOptionSurvivesRestart(t *testing.T) {
 
 func TestLevelingRoundDefaultMigration(t *testing.T) {
 	t.Setenv("APPDATA", t.TempDir())
+	if err := os.MkdirAll(configDir(), 0755); err != nil {
+		t.Fatal(err)
+	}
 	if c := loadLightConfig(0); c.MaxIter != 10 {
 		t.Fatal(c.MaxIter)
 	}
