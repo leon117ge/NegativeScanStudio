@@ -58,3 +58,8 @@ English only. Stock dropdown, exposure EV, optional “apply camera profile”, 
 - Rebate border (BorderPct, SoftBorder).
 - Metadata: nss.scan/1 film_base after_profile; file name *_RGB.tiff via rawconv.WriteTIFF16Description.
 - Round-trip: Density In base 0.5 + Positive Out stock gamma (develop package = dctl_math.hpp).
+
+## v0.95
+
+- Full Status M CSV + PCHIP for still stocks; Vision3 logistic fallback (see convert/data/SOURCES.md).
+- Naming OutputPath; grain ISO 100/400 in density domain.

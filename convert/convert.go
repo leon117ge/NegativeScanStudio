@@ -1,12 +1,11 @@
 // Package convert turns calibrated linear camera RGB into a simulated
-// colour-negative that matches NegativeScan Studio leveled trichrome scans:
-// film base at 0.5/0.5/0.5 linear FS, image = 0.5 * 10^(-(D-Dmin)), optional
-// rebate border, nss.scan/1 metadata values. No orange-mask cast.
+// colour-negative matching NegativeScan Studio leveled trichrome scans.
 package convert
 
 import (
 	"fmt"
 	"math"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -15,24 +14,25 @@ import (
 	"basetool/scanmeta"
 )
 
-// Stock is one film model available in Convert.
 type Stock struct {
-	Name   string
-	Source string
-	Gamma  [3]float64
+	Name      string
+	FileTag   string // compact name for output files
+	Source    string
+	Gamma     [3]float64 // logistic fallback mid-slopes
 }
 
-// Options control one conversion.
 type Options struct {
 	Stock           Stock
 	EV              float64
 	CamMatrix       colorsci.Mat3
 	CamStrength     float64
 	ApplyCamProfile bool
-	BorderPct       float64 // rebate each side as fraction of short edge
+	BorderPct       float64
 	SoftBorder      bool
-	MidDensity      float64 // D-Dmin at 18% grey (default 0.75)
-	MaxDensity      float64 // asymptotic D-Dmin
+	MidDensity      float64
+	MaxDensity      float64
+	Grain           GrainISO
+	GrainSeed       int64
 	Software        string
 	Roll            string
 	Make            string
@@ -53,17 +53,17 @@ var (
 func Stocks() []Stock {
 	stockOnce.Do(func() {
 		stockList = []Stock{
-			{Name: "Vision3 500T 5219", Source: "OFX Vision3 Status M gamma; Kodak H-1-5219",
+			{Name: "Vision3 500T 5219", FileTag: "Vision3_500T", Source: "OFX Status M mid-slope; H-1-5219 (logistic fallback — no full D-logH CSV)",
 				Gamma: [3]float64{0.4482, 0.5266, 0.5096}},
-			{Name: "Vision3 250D 5207", Source: "OFX 250D gamma; H-1-5219 family",
+			{Name: "Vision3 250D 5207", FileTag: "Vision3_250D", Source: "OFX Status M mid-slope; H-1-5207 (logistic fallback — no full D-logH CSV)",
 				Gamma: [3]float64{0.48148148, 0.56018519, 0.54166667}},
-			{Name: "UltraMax 400", Source: "OFX still_gammas from Kodak E-7023 polylines",
+			{Name: "UltraMax 400", FileTag: "UltraMax400", Source: "Kodak E-7023 p.4 Status M full curve CSV",
 				Gamma: [3]float64{0.518590585, 0.536316940, 0.604826092}},
-			{Name: "Portra 400", Source: "OFX still_gammas from Kodak E-4050 polylines",
+			{Name: "Portra 400", FileTag: "Portra400", Source: "Kodak E-4050 p.4 Status M full curve CSV",
 				Gamma: [3]float64{0.555934584, 0.549589137, 0.640031943}},
-			{Name: "Gold 200", Source: "OFX still_gammas from Kodak E-7022 polylines",
+			{Name: "Gold 200", FileTag: "Gold200", Source: "Kodak E-7022 p.4 Status M full curve CSV",
 				Gamma: [3]float64{0.550723702, 0.564449843, 0.610388122}},
-			{Name: "Ektar 100", Source: "OFX still_gammas from Kodak E-4046 polylines",
+			{Name: "Ektar 100", FileTag: "Ektar100", Source: "Kodak E-4046 p.4 Status M full curve CSV",
 				Gamma: [3]float64{0.580572786, 0.579564388, 0.663740443}},
 		}
 	})
@@ -92,9 +92,12 @@ func (o *Options) normalize() {
 	if o.BorderPct > 0.2 {
 		o.BorderPct = 0.2
 	}
+	if o.GrainSeed == 0 {
+		o.GrainSeed = 0x4e535347 // 'NSSG'
+	}
 }
 
-func densityAbove(logH, gamma, dMid, dMax float64) float64 {
+func densityAboveLogistic(logH, gamma, dMid, dMax float64) float64 {
 	if gamma < 1e-6 {
 		gamma = 1e-6
 	}
@@ -110,17 +113,28 @@ func densityAbove(logH, gamma, dMid, dMax float64) float64 {
 	return d
 }
 
-// SceneToNeg maps one calibrated linear RGB pixel to leveled negative FS.
-func SceneToNeg(v [3]float64, o Options) [3]float64 {
+// densityAboveFor maps scene-linear channel value to D-Dmin.
+func densityAboveFor(lin float64, c int, o Options, cs *CurveSet) float64 {
 	o.normalize()
 	exp := math.Pow(2, o.EV)
+	h := math.Max(lin*exp, 1e-12)
+	rel := math.Log10(h / MidGrey)
+	if cs != nil && cs.HasFull {
+		return cs.densityAbove(cs.LogHMid+rel, c)
+	}
+	// Logistic in relative logH (0 = mid grey).
+	return densityAboveLogistic(rel, o.Stock.Gamma[c], o.MidDensity, o.MaxDensity)
+}
+
+func SceneToNeg(v [3]float64, o Options) [3]float64 {
+	o.normalize()
 	if o.ApplyCamProfile && o.CamStrength > 0 {
 		v = colorsci.ApplyCam(o.CamMatrix, o.CamStrength, v)
 	}
+	cs := CurveFor(o.Stock.Name)
 	var out [3]float64
 	for c := 0; c < 3; c++ {
-		h := math.Max(v[c]*exp, 1e-12)
-		d := densityAbove(math.Log10(h/MidGrey), o.Stock.Gamma[c], o.MidDensity, o.MaxDensity)
+		d := densityAboveFor(v[c], c, o, cs)
 		t := BaseFS * math.Pow(10, -d)
 		if t < 0 {
 			t = 0
@@ -135,9 +149,31 @@ func SceneToNeg(v [3]float64, o Options) [3]float64 {
 
 func ProcessPixels(rgb []float64, w, h int, o Options) {
 	o.normalize()
+	if o.ApplyCamProfile && o.CamStrength > 0 {
+		for i := 0; i+2 < len(rgb); i += 3 {
+			v := colorsci.ApplyCam(o.CamMatrix, o.CamStrength, [3]float64{rgb[i], rgb[i+1], rgb[i+2]})
+			rgb[i], rgb[i+1], rgb[i+2] = v[0], v[1], v[2]
+		}
+	}
+	cs := CurveFor(o.Stock.Name)
+	// Density above Dmin first (for grain), then transmittance.
 	for i := 0; i+2 < len(rgb); i += 3 {
-		v := SceneToNeg([3]float64{rgb[i], rgb[i+1], rgb[i+2]}, o)
-		rgb[i], rgb[i+1], rgb[i+2] = v[0], v[1], v[2]
+		for c := 0; c < 3; c++ {
+			rgb[i+c] = densityAboveFor(rgb[i+c], c, o, cs)
+		}
+	}
+	applyGrain(rgb, w, h, o.Stock.Name, o.Grain, o.GrainSeed)
+	for i := 0; i+2 < len(rgb); i += 3 {
+		for c := 0; c < 3; c++ {
+			t := BaseFS * math.Pow(10, -rgb[i+c])
+			if t < 0 {
+				t = 0
+			}
+			if t > 1 {
+				t = 1
+			}
+			rgb[i+c] = t
+		}
 	}
 	applyBorder(rgb, w, h, o)
 }
@@ -216,26 +252,46 @@ func Process16(pix []uint16, w, h int, o Options) []uint16 {
 	return out
 }
 
-// RGBPath matches trichrome naming: <stem>_RGB.tiff
-func RGBPath(src string) string {
+// OutputPath is <rafStem>_<FileTag>.tiff with _2, _3... if taken.
+func OutputPath(src string, stock Stock) string {
 	ext := filepath.Ext(src)
-	base := strings.TrimSuffix(src, ext)
-	base = strings.TrimSuffix(base, "_RGB_HDR")
-	base = strings.TrimSuffix(base, "_RGB")
-	base = strings.TrimSuffix(base, "_NEG")
-	return base + "_RGB.tiff"
+	stem := strings.TrimSuffix(filepath.Base(src), ext)
+	dir := filepath.Dir(src)
+	tag := stock.FileTag
+	if tag == "" {
+		tag = strings.ReplaceAll(stock.Name, " ", "")
+	}
+	base := filepath.Join(dir, stem+"_"+tag+".tiff")
+	if _, err := os.Stat(base); err != nil {
+		return base
+	}
+	for n := 2; n < 1000; n++ {
+		p := filepath.Join(dir, fmt.Sprintf("%s_%s_%d.tiff", stem, tag, n))
+		if _, err := os.Stat(p); err != nil {
+			return p
+		}
+	}
+	return filepath.Join(dir, fmt.Sprintf("%s_%s_%d.tiff", stem, tag, 1000))
 }
 
-// Metadata builds nss.scan/1 with film_base 0.5/0.5/0.5 after_profile.
 func Metadata(o Options) scanmeta.Metadata {
 	b := [3]float64{BaseFS, BaseFS, BaseFS}
+	proc := "digital-to-negative; stock=" + o.Stock.Name
+	if cs := CurveFor(o.Stock.Name); cs != nil {
+		proc += "; curve=StatusM-CSV"
+	} else {
+		proc += "; curve=logistic-fallback"
+	}
+	if o.Grain != GrainOff {
+		proc += "; grain=" + o.Grain.Label()
+	}
 	m := scanmeta.Metadata{
 		Mode:          "convert",
 		Encoding:      "linear",
 		FilmBase:      &b,
 		FilmBaseSpace: scanmeta.AfterProfile,
 		BaseSource:    "convert simulated levelled base",
-		Processing:    "digital-to-negative; stock=" + o.Stock.Name,
+		Processing:    proc,
 		Roll:          o.Roll,
 	}
 	if m.Roll == "" {

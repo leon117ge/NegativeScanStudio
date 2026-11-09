@@ -1,6 +1,6 @@
 package main
 
-// Page 4 "Convert" (v0.94): digital camera RAW / linear TIFF -> simulated
+// Page 4 "Convert" (v0.95): digital camera RAW / linear TIFF -> simulated
 // colour-negative TIFF. Replaces the Develop module. English UI only.
 
 import (
@@ -33,6 +33,7 @@ type ConvertUI struct {
 	useCam bool
 	border float64
 	softBorder bool
+	grain     convert.GrainISO
 
 	status, info *walk.Label
 	fileCB       *walk.ComboBox
@@ -41,6 +42,7 @@ type ConvertUI struct {
 	camChk       *walk.CheckBox
 	borderNE     *walk.NumberEdit
 	softChk      *walk.CheckBox
+	grainCB      *walk.ComboBox
 	pb           *walk.ProgressBar
 	logTE        *walk.TextEdit
 	view         *walk.CustomWidget
@@ -84,12 +86,13 @@ func (u *ConvertUI) init() {
 	u.useCam = true
 	u.border = 0.04
 	u.softBorder = true
+	u.grain = convert.GrainOff
 }
 
 func (u *ConvertUI) options() convert.Options {
 	o := convert.Options{
 		Stock: u.stock, EV: u.ev, ApplyCamProfile: u.useCam,
-		BorderPct: u.border, SoftBorder: u.softBorder,
+		BorderPct: u.border, SoftBorder: u.softBorder, Grain: u.grain,
 		Software: appVersion, LZW: true,
 	}
 	if p, k := activeCam(); p != nil && u.useCam {
@@ -317,10 +320,7 @@ func convertFile(src string, o convert.Options, progress func(float64)) (string,
 	if progress != nil {
 		progress(0.8)
 	}
-	dst := convert.RGBPath(src)
-	if _, err := os.Stat(dst); err == nil {
-		return "", fmt.Errorf("already exists: %s", dst)
-	}
+	dst := convert.OutputPath(src, o.Stock)
 	sw := o.Software
 	if sw == "" {
 		sw = appVersion
@@ -414,7 +414,7 @@ func (u *ConvertUI) Page() TabPage {
 						MinSize: Size{Width: 420, Height: 280}, StretchFactor: 4,
 						ToolTipText: "Preview of the simulated colour negative (transmittance)."},
 					Label{AssignTo: &u.status, EllipsisMode: EllipsisEnd,
-						Text: "Open a Fujifilm RAF (or linear TIFF). Output matches leveled scans: film base 0.5/0.5/0.5, rebate border, nss.scan/1 metadata for OFX.",
+						Text: "Open a Fujifilm RAF (or linear TIFF). Leveled-scan look: base 0.5, Kodak Status M D-logH (still stocks), rebate border, grain option, nss.scan/1 for OFX.",
 						TextColor: walk.RGB(128, 128, 136)},
 					Composite{Layout: HBox{MarginsZero: true, Spacing: 4}, Children: []Widget{
 						PushButton{Text: "Open files...", OnClicked: func() {
@@ -478,8 +478,20 @@ func (u *ConvertUI) Page() TabPage {
 							u.softBorder = u.softChk.Checked()
 							u.reprocess()
 						}},
+						Label{Text: "Film grain"},
+						ComboBox{AssignTo: &u.grainCB, Model: []string{"Off", "ISO 100", "ISO 400"}, CurrentIndex: 0, OnCurrentIndexChanged: func() {
+							switch u.grainCB.CurrentIndex() {
+							case 1:
+								u.grain = convert.GrainISO100
+							case 2:
+								u.grain = convert.GrainISO400
+							default:
+								u.grain = convert.GrainOff
+							}
+							u.reprocess()
+						}, ToolTipText: "Density-domain grain before transmittance. ISO 100 is finer; ISO 400 is coarser. Strength is stock-tuned (Ektar finest)."},
 					}},
-					GroupBox{Title: "Export (16-bit TIFF, scan-style _RGB.tiff + nss.scan/1 metadata)", Layout: VBox{Spacing: 4, Margins: Margins{Left: 8, Top: 4, Right: 8, Bottom: 6}}, Children: []Widget{
+					GroupBox{Title: "Export (16-bit TIFF, RAFBasename_Stock.tiff + nss.scan/1 metadata)", Layout: VBox{Spacing: 4, Margins: Margins{Left: 8, Top: 4, Right: 8, Bottom: 6}}, Children: []Widget{
 						Composite{Layout: HBox{MarginsZero: true, Spacing: 4}, Children: []Widget{
 							PushButton{Text: "Export current", StretchFactor: 1, OnClicked: u.exportOne},
 							PushButton{Text: "Export all in list", StretchFactor: 1, OnClicked: u.exportAll},

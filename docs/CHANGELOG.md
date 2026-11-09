@@ -1,8 +1,15 @@
 # NegativeScan Studio app — Changelog / 扫描软件更新日志
 
-Current local test app: **v0.94**, not published. Latest published app: **v0.91** · [App release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/v0.91) · [OFX plugin changelog](../ofx/CHANGELOG.md) · [Versioning policy](VERSIONING.md)
+Current local test app: **v0.95**, not published. Latest published app: **v0.91** · [App release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/v0.91) · [OFX plugin changelog](../ofx/CHANGELOG.md) · [Versioning policy](VERSIONING.md)
 
 This file tracks the scanning app, not plugin-only releases. / 本文件只记录扫描软件。
+
+## v0.95 local test build
+
+- Convert uses full Kodak Status M D-logH CSVs (PCHIP) for Ektar 100 / Portra 400 / Gold 200 / UltraMax 400; Vision3 500T/250D keep logistic mid-slope fallback (no full polyline digitised yet).
+- Output name: `<RAFStem>_<Stock>.tiff` (Portra400, Ektar100, …); auto `_2`, `_3` if taken.
+- Film grain Off / ISO 100 / ISO 400 in density space (own model; spektrafilm consulted for approach only).
+- Local only; no tag/push/release.
 
 ## v0.94 local test build
 
