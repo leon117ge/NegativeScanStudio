@@ -1,6 +1,6 @@
 package main
 
-// Page 4 "Convert" (v0.95): digital camera RAW / linear TIFF -> simulated
+// Page 4 "Convert" (v0.96): digital camera RAW / linear TIFF -> simulated
 // colour-negative TIFF. Replaces the Develop module. English UI only.
 
 import (
@@ -34,6 +34,7 @@ type ConvertUI struct {
 	border float64
 	softBorder bool
 	grain     convert.GrainISO
+	gStrength float64
 
 	status, info *walk.Label
 	fileCB       *walk.ComboBox
@@ -43,6 +44,11 @@ type ConvertUI struct {
 	borderNE     *walk.NumberEdit
 	softChk      *walk.CheckBox
 	grainCB      *walk.ComboBox
+	gStrNE       *walk.NumberEdit
+	cachePath    string
+	cachePix     []uint16
+	cacheW, cacheH int
+	cacheNote    string
 	pb           *walk.ProgressBar
 	logTE        *walk.TextEdit
 	view         *walk.CustomWidget
@@ -87,12 +93,13 @@ func (u *ConvertUI) init() {
 	u.border = 0.04
 	u.softBorder = true
 	u.grain = convert.GrainOff
+	u.gStrength = 1
 }
 
 func (u *ConvertUI) options() convert.Options {
 	o := convert.Options{
 		Stock: u.stock, EV: u.ev, ApplyCamProfile: u.useCam,
-		BorderPct: u.border, SoftBorder: u.softBorder, Grain: u.grain,
+		BorderPct: u.border, SoftBorder: u.softBorder, Grain: u.grain, GrainStrength: u.gStrength,
 		Software: appVersion, LZW: true,
 	}
 	if p, k := activeCam(); p != nil && u.useCam {
@@ -157,21 +164,39 @@ func (u *ConvertUI) loadPreview(path string) {
 	if u.status != nil {
 		u.status.SetText("Loading " + filepath.Base(path) + "...")
 	}
-	o := u.options()
 	go func() {
 		defer func() { u.ui(func() { u.busy = false }) }()
-		pix, w, h, note, err := loadLinearRGB16(path, 800)
+		pix, w, h, note, err := loadLinearRGB16(path, 1600)
 		u.ui(func() {
 			if err != nil {
 				u.log("load failed: " + err.Error())
 				u.status.SetText("Load failed")
+				u.cachePath, u.cachePix = "", nil
 				return
 			}
-			out := convert.Process16(pix, w, h, o)
+			u.cachePath, u.cachePix, u.cacheW, u.cacheH, u.cacheNote = path, pix, w, h, note
+			u.renderPreviewFromCache()
+		})
+	}()
+}
+
+// renderPreviewFromCache runs Convert on the cached linear preview (no RAW decode).
+func (u *ConvertUI) renderPreviewFromCache() {
+	if len(u.cachePix) == 0 || u.cacheW == 0 {
+		return
+	}
+	o := u.options()
+	src := append([]uint16(nil), u.cachePix...)
+	w, h, note, path := u.cacheW, u.cacheH, u.cacheNote, u.cachePath
+	u.busy = true
+	go func() {
+		defer func() { u.ui(func() { u.busy = false }) }()
+		out := convert.Process16Fast(src, w, h, o)
+		u.ui(func() {
 			u.pw, u.ph, u.pix = w, h, out
 			u.makeBitmap()
-			u.status.SetText(fmt.Sprintf("%s  %dx%d  %s", filepath.Base(path), w, h, note))
-			u.log("preview: " + filepath.Base(path) + " / " + o.Stock.Name)
+			u.status.SetText(fmt.Sprintf("%s  preview %dx%d  %s  / %s", filepath.Base(path), w, h, note, o.Stock.Name))
+			u.log("preview render: " + o.Stock.Name + " grain=" + o.Grain.Label())
 			if u.view != nil {
 				u.view.Invalidate()
 			}
@@ -180,10 +205,18 @@ func (u *ConvertUI) loadPreview(path string) {
 }
 
 func (u *ConvertUI) reprocess() {
-	if u.cur < 0 || u.cur >= len(u.files) || u.busy {
+	if u.cur < 0 || u.cur >= len(u.files) {
 		return
 	}
-	u.loadPreview(u.files[u.cur])
+	path := u.files[u.cur]
+	if u.cachePath == path && len(u.cachePix) > 0 {
+		if u.busy {
+			return
+		}
+		u.renderPreviewFromCache()
+		return
+	}
+	u.loadPreview(path)
 }
 
 func (u *ConvertUI) makeBitmap() {
@@ -316,7 +349,7 @@ func convertFile(src string, o convert.Options, progress func(float64)) (string,
 	if progress != nil {
 		progress(0.4)
 	}
-	out := convert.Process16(pix, w, h, o)
+	out := convert.Process16Fast(pix, w, h, o)
 	if progress != nil {
 		progress(0.8)
 	}
@@ -487,9 +520,15 @@ func (u *ConvertUI) Page() TabPage {
 								u.grain = convert.GrainISO400
 							default:
 								u.grain = convert.GrainOff
+	u.gStrength = 1
 							}
 							u.reprocess()
-						}, ToolTipText: "Density-domain grain before transmittance. ISO 100 is finer; ISO 400 is coarser. Strength is stock-tuned (Ektar finest)."},
+						}, ToolTipText: "Poisson dye-cloud grain; local transmittance equalised so mean tone stays put. ISO 100 finer; ISO 400 coarser."},
+						Composite{Layout: HBox{MarginsZero: true, Spacing: 4}, Children: []Widget{
+							Label{Text: "Grain strength"},
+							NumberEdit{AssignTo: &u.gStrNE, Value: 1, MinValue: 0.1, MaxValue: 3, Decimals: 2, Increment: 0.1,
+								OnValueChanged: func() { u.gStrength = u.gStrNE.Value(); u.reprocess() }},
+						}},
 					}},
 					GroupBox{Title: "Export (16-bit TIFF, RAFBasename_Stock.tiff + nss.scan/1 metadata)", Layout: VBox{Spacing: 4, Margins: Margins{Left: 8, Top: 4, Right: 8, Bottom: 6}}, Children: []Widget{
 						Composite{Layout: HBox{MarginsZero: true, Spacing: 4}, Children: []Widget{

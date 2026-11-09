@@ -1,8 +1,15 @@
 # NegativeScan Studio app — Changelog / 扫描软件更新日志
 
-Current local test app: **v0.95**, not published. Latest published app: **v0.91** · [App release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/v0.91) · [OFX plugin changelog](../ofx/CHANGELOG.md) · [Versioning policy](VERSIONING.md)
+Current local test app: **v0.96**, not published. Latest published app: **v0.91** · [App release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/v0.91) · [OFX plugin changelog](../ofx/CHANGELOG.md) · [Versioning policy](VERSIONING.md)
 
 This file tracks the scanning app, not plugin-only releases. / 本文件只记录扫描软件。
+
+## v0.96 local test build
+
+- Redo Convert grain: Poisson dye-cloud (fast+slow sublayers), transmittance local equalisation (mean/contrast neutral within 0.5%).
+- Preview cache: decode/downscale once (~1600px), re-render on slider changes only; tiled+LUT CPU path. No app CUDA this build (CPU fallback).
+- Grain strength slider. Sample crops in /workspace/grain_samples/.
+- Local only; no tag/push/release.
 
 ## v0.95 local test build
 

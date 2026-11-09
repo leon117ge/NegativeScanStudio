@@ -32,6 +32,8 @@ type Options struct {
 	MidDensity      float64
 	MaxDensity      float64
 	Grain           GrainISO
+	GrainStrength   float64 // default 1
+	GrainSize       float64 // default 1, relative cloud size
 	GrainSeed       int64
 	Software        string
 	Roll            string
@@ -95,6 +97,12 @@ func (o *Options) normalize() {
 	if o.GrainSeed == 0 {
 		o.GrainSeed = 0x4e535347 // 'NSSG'
 	}
+	if o.GrainStrength <= 0 {
+		o.GrainStrength = 1
+	}
+	if o.GrainSize <= 0 {
+		o.GrainSize = 1
+	}
 }
 
 func densityAboveLogistic(logH, gamma, dMid, dMax float64) float64 {
@@ -126,6 +134,10 @@ func densityAboveFor(lin float64, c int, o Options, cs *CurveSet) float64 {
 	return densityAboveLogistic(rel, o.Stock.Gamma[c], o.MidDensity, o.MaxDensity)
 }
 
+func applyCamMatrix(m colorsci.Mat3, strength float64, v [3]float64) [3]float64 {
+	return colorsci.ApplyCam(m, strength, v)
+}
+
 func SceneToNeg(v [3]float64, o Options) [3]float64 {
 	o.normalize()
 	if o.ApplyCamProfile && o.CamStrength > 0 {
@@ -148,34 +160,7 @@ func SceneToNeg(v [3]float64, o Options) [3]float64 {
 }
 
 func ProcessPixels(rgb []float64, w, h int, o Options) {
-	o.normalize()
-	if o.ApplyCamProfile && o.CamStrength > 0 {
-		for i := 0; i+2 < len(rgb); i += 3 {
-			v := colorsci.ApplyCam(o.CamMatrix, o.CamStrength, [3]float64{rgb[i], rgb[i+1], rgb[i+2]})
-			rgb[i], rgb[i+1], rgb[i+2] = v[0], v[1], v[2]
-		}
-	}
-	cs := CurveFor(o.Stock.Name)
-	// Density above Dmin first (for grain), then transmittance.
-	for i := 0; i+2 < len(rgb); i += 3 {
-		for c := 0; c < 3; c++ {
-			rgb[i+c] = densityAboveFor(rgb[i+c], c, o, cs)
-		}
-	}
-	applyGrain(rgb, w, h, o.Stock.Name, o.Grain, o.GrainSeed)
-	for i := 0; i+2 < len(rgb); i += 3 {
-		for c := 0; c < 3; c++ {
-			t := BaseFS * math.Pow(10, -rgb[i+c])
-			if t < 0 {
-				t = 0
-			}
-			if t > 1 {
-				t = 1
-			}
-			rgb[i+c] = t
-		}
-	}
-	applyBorder(rgb, w, h, o)
+	ProcessPixelsFast(rgb, w, h, o)
 }
 
 func applyBorder(rgb []float64, w, h int, o Options) {
@@ -238,7 +223,7 @@ func Process16(pix []uint16, w, h int, o Options) []uint16 {
 	for i, v := range pix {
 		tmp[i] = float64(v) / 65535
 	}
-	ProcessPixels(tmp, w, h, o)
+	ProcessPixelsFast(tmp, w, h, o)
 	out := make([]uint16, n)
 	for i, v := range tmp {
 		if v < 0 {
@@ -284,6 +269,9 @@ func Metadata(o Options) scanmeta.Metadata {
 	}
 	if o.Grain != GrainOff {
 		proc += "; grain=" + o.Grain.Label()
+		if o.GrainStrength != 1 {
+			proc += fmt.Sprintf("; grain_strength=%.2f", o.GrainStrength)
+		}
 	}
 	m := scanmeta.Metadata{
 		Mode:          "convert",

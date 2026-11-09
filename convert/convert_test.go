@@ -167,3 +167,64 @@ func TestApplyCam(t *testing.T) {
 		t.Fatal("cam")
 	}
 }
+
+func TestGrainContrastNeutral(t *testing.T) {
+	s, _ := StockByName("Portra 400")
+	w, h := 256, 128
+	mk := func(g GrainISO) []float64 {
+		rgb := make([]float64, w*h*3)
+		for y := 0; y < h; y++ {
+			L := math.Pow(10, -2+4*float64(y)/float64(h-1)) // log ramp
+			for x := 0; x < w; x++ {
+				i := (y*w + x) * 3
+				rgb[i], rgb[i+1], rgb[i+2] = L, L, L
+			}
+		}
+		ProcessPixels(rgb, w, h, Options{Stock: s, Grain: g, GrainSeed: 7, BorderPct: 0, GrainStrength: 1})
+		return rgb
+	}
+	off, on := mk(GrainOff), mk(GrainISO400)
+	// Global mean within 0.5%
+	var mo, mn float64
+	for i := range off {
+		mo += off[i]
+		mn += on[i]
+	}
+	mo /= float64(len(off))
+	mn /= float64(len(on))
+	rel := math.Abs(mn-mo) / math.Max(mo, 1e-9)
+	t.Logf("mean off=%.6f on=%.6f rel=%.4f%%", mo, mn, rel*100)
+	if rel > 0.005 {
+		t.Fatalf("mean shifted by %.3f%% > 0.5%%", rel*100)
+	}
+	// Local-average tone curve: blur both at grain scale, compare per-row means
+	blur := func(src []float64) []float64 {
+		p := append([]float64(nil), src...)
+		// planar G channel blur proxy: average RGB then blur as mono plane
+		plane := make([]float64, w*h)
+		for i := 0; i < w*h; i++ {
+			plane[i] = (p[i*3] + p[i*3+1] + p[i*3+2]) / 3
+		}
+		blurInPlace(plane, w, h, 6)
+		return plane
+	}
+	bo, bn := blur(off), blur(on)
+	var maxRowRel float64
+	for y := 0; y < h; y++ {
+		var ro, rn float64
+		for x := 0; x < w; x++ {
+			ro += bo[y*w+x]
+			rn += bn[y*w+x]
+		}
+		ro /= float64(w)
+		rn /= float64(w)
+		r := math.Abs(rn-ro) / math.Max(ro, 1e-9)
+		if r > maxRowRel {
+			maxRowRel = r
+		}
+	}
+	t.Logf("max row local-avg rel=%.4f%%", maxRowRel*100)
+	if maxRowRel > 0.005 {
+		t.Fatalf("local tone curve shifted by %.3f%% > 0.5%%", maxRowRel*100)
+	}
+}
