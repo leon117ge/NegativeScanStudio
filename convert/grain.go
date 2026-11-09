@@ -157,7 +157,10 @@ func applyGrainPoisson(d []float64, w, h int, stock string, iso GrainISO, seed i
 						if nS < 0 {
 							nS = 0
 						}
-						planes[c][i] = nF*df + nS*ds
+						// Store only the zero-mean grain fluctuation; the image
+						// density itself must not be blurred (v0.96 blurred the
+						// whole frame, which made exports soft).
+						planes[c][i] = (nF*df + nS*ds) - D
 					}
 				}
 			}
@@ -184,7 +187,11 @@ func applyGrainPoisson(d []float64, w, h int, stock string, iso GrainISO, seed i
 
 	for i := 0; i < n; i++ {
 		for c := 0; c < 3; c++ {
-			d[i*3+c] = planes[c][i]
+			v := d[i*3+c] + planes[c][i]
+			if v < 0 {
+				v = 0
+			}
+			d[i*3+c] = v
 		}
 	}
 	return sigmaEq
