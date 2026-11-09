@@ -49,33 +49,29 @@ func stockGrainScale(name string) float64 {
 
 // grainParams returns dye-cloud density quantum δ (fast/slow) and blur σ in
 // pixels for a 36x24 mm frame at width w.
-func grainParams(w int, stock string, iso GrainISO, strength, sizeMul float64) (deltaFast, deltaSlow, sigmaFast, sigmaSlow float64) {
+func grainParams(w int, stock string, iso GrainISO, strength, sizeMul float64) (deltaFast, deltaSlow, sigmaFast, sigmaSlow float64, prof GrainProfile) {
 	if strength <= 0 {
 		strength = 1
 	}
 	if sizeMul <= 0 {
 		sizeMul = 1
 	}
-	// Base quantum (Status-M density per dye cloud at Portra / ISO100).
-	df, ds := 0.012, 0.004
-	umFast, umSlow := 18.0, 7.0
-	if iso == GrainISO400 {
-		df, ds = 0.028, 0.009
-		umFast, umSlow = 32.0, 12.0
-	}
-	s := stockGrainScale(stock) * strength
-	df *= s
-	ds *= s
+	prof = grainProfile(stock, iso)
+	// Base quantum; Amp from 500T calibration.
+	df, ds := 0.018*prof.Amp, 0.006*prof.Amp
+	umFast, umSlow := 14.0*prof.Size, 5.5*prof.Size
+	df *= strength
+	ds *= strength
 	pxUM := 36000.0 / float64(w)
 	sigmaFast = (umFast * sizeMul) / pxUM
 	sigmaSlow = (umSlow * sizeMul) / pxUM
-	if sigmaFast < 0.8 {
-		sigmaFast = 0.8
+	if sigmaFast < 0.7 {
+		sigmaFast = 0.7
 	}
-	if sigmaSlow < 0.5 {
-		sigmaSlow = 0.5
+	if sigmaSlow < 0.45 {
+		sigmaSlow = 0.45
 	}
-	return df, ds, sigmaFast, sigmaSlow
+	return df, ds, sigmaFast, sigmaSlow, prof
 }
 
 // applyGrainPoisson replaces density-above-Dmin samples with a Poisson /
@@ -87,7 +83,7 @@ func applyGrainPoisson(d []float64, w, h int, stock string, iso GrainISO, seed i
 	if iso == GrainOff || w < 8 || h < 8 {
 		return 0
 	}
-	df, ds, sigF, sigS := grainParams(w, stock, iso, strength, sizeMul)
+	df, ds, sigF, sigS, prof := grainParams(w, stock, iso, strength, sizeMul)
 	// Equalisation blur a bit larger than the coarse cloud so LF tone is matched.
 	sigmaEq = sigF * 2.0
 	if sigmaEq < 2 {
@@ -114,8 +110,15 @@ func applyGrainPoisson(d []float64, w, h int, stock string, iso GrainISO, seed i
 			chS[c][i] = rng.NormFloat64()
 		}
 	}
-	const corr = 0.35
+	corr := prof.Corr
+	if corr < 0 {
+		corr = 0
+	}
+	if corr > 0.95 {
+		corr = 0.95
+	}
 	sCorr := math.Sqrt(1 - corr*corr)
+	cs := prof.ChanScale
 
 	// Split mean density ~60% slow (fine) / 40% fast (coarse) dye clouds.
 	const wFast, wSlow = 0.40, 0.60
@@ -160,7 +163,7 @@ func applyGrainPoisson(d []float64, w, h int, stock string, iso GrainISO, seed i
 						// Store only the zero-mean grain fluctuation; the image
 						// density itself must not be blurred (v0.96 blurred the
 						// whole frame, which made exports soft).
-						planes[c][i] = (nF*df + nS*ds) - D
+						planes[c][i] = ((nF*df + nS*ds) - D) * cs[c]
 					}
 				}
 			}
