@@ -526,7 +526,7 @@ func (u *ConvertUI) Page() TabPage {
 						}, ToolTipText: "Poisson dye-cloud grain; local transmittance equalised so mean tone stays put. ISO 100 finer; ISO 400 coarser."},
 						Composite{Layout: HBox{MarginsZero: true, Spacing: 4}, Children: []Widget{
 							Label{Text: "Grain strength"},
-							NumberEdit{AssignTo: &u.gStrNE, Value: 1, MinValue: 0.1, MaxValue: 3, Decimals: 2, Increment: 0.1,
+							NumberEdit{AssignTo: &u.gStrNE, Value: 1, MinValue: 0, MaxValue: 3, Decimals: 2, Increment: 0.1,
 								OnValueChanged: func() { u.gStrength = u.gStrNE.Value(); u.reprocess() }},
 						}},
 					}},
