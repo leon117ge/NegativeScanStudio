@@ -1,8 +1,17 @@
 # NegativeScan Studio app — Changelog / 扫描软件更新日志
 
-Current local test app: **v0.92**, not published. Latest published app: **v0.91** · [App release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/v0.91) · [OFX plugin changelog](../ofx/CHANGELOG.md) · [Versioning policy](VERSIONING.md)
+Current local test app: **v0.93**, not published. Latest published app: **v0.91** · [App release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/v0.91) · [OFX plugin changelog](../ofx/CHANGELOG.md) · [Versioning policy](VERSIONING.md)
 
 This file tracks the scanning app, not plugin-only releases. / 本文件只记录扫描软件。
+
+## v0.93 local test build
+
+- Replace the **Develop** module with **Convert**: digital camera RAW (Fujifilm X-T3 LibRaw / X-Trans) or linear TIFF to a simulated colour-negative 16-bit `_NEG.tiff`.
+- Input colour: Chart camera profile via `activeCam()` + `colorsci.ApplyCam` (same CamCal matrix as Light leveling). LibRaw camera matrix stays off.
+- Film model: mid-slope H&D curves from existing Kodak PDF gamma tables + dye mixing from `colorsci` spectral dye sets (H-1-5219, E-4046, E-4050, E-7023, E-7022). Orange-mask Dmin when available.
+- Stocks: Vision3 500T, Vision3 250D, UltraMax 400, Portra 400, Gold 200, Ektar 100. Exposure EV control. English UI only.
+- Inspired by spektrafilm pipeline shape; **no** spektrafilm code or CC BY-SA profiles. See `docs/convert-design.md` and `NOTICE_CONVERT.md`.
+- No tag, push, or GitHub release in this step. OFX unchanged.
 
 ## v0.92 local test build
 

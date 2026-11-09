@@ -7,7 +7,6 @@ import (
 	"runtime/debug"
 	"strings"
 
-	"basetool/develop"
 	"basetool/filmdb"
 	"github.com/lxn/walk"
 	. "github.com/lxn/walk/declarative"
@@ -26,7 +25,7 @@ func main() {
 	// Four app modules; Resolve conversion is provided by the independent OFX plugin.
 	tabs := newPager(4)
 	pageBar := newNavBar(tabs, false,
-		navItem{"Camera & Light", iconLight}, navItem{"HDR Scan", iconHDR}, navItem{"Crop & Merge", iconCrop}, navItem{"Develop", iconDevelop})
+		navItem{"Camera & Light", iconLight}, navItem{"HDR Scan", iconHDR}, navItem{"Crop & Merge", iconCrop}, navItem{"Convert", iconConvert})
 	camTabs := newPager(2)
 	camSeg := newNavBar(camTabs, true, navItem{label: "Camera"}, navItem{label: "Light"})
 	scanTabs := newPager(2)
@@ -42,7 +41,7 @@ func main() {
 	rawui := &RAWUI{mw: &mw}
 	hdrui := &HDRUI{mw: &mw}
 	cropui := &CropUI{mw: &mw}
-	devui := &DevUI{mw: &mw}
+	convui := &ConvertUI{mw: &mw}
 	lightui := &LightUI{mw: &mw, hdr: hdrui}
 	hdrui.light = lightui
 	triui := &TriUI{hdr: hdrui, light: lightui}
@@ -77,7 +76,7 @@ func main() {
 			}
 			switch tabs.CurrentIndex() {
 			case 3:
-				devui.Open(files)
+				convui.Open(files)
 			case 2:
 				switch cropTabs.CurrentIndex() {
 				case 1:
@@ -102,7 +101,7 @@ func main() {
 						Layout: VBox{MarginsZero: true, Spacing: 0},
 						Children: []Widget{
 							Label{Text: appVersion, TextColor: walk.RGB(236, 236, 240), Font: Font{Family: "Segoe UI", PointSize: 12, Bold: true}},
-							Label{Text: "Camera and light control, tethered HDR scanning, RAW to linear TIFF, crop and Develop preview", TextColor: walk.RGB(128, 128, 136)},
+							Label{Text: "Camera and light control, tethered HDR scanning, RAW to linear TIFF, crop and Convert (RAW to film negative)", TextColor: walk.RGB(128, 128, 136)},
 						},
 					},
 					HSpacer{},
@@ -116,7 +115,7 @@ func main() {
 				module("  1. Camera & Light  ", camSeg, camTabs, hp.Camera, lightui.Page()),
 				module("  2. HDR Scan  ", scanSeg, scanTabs, hp.White, triui.Page()),
 				module("  3. Crop & Merge  ", cropSeg, cropTabs, cropui.Page(), hp.Merge, hp.Hairs, hp.Batch),
-				devui.Page(),
+				convui.Page(),
 			), VSpacer{StretchFactor: 1})},
 			pageBar.Widget(),
 		},
@@ -153,41 +152,19 @@ func main() {
 	tabs.onChange, camTabs.onChange, scanTabs.onChange = updateLivePage, updateLivePage, updateLivePage
 	updateLivePage(0)
 	lightui.cast.toDevelop = func(c filmdb.ColourCast) {
-		n := &devui.chain.Nodes[devui.nodeIndex(develop.TDensity)]
-		n.V["cast_on"] = 0
-		if c.Enabled {
-			n.V["cast_on"] = 1
-		}
-		for i, key := range []string{"cast_r", "cast_g", "cast_b"} {
-			n.V[key] = c.Offset[i]
-		}
-		devui.syncPanel(develop.TDensity)
-		devui.changed()
-		walk.MsgBox(mw, "500T colour cast", "Density In correction sent to Develop. Existing creative gamma / auto-WB settings are unchanged; avoid double colour correction.", walk.MsgBoxIconInformation)
+		walk.MsgBox(mw, "500T colour cast", "Convert models a digital-to-negative exposure and does not use the Develop Density In cast controls. Colour cast stays on the 500T calculator page.", walk.MsgBoxIconInformation)
 	}
 	hdrui.SendBase = func(b SentBase) {
-		n := &devui.chain.Nodes[devui.nodeIndex(develop.TDensity)]
-		n.V["preset"] = 0
-		for i, key := range []string{"base_r", "base_g", "base_b"} {
-			n.V[key] = b.RGB[i]
-		}
-		devui.syncPanel(develop.TDensity)
-		if b.Trichrome {
-			m := &devui.chain.Nodes[devui.nodeIndex(develop.TMask)]
-			m.V["mask_on"], m.V["strength"] = 0, 0
-			devui.syncPanel(develop.TMask)
-		}
-		devui.changed()
-		tabs.SetCurrentIndex(3)
+		walk.MsgBox(mw, "Film base", "Convert does not apply a scanned film-base reference. Use the OFX plugin for negative-to-positive grading of scanned film.", walk.MsgBoxIconInformation)
 	}
 	hdrui.OpenInDevelop = func(path string) {
 		tabs.SetCurrentIndex(3)
-		devui.Open([]string{path})
+		convui.Open([]string{path})
 	}
 	hdrui.AfterCreate()
 	lightui.AfterCreate()
 	triui.AfterCreate()
-	devui.init()
+	convui.init()
 	applyDark(mw)
 	fitToWorkArea(mw)
 	// "NegativeScanStudio.exe --crop <files or folders>" opens them on the Crop page
@@ -196,10 +173,10 @@ func main() {
 		cropTabs.SetCurrentIndex(0)
 		cropui.AddFiles(os.Args[2:])
 	}
-	// "NegativeScanStudio.exe --develop <files or folder>" opens them on the Develop page
-	if len(os.Args) > 2 && os.Args[1] == "--develop" {
+	// "NegativeScanStudio.exe --develop / --convert <files or folder>" opens them on the Convert page
+	if len(os.Args) > 2 && (os.Args[1] == "--develop" || os.Args[1] == "--convert") {
 		tabs.SetCurrentIndex(3)
-		devui.Open(os.Args[2:])
+		convui.Open(os.Args[2:])
 	}
 	// "NegativeScanStudio.exe --light" opens the Light page
 	if len(os.Args) > 1 && os.Args[1] == "--light" {

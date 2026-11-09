@@ -338,6 +338,8 @@ func iconCrop(z *vector.Rasterizer, s float32) {
 }
 
 // develop: a negative frame with an arrow to a filled positive frame
+func iconConvert(z *vector.Rasterizer, s float32) { iconDevelop(z, s) }
+
 func iconDevelop(z *vector.Rasterizer, s float32) {
 	vRect(z, s, 2, 6, 10, 18, false)
 	vRect(z, s, 3.6, 7.6, 8.4, 16.4, true)
