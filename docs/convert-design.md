@@ -51,3 +51,10 @@ English only. Stock dropdown, exposure EV, optional “apply camera profile”, 
 - Matrix: user Chart profile in `%APPDATA%/NegativeScanStudio/camera_profiles.json` via `activeCam()` → `CamProfile.M` / strength.
 - Apply: `colorsci.ApplyCam` (`colorsci/camcal.go`).
 - RAW: `rawconv.decode` / `rawconv.Convert` (`rawconv/libraw.go`, `use_camera_matrix = 0`).
+
+## v0.94 scan-matched negative
+
+- Output FS: base = 0.5/0.5/0.5; image = 0.5 * 10^(-(D-Dmin)). No orange cast.
+- Rebate border (BorderPct, SoftBorder).
+- Metadata: nss.scan/1 film_base after_profile; file name *_RGB.tiff via rawconv.WriteTIFF16Description.
+- Round-trip: Density In base 0.5 + Positive Out stock gamma (develop package = dctl_math.hpp).

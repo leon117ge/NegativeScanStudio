@@ -1,8 +1,17 @@
 # NegativeScan Studio app — Changelog / 扫描软件更新日志
 
-Current local test app: **v0.93**, not published. Latest published app: **v0.91** · [App release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/v0.91) · [OFX plugin changelog](../ofx/CHANGELOG.md) · [Versioning policy](VERSIONING.md)
+Current local test app: **v0.94**, not published. Latest published app: **v0.91** · [App release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/v0.91) · [OFX plugin changelog](../ofx/CHANGELOG.md) · [Versioning policy](VERSIONING.md)
 
 This file tracks the scanning app, not plugin-only releases. / 本文件只记录扫描软件。
+
+## v0.94 local test build
+
+- Convert output matches leveled trichrome scans: film base **0.5/0.5/0.5** linear FS; image = `0.5 * 10^(-(D-Dmin))` (no orange-mask cast).
+- Configurable film-base rebate border (default 4% of short edge, optional soft edge).
+- Write `nss.scan/1` ImageDescription with `film_base` 0.5 after_profile and stock in `processing`; 16-bit LZW `_RGB.tiff` naming like trichrome.
+- H&D logistic with toe/shoulder; mid density 0.75 at 18% grey; per-channel Kodak/OFX gammas.
+- Round-trip test with Develop/OFX Density In (base 0.5) + Positive Out (stock gamma, linear): grey ramp monotonic and near-neutral.
+- Local only; no tag/push/release.
 
 ## v0.93 local test build
 

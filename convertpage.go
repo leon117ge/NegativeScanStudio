@@ -1,6 +1,6 @@
 package main
 
-// Page 4 "Convert" (v0.93): digital camera RAW / linear TIFF -> simulated
+// Page 4 "Convert" (v0.94): digital camera RAW / linear TIFF -> simulated
 // colour-negative TIFF. Replaces the Develop module. English UI only.
 
 import (
@@ -31,12 +31,16 @@ type ConvertUI struct {
 	stock  convert.Stock
 	ev     float64
 	useCam bool
+	border float64
+	softBorder bool
 
 	status, info *walk.Label
 	fileCB       *walk.ComboBox
 	stockCB      *walk.ComboBox
 	evNE         *walk.NumberEdit
 	camChk       *walk.CheckBox
+	borderNE     *walk.NumberEdit
+	softChk      *walk.CheckBox
 	pb           *walk.ProgressBar
 	logTE        *walk.TextEdit
 	view         *walk.CustomWidget
@@ -78,10 +82,16 @@ func (u *ConvertUI) init() {
 	}
 	u.ev = 0
 	u.useCam = true
+	u.border = 0.04
+	u.softBorder = true
 }
 
 func (u *ConvertUI) options() convert.Options {
-	o := convert.Options{Stock: u.stock, EV: u.ev, ApplyCamProfile: u.useCam}
+	o := convert.Options{
+		Stock: u.stock, EV: u.ev, ApplyCamProfile: u.useCam,
+		BorderPct: u.border, SoftBorder: u.softBorder,
+		Software: appVersion, LZW: true,
+	}
 	if p, k := activeCam(); p != nil && u.useCam {
 		o.CamMatrix, o.CamStrength = p.M, k
 		o.ApplyCamProfile = true
@@ -154,7 +164,7 @@ func (u *ConvertUI) loadPreview(path string) {
 				u.status.SetText("Load failed")
 				return
 			}
-			out := convert.Process16(pix, o)
+			out := convert.Process16(pix, w, h, o)
 			u.pw, u.ph, u.pix = w, h, out
 			u.makeBitmap()
 			u.status.SetText(fmt.Sprintf("%s  %dx%d  %s", filepath.Base(path), w, h, note))
@@ -287,35 +297,46 @@ func convertFile(src string, o convert.Options, progress func(float64)) (string,
 	if progress != nil {
 		progress(0.05)
 	}
-	pix, w, h, _, err := loadLinearRGB16(src, 0)
+	pix, w, h, note, err := loadLinearRGB16(src, 0)
 	if err != nil {
 		return "", err
+	}
+	if strings.HasPrefix(note, "LibRaw") {
+		parts := strings.SplitN(strings.TrimPrefix(note, "LibRaw "), " ", 2)
+		if len(parts) >= 1 {
+			o.Make = parts[0]
+		}
+		if len(parts) == 2 {
+			o.Model = parts[1]
+		}
 	}
 	if progress != nil {
 		progress(0.4)
 	}
-	out := convert.Process16(pix, o)
+	out := convert.Process16(pix, w, h, o)
 	if progress != nil {
 		progress(0.8)
 	}
-	dst := negPath(src)
+	dst := convert.RGBPath(src)
 	if _, err := os.Stat(dst); err == nil {
 		return "", fmt.Errorf("already exists: %s", dst)
 	}
-	im := &cropper.Image{W: w, H: h, Bits: 16, Format: "tiff", Pix: out}
-	if err := cropper.Save(dst, im, cropper.SaveOptions{Software: appVersion + " Convert / " + o.Stock.Name}); err != nil {
+	sw := o.Software
+	if sw == "" {
+		sw = appVersion
+	}
+	sw += " convert / " + o.Stock.Name
+	desc, err := convert.Metadata(o).JSON(sw)
+	if err != nil {
+		return "", err
+	}
+	if err := rawconv.WriteTIFF16Description(dst, w, h, out, o.LZW, o.Make, o.Model, sw, desc); err != nil {
 		return "", err
 	}
 	if progress != nil {
 		progress(1)
 	}
 	return dst, nil
-}
-
-func negPath(src string) string {
-	ext := filepath.Ext(src)
-	base := strings.TrimSuffix(src, ext)
-	return base + "_NEG.tiff"
 }
 
 func loadLinearRGB16(path string, maxEdge int) (pix []uint16, w, h int, note string, err error) {
@@ -393,7 +414,7 @@ func (u *ConvertUI) Page() TabPage {
 						MinSize: Size{Width: 420, Height: 280}, StretchFactor: 4,
 						ToolTipText: "Preview of the simulated colour negative (transmittance)."},
 					Label{AssignTo: &u.status, EllipsisMode: EllipsisEnd,
-						Text: "Open a Fujifilm RAF (or linear TIFF). Uses LibRaw X-Trans decode and the Chart camera profile when enabled.",
+						Text: "Open a Fujifilm RAF (or linear TIFF). Output matches leveled scans: film base 0.5/0.5/0.5, rebate border, nss.scan/1 metadata for OFX.",
 						TextColor: walk.RGB(128, 128, 136)},
 					Composite{Layout: HBox{MarginsZero: true, Spacing: 4}, Children: []Widget{
 						PushButton{Text: "Open files...", OnClicked: func() {
@@ -447,8 +468,18 @@ func (u *ConvertUI) Page() TabPage {
 							u.useCam = u.camChk.Checked()
 							u.reprocess()
 						}, ToolTipText: "Uses activeCam() matrix from camera_profiles.json via colorsci.ApplyCam - same as Light leveling."},
+						Composite{Layout: HBox{MarginsZero: true, Spacing: 4}, Children: []Widget{
+							Label{Text: "Film-base border"},
+							NumberEdit{AssignTo: &u.borderNE, Value: 0.04, MinValue: 0, MaxValue: 0.15, Decimals: 3, Increment: 0.005,
+								OnValueChanged: func() { u.border = u.borderNE.Value(); u.reprocess() },
+								ToolTipText: "Rebate width on each side as a fraction of the short edge (like a scanned 35mm frame edge)."},
+						}},
+						CheckBox{AssignTo: &u.softChk, Text: "Soft border edge", Checked: true, OnCheckedChanged: func() {
+							u.softBorder = u.softChk.Checked()
+							u.reprocess()
+						}},
 					}},
-					GroupBox{Title: "Export (16-bit TIFF, new _NEG file next to the source)", Layout: VBox{Spacing: 4, Margins: Margins{Left: 8, Top: 4, Right: 8, Bottom: 6}}, Children: []Widget{
+					GroupBox{Title: "Export (16-bit TIFF, scan-style _RGB.tiff + nss.scan/1 metadata)", Layout: VBox{Spacing: 4, Margins: Margins{Left: 8, Top: 4, Right: 8, Bottom: 6}}, Children: []Widget{
 						Composite{Layout: HBox{MarginsZero: true, Spacing: 4}, Children: []Widget{
 							PushButton{Text: "Export current", StretchFactor: 1, OnClicked: u.exportOne},
 							PushButton{Text: "Export all in list", StretchFactor: 1, OnClicked: u.exportAll},

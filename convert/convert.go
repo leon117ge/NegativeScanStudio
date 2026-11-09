@@ -1,73 +1,75 @@
 // Package convert turns calibrated linear camera RGB into a simulated
-// colour-negative (transmittance) image.
-//
-// Algorithm (see docs/convert-design.md): LibRaw linear RGB -> optional
-// Chart CamCal (colorsci.ApplyCam) -> EV exposure -> per-layer H&D density
-// (Kodak datasheet mid-slopes) -> dye mixing via MeasuredForward on our
-// digitised dye spectra -> T = 10^(-D). Inspired by the spektrafilm pipeline
-// shape; no spektrafilm code or CC BY-SA profile data is used.
+// colour-negative that matches NegativeScan Studio leveled trichrome scans:
+// film base at 0.5/0.5/0.5 linear FS, image = 0.5 * 10^(-(D-Dmin)), optional
+// rebate border, nss.scan/1 metadata values. No orange-mask cast.
 package convert
 
 import (
 	"fmt"
 	"math"
+	"path/filepath"
+	"strings"
 	"sync"
 
 	"basetool/colorsci"
+	"basetool/scanmeta"
 )
 
 // Stock is one film model available in Convert.
 type Stock struct {
 	Name   string
-	Source string // human-readable citation
+	Source string
 	Gamma  [3]float64
-	Dyes   colorsci.DyeSet
 }
 
 // Options control one conversion.
 type Options struct {
-	Stock          Stock
-	EV             float64 // exposure compensation in stops
-	CamMatrix      colorsci.Mat3
-	CamStrength    float64 // 0..1; 0 skips ApplyCam
+	Stock           Stock
+	EV              float64
+	CamMatrix       colorsci.Mat3
+	CamStrength     float64
 	ApplyCamProfile bool
+	BorderPct       float64 // rebate each side as fraction of short edge
+	SoftBorder      bool
+	MidDensity      float64 // D-Dmin at 18% grey (default 0.75)
+	MaxDensity      float64 // asymptotic D-Dmin
+	Software        string
+	Roll            string
+	Make            string
+	Model           string
+	LZW             bool
 }
 
-// MidGrey is the linear mid-grey reference for log exposure (18% grey).
-const MidGrey = 0.18
-
-// Density range above Dmin for the soft H&D curve (Status-M-ish).
-const densityRange = 2.4
+const (
+	MidGrey = 0.18
+	BaseFS  = 0.5
+)
 
 var (
 	stockOnce sync.Once
 	stockList []Stock
-	fwdCache  = map[string]colorsci.Mat3{}
-	dminCache = map[string][3]float64{}
 )
 
-// Stocks returns the built-in Convert stocks (order = UI order).
 func Stocks() []Stock {
 	stockOnce.Do(func() {
 		stockList = []Stock{
-			{Name: "Vision3 500T 5219", Source: "Gamma: OFX Vision3 Status M; dyes+Dmin: Kodak H-1-5219",
-				Gamma: [3]float64{0.4482, 0.5266, 0.5096}, Dyes: colorsci.Vision3500TDyes},
-			{Name: "Vision3 250D 5207", Source: "Gamma: OFX 250D preset; dyes: H-1-5219 shapes (proxy for 5207)",
-				Gamma: [3]float64{0.48148148, 0.56018519, 0.54166667}, Dyes: colorsci.Vision3Dyes},
-			{Name: "UltraMax 400", Source: "Gamma: OFX still_gammas (Kodak E-7023 polylines); dyes: E-7023 decomposed",
-				Gamma: [3]float64{0.518590585, 0.536316940, 0.604826092}, Dyes: colorsci.UltraMax400Dyes},
-			{Name: "Portra 400", Source: "Gamma: OFX still_gammas (Kodak E-4050 polylines); dyes: E-4050 decomposed",
-				Gamma: [3]float64{0.555934584, 0.549589137, 0.640031943}, Dyes: colorsci.Portra400Dyes},
-			{Name: "Gold 200", Source: "Gamma: OFX still_gammas (Kodak E-7022 polylines); dyes: E-7022 decomposed",
-				Gamma: [3]float64{0.550723702, 0.564449843, 0.610388122}, Dyes: colorsci.Gold200Dyes},
-			{Name: "Ektar 100", Source: "Gamma: OFX still_gammas (Kodak E-4046 polylines); dyes: E-4046 decomposed",
-				Gamma: [3]float64{0.580572786, 0.579564388, 0.663740443}, Dyes: colorsci.Ektar100Dyes},
+			{Name: "Vision3 500T 5219", Source: "OFX Vision3 Status M gamma; Kodak H-1-5219",
+				Gamma: [3]float64{0.4482, 0.5266, 0.5096}},
+			{Name: "Vision3 250D 5207", Source: "OFX 250D gamma; H-1-5219 family",
+				Gamma: [3]float64{0.48148148, 0.56018519, 0.54166667}},
+			{Name: "UltraMax 400", Source: "OFX still_gammas from Kodak E-7023 polylines",
+				Gamma: [3]float64{0.518590585, 0.536316940, 0.604826092}},
+			{Name: "Portra 400", Source: "OFX still_gammas from Kodak E-4050 polylines",
+				Gamma: [3]float64{0.555934584, 0.549589137, 0.640031943}},
+			{Name: "Gold 200", Source: "OFX still_gammas from Kodak E-7022 polylines",
+				Gamma: [3]float64{0.550723702, 0.564449843, 0.610388122}},
+			{Name: "Ektar 100", Source: "OFX still_gammas from Kodak E-4046 polylines",
+				Gamma: [3]float64{0.580572786, 0.579564388, 0.663740443}},
 		}
 	})
 	return stockList
 }
 
-// StockByName finds a stock or returns an error.
 func StockByName(name string) (Stock, error) {
 	for _, s := range Stocks() {
 		if s.Name == name {
@@ -77,97 +79,130 @@ func StockByName(name string) (Stock, error) {
 	return Stock{}, fmt.Errorf("unknown film stock %q", name)
 }
 
-func forwardOf(s Stock) colorsci.Mat3 {
-	if m, ok := fwdCache[s.Name]; ok {
-		return m
+func (o *Options) normalize() {
+	if o.MidDensity <= 0 {
+		o.MidDensity = 0.75
 	}
-	m := s.Dyes.MeasuredForward(colorsci.XT3Measured, colorsci.ScanLightWhiteLED)
-	fwdCache[s.Name] = m
-	return m
+	if o.MaxDensity <= o.MidDensity {
+		o.MaxDensity = math.Max(2*o.MidDensity, 1.5)
+	}
+	if o.BorderPct < 0 {
+		o.BorderPct = 0
+	}
+	if o.BorderPct > 0.2 {
+		o.BorderPct = 0.2
+	}
 }
 
-// dminRGB is absolute optical density of the unexposed base (orange mask)
-// as seen by XT3Measured under white LED. Falls back to a mild warm base
-// when the stock has no KodakDmin curve.
-func dminRGB(s Stock) [3]float64 {
-	if v, ok := dminCache[s.Name]; ok {
-		return v
-	}
-	var out [3]float64
-	curve, ok := colorsci.KodakDmin[s.Dyes.Name]
-	if !ok {
-		out = [3]float64{0.15, 0.45, 0.55} // R,G,B typical orange-mask-ish
-		dminCache[s.Name] = out
-		return out
-	}
-	for c := 0; c < 3; c++ {
-		var num, den float64
-		for wl := 380.0; wl <= 800; wl += 2 {
-			w := colorsci.XT3Measured.Sens(c, wl) * colorsci.LightSPD(colorsci.LightLED, wl)
-			num += w * math.Pow(10, -curve.At(wl))
-			den += w
-		}
-		if den > 0 {
-			out[c] = -math.Log10(num / den)
-		}
-	}
-	dminCache[s.Name] = out
-	return out
-}
-
-// hd maps mid-grey-relative log10 exposure to density above zero using a
-// logistic whose maximum slope equals gamma (Kodak mid-tone slope).
-func hd(logH, gamma float64) float64 {
+func densityAbove(logH, gamma, dMid, dMax float64) float64 {
 	if gamma < 1e-6 {
 		gamma = 1e-6
 	}
-	k := 4 * gamma / densityRange
-	return densityRange / (1 + math.Exp(-k*logH))
+	if dMax <= dMid {
+		dMax = 2 * dMid
+	}
+	k := 4 * gamma / dMax
+	x0 := math.Log(dMax/dMid-1) / k
+	d := dMax / (1 + math.Exp(-k*(logH-x0)))
+	if d < 0 {
+		return 0
+	}
+	return d
 }
 
-// ProcessPixels converts linear camera RGB (0..1 per sample already scaled
-// from 16-bit / 65535) in place into negative transmittance 0..1.
-func ProcessPixels(rgb []float64, o Options) {
+// SceneToNeg maps one calibrated linear RGB pixel to leveled negative FS.
+func SceneToNeg(v [3]float64, o Options) [3]float64 {
+	o.normalize()
 	exp := math.Pow(2, o.EV)
-	fwd := forwardOf(o.Stock)
-	base := dminRGB(o.Stock)
-	g := o.Stock.Gamma
-	applyCam := o.ApplyCamProfile && o.CamStrength > 0
+	if o.ApplyCamProfile && o.CamStrength > 0 {
+		v = colorsci.ApplyCam(o.CamMatrix, o.CamStrength, v)
+	}
+	var out [3]float64
+	for c := 0; c < 3; c++ {
+		h := math.Max(v[c]*exp, 1e-12)
+		d := densityAbove(math.Log10(h/MidGrey), o.Stock.Gamma[c], o.MidDensity, o.MaxDensity)
+		t := BaseFS * math.Pow(10, -d)
+		if t < 0 {
+			t = 0
+		}
+		if t > 1 {
+			t = 1
+		}
+		out[c] = t
+	}
+	return out
+}
+
+func ProcessPixels(rgb []float64, w, h int, o Options) {
+	o.normalize()
 	for i := 0; i+2 < len(rgb); i += 3 {
-		v := [3]float64{rgb[i], rgb[i+1], rgb[i+2]}
-		if applyCam {
-			v = colorsci.ApplyCam(o.CamMatrix, o.CamStrength, v)
+		v := SceneToNeg([3]float64{rgb[i], rgb[i+1], rgb[i+2]}, o)
+		rgb[i], rgb[i+1], rgb[i+2] = v[0], v[1], v[2]
+	}
+	applyBorder(rgb, w, h, o)
+}
+
+func applyBorder(rgb []float64, w, h int, o Options) {
+	if o.BorderPct <= 0 || w < 8 || h < 8 {
+		return
+	}
+	short := w
+	if h < w {
+		short = h
+	}
+	bw := int(math.Round(float64(short) * o.BorderPct))
+	if bw < 1 {
+		bw = 1
+	}
+	feather := 0
+	if o.SoftBorder {
+		feather = bw / 3
+		if feather < 1 {
+			feather = 1
 		}
-		var layer [3]float64 // cyan, magenta, yellow (R,G,B-forming)
-		for c := 0; c < 3; c++ {
-			h := math.Max(v[c]*exp, 1e-10)
-			layer[c] = hd(math.Log10(h/MidGrey), g[c])
-		}
-		// Optical density in camera RGB: Forward * [C,M,Y] + Dmin.
-		od := fwd.Apply(layer)
-		for c := 0; c < 3; c++ {
-			d := od[c] + base[c]
-			t := math.Pow(10, -d)
-			if t < 0 {
-				t = 0
+	}
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			dx := x
+			if w-1-x < dx {
+				dx = w - 1 - x
 			}
-			if t > 1 {
-				t = 1
+			dy := y
+			if h-1-y < dy {
+				dy = h - 1 - y
 			}
-			rgb[i+c] = t
+			dEdge := dx
+			if dy < dEdge {
+				dEdge = dy
+			}
+			var a float64
+			if dEdge >= bw {
+				a = 1
+			} else if feather == 0 {
+				a = 0
+			} else if dEdge < bw-feather {
+				a = 0
+			} else {
+				a = float64(dEdge-(bw-feather)) / float64(feather)
+			}
+			if a >= 1 {
+				continue
+			}
+			i := (y*w + x) * 3
+			for c := 0; c < 3; c++ {
+				rgb[i+c] = rgb[i+c]*a + BaseFS*(1-a)
+			}
 		}
 	}
 }
 
-// Process16 converts interleaved RGB uint16 pixels (camera-linear) to a
-// new negative uint16 buffer.
-func Process16(pix []uint16, o Options) []uint16 {
+func Process16(pix []uint16, w, h int, o Options) []uint16 {
 	n := len(pix)
 	tmp := make([]float64, n)
 	for i, v := range pix {
 		tmp[i] = float64(v) / 65535
 	}
-	ProcessPixels(tmp, o)
+	ProcessPixels(tmp, w, h, o)
 	out := make([]uint16, n)
 	for i, v := range tmp {
 		if v < 0 {
@@ -181,13 +216,32 @@ func Process16(pix []uint16, o Options) []uint16 {
 	return out
 }
 
-// NeutralNegDensity returns OD of an 18% grey at EV=0 for tests.
-func NeutralNegDensity(o Options) [3]float64 {
-	rgb := []float64{MidGrey, MidGrey, MidGrey}
-	ProcessPixels(rgb, o)
-	var d [3]float64
-	for c := 0; c < 3; c++ {
-		d[c] = -math.Log10(math.Max(rgb[c], 1e-12))
-	}
-	return d
+// RGBPath matches trichrome naming: <stem>_RGB.tiff
+func RGBPath(src string) string {
+	ext := filepath.Ext(src)
+	base := strings.TrimSuffix(src, ext)
+	base = strings.TrimSuffix(base, "_RGB_HDR")
+	base = strings.TrimSuffix(base, "_RGB")
+	base = strings.TrimSuffix(base, "_NEG")
+	return base + "_RGB.tiff"
 }
+
+// Metadata builds nss.scan/1 with film_base 0.5/0.5/0.5 after_profile.
+func Metadata(o Options) scanmeta.Metadata {
+	b := [3]float64{BaseFS, BaseFS, BaseFS}
+	m := scanmeta.Metadata{
+		Mode:          "convert",
+		Encoding:      "linear",
+		FilmBase:      &b,
+		FilmBaseSpace: scanmeta.AfterProfile,
+		BaseSource:    "convert simulated levelled base",
+		Processing:    "digital-to-negative; stock=" + o.Stock.Name,
+		Roll:          o.Roll,
+	}
+	if m.Roll == "" {
+		m.Roll = o.Stock.Name
+	}
+	return m
+}
+
+func NeutralBaseCode() uint16 { return uint16(BaseFS*65535 + 0.5) }
