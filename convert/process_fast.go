@@ -22,6 +22,22 @@ func ProcessPixelsFast(rgb []float64, w, h int, o Options) {
 		workers = 16
 	}
 
+	// As-shot white balance (RAW cam_mul) before any colour matrix.
+	if o.AsShotWB {
+		if rm, gm, bm, ok := asShotScales(o.CamMul); ok {
+			parallelRows(h, workers, func(y0, y1 int) {
+				for y := y0; y < y1; y++ {
+					for x := 0; x < w; x++ {
+						i := (y*w + x) * 3
+						rgb[i] *= rm
+						rgb[i+1] *= gm
+						rgb[i+2] *= bm
+					}
+				}
+			})
+		}
+	}
+
 	// Optional CamCal (cheap 3x3) in tiles.
 	if o.ApplyCamProfile && o.CamStrength > 0 {
 		parallelRows(h, workers, func(y0, y1 int) {

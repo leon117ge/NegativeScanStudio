@@ -40,6 +40,11 @@ type Options struct {
 	Make            string
 	Model           string
 	LZW             bool
+	// AsShotWB multiplies camera-RGB by CamMul (LibRaw as-shot, green-
+	// normalized) before the film model. Convert sets this from the RAW
+	// file; leave it off for already-balanced linear TIFFs.
+	AsShotWB bool
+	CamMul   [4]float32
 }
 
 const (
@@ -143,6 +148,9 @@ func applyCamMatrix(m colorsci.Mat3, strength float64, v [3]float64) [3]float64 
 
 func SceneToNeg(v [3]float64, o Options) [3]float64 {
 	o.normalize()
+	if o.AsShotWB {
+		v = applyAsShot(v, o.CamMul)
+	}
 	if o.ApplyCamProfile && o.CamStrength > 0 {
 		v = colorsci.ApplyCam(o.CamMatrix, o.CamStrength, v)
 	}
@@ -260,6 +268,15 @@ func Metadata(o Options) scanmeta.Metadata {
 		proc += "; curve=logistic-fallback"
 	}
 	proc += "; color=spectral+DIR+dye"
+	if o.AsShotWB {
+		if _, _, _, ok := asShotScales(o.CamMul); ok {
+			proc += fmt.Sprintf("; wb=as-shot; cam_mul=%.3f,%.3f,%.3f,%.3f", o.CamMul[0], o.CamMul[1], o.CamMul[2], o.CamMul[3])
+		} else {
+			proc += "; wb=as-shot"
+		}
+	} else {
+		proc += "; wb=none"
+	}
 	if o.Grain != GrainOff {
 		proc += "; grain=" + o.Grain.Label()
 		if o.GrainStrength != 1 {

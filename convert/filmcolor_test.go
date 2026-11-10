@@ -144,3 +144,52 @@ func TestLookNeutralsUnchangedByDensityMix(t *testing.T) {
 		}
 	}
 }
+
+func TestAsShotWBFixesTungstenGrey(t *testing.T) {
+	s, _ := StockByName("Portra 400")
+	expo := stockExpo(s)
+	// Tungsten-ish camera-RGB of a grey card: raw red high, blue low.
+	raw := [3]float64{0.36, 0.18, 0.072}
+	// cam_mul that restores the grey (green-normalized: G/R, 1, G/B).
+	mul := [4]float32{float32(raw[1] / raw[0]), 1, float32(raw[1] / raw[2]), 1}
+
+	noWB := invertPixel(SceneToNeg(raw, Options{Stock: s}), s.Gamma, expo)
+	with := invertPixel(SceneToNeg(raw, Options{Stock: s, AsShotWB: true, CamMul: mul}), s.Gamma, expo)
+	ref := invertPixel(SceneToNeg([3]float64{MidGrey, MidGrey, MidGrey}, Options{Stock: s}), s.Gamma, expo)
+
+	t.Logf("no WB  inv=%.3f/%.3f/%.3f  R/B=%.2f", noWB[0], noWB[1], noWB[2], noWB[0]/math.Max(noWB[2], 1e-6))
+	t.Logf("with WB inv=%.3f/%.3f/%.3f", with[0], with[1], with[2])
+	t.Logf("ref     inv=%.3f/%.3f/%.3f", ref[0], ref[1], ref[2])
+
+	if !(noWB[0] > noWB[2]*1.5) {
+		t.Fatalf("expected yellow-brown tungsten cast without WB, got %v", noWB)
+	}
+	for c := 0; c < 3; c++ {
+		if math.Abs(with[c]-ref[c]) > 0.03 {
+			t.Fatalf("as-shot WB should match a balanced grey: got %v want %v", with, ref)
+		}
+	}
+
+	// ProcessPixelsFast must match SceneToNeg.
+	buf := []float64{raw[0], raw[1], raw[2]}
+	ProcessPixelsFast(buf, 1, 1, Options{Stock: s, AsShotWB: true, CamMul: mul, BorderPct: 0})
+	neg := SceneToNeg(raw, Options{Stock: s, AsShotWB: true, CamMul: mul})
+	for c := 0; c < 3; c++ {
+		if math.Abs(buf[c]-neg[c]) > 2e-3 {
+			t.Fatalf("fast vs SceneToNeg: %v vs %v", buf, neg)
+		}
+	}
+}
+
+func TestAsShotScalesRejectJunk(t *testing.T) {
+	if _, _, _, ok := asShotScales([4]float32{0, 0, 0, 0}); ok {
+		t.Fatal("zero cam_mul should be rejected")
+	}
+	if _, _, _, ok := asShotScales([4]float32{1, 0, 1, 0}); ok {
+		t.Fatal("zero green should be rejected")
+	}
+	rm, gm, bm, ok := asShotScales([4]float32{2.4, 1.2, 1.8, 1.2})
+	if !ok || math.Abs(rm-2) > 1e-6 || gm != 1 || math.Abs(bm-1.5) > 1e-6 {
+		t.Fatalf("got %v %v %v ok=%v", rm, gm, bm, ok)
+	}
+}

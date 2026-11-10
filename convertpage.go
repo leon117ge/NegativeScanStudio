@@ -24,37 +24,40 @@ import (
 type ConvertUI struct {
 	mw **walk.MainWindow
 
-	mu     sync.Mutex
-	files  []string
-	cur    int
-	busy   bool
-	stock  convert.Stock
-	ev     float64
-	useCam bool
-	border float64
+	mu         sync.Mutex
+	files      []string
+	cur        int
+	busy       bool
+	stock      convert.Stock
+	ev         float64
+	useCam     bool
+	useWB      bool
+	border     float64
 	softBorder bool
-	grain     convert.GrainISO
-	gStrength float64
+	grain      convert.GrainISO
+	gStrength  float64
 
-	status, info *walk.Label
-	fileCB       *walk.ComboBox
-	stockCB      *walk.ComboBox
-	evNE         *walk.NumberEdit
-	camChk       *walk.CheckBox
-	borderNE     *walk.NumberEdit
-	softChk      *walk.CheckBox
-	grainCB      *walk.ComboBox
-	gStrNE       *walk.NumberEdit
-	cachePath    string
-	cachePix     []uint16
+	status, info   *walk.Label
+	fileCB         *walk.ComboBox
+	stockCB        *walk.ComboBox
+	evNE           *walk.NumberEdit
+	camChk         *walk.CheckBox
+	wbChk          *walk.CheckBox
+	borderNE       *walk.NumberEdit
+	softChk        *walk.CheckBox
+	grainCB        *walk.ComboBox
+	gStrNE         *walk.NumberEdit
+	cachePath      string
+	cachePix       []uint16
 	cacheW, cacheH int
-	cacheNote    string
-	pb           *walk.ProgressBar
-	logTE        *walk.TextEdit
-	view         *walk.CustomWidget
-	bmp          *walk.Bitmap
-	pw, ph       int
-	pix          []uint16
+	cacheNote      string
+	cacheCamMul    [4]float32
+	pb             *walk.ProgressBar
+	logTE          *walk.TextEdit
+	view           *walk.CustomWidget
+	bmp            *walk.Bitmap
+	pw, ph         int
+	pix            []uint16
 }
 
 func (u *ConvertUI) win() *walk.MainWindow {
@@ -89,7 +92,8 @@ func (u *ConvertUI) init() {
 		u.stock = ss[0]
 	}
 	u.ev = 0
-	u.useCam = true
+	u.useCam = false
+	u.useWB = true
 	u.border = 0.04
 	u.softBorder = true
 	u.grain = convert.GrainOff
@@ -101,6 +105,7 @@ func (u *ConvertUI) options() convert.Options {
 		Stock: u.stock, EV: u.ev, ApplyCamProfile: u.useCam,
 		BorderPct: u.border, SoftBorder: u.softBorder, Grain: u.grain, GrainStrength: u.gStrength,
 		Software: appVersion, LZW: true,
+		AsShotWB: u.useWB, CamMul: u.cacheCamMul,
 	}
 	if p, k := activeCam(); p != nil && u.useCam {
 		o.CamMatrix, o.CamStrength = p.M, k
@@ -166,15 +171,17 @@ func (u *ConvertUI) loadPreview(path string) {
 	}
 	go func() {
 		defer func() { u.ui(func() { u.busy = false }) }()
-		pix, w, h, note, err := loadLinearRGB16(path, 1600)
+		pix, w, h, note, camMul, err := loadLinearRGB16(path, 1600)
 		u.ui(func() {
 			if err != nil {
 				u.log("load failed: " + err.Error())
 				u.status.SetText("Load failed")
 				u.cachePath, u.cachePix = "", nil
+				u.cacheCamMul = [4]float32{}
 				return
 			}
 			u.cachePath, u.cachePix, u.cacheW, u.cacheH, u.cacheNote = path, pix, w, h, note
+			u.cacheCamMul = camMul
 			u.renderPreviewFromCache()
 		})
 	}()
@@ -333,12 +340,18 @@ func convertFile(src string, o convert.Options, progress func(float64)) (string,
 	if progress != nil {
 		progress(0.05)
 	}
-	pix, w, h, note, err := loadLinearRGB16(src, 0)
+	pix, w, h, note, camMul, err := loadLinearRGB16(src, 0)
 	if err != nil {
 		return "", err
 	}
+	o.CamMul = camMul
 	if strings.HasPrefix(note, "LibRaw") {
-		parts := strings.SplitN(strings.TrimPrefix(note, "LibRaw "), " ", 2)
+		rest := strings.TrimPrefix(note, "LibRaw ")
+		if i := strings.Index(rest, " cam_mul="); i >= 0 {
+			rest = rest[:i]
+		}
+		rest = strings.TrimSuffix(rest, " (preview)")
+		parts := strings.SplitN(strings.TrimSpace(rest), " ", 2)
 		if len(parts) >= 1 {
 			o.Make = parts[0]
 		}
@@ -372,32 +385,36 @@ func convertFile(src string, o convert.Options, progress func(float64)) (string,
 	return dst, nil
 }
 
-func loadLinearRGB16(path string, maxEdge int) (pix []uint16, w, h int, note string, err error) {
+func loadLinearRGB16(path string, maxEdge int) (pix []uint16, w, h int, note string, camMul [4]float32, err error) {
 	ext := strings.ToLower(filepath.Ext(path))
 	if ext == ".tif" || ext == ".tiff" {
 		im, e := cropper.Load(path)
 		if e != nil {
-			return nil, 0, 0, "", e
+			return nil, 0, 0, "", camMul, e
 		}
 		pix, w, h = im.Pix, im.W, im.H
 		note = "TIFF"
 	} else {
 		img, e := rawconv.Decode(path)
 		if e != nil {
-			return nil, 0, 0, "", e
+			return nil, 0, 0, "", camMul, e
 		}
 		defer img.Free()
 		n := img.Width * img.Height * 3
 		pix = make([]uint16, n)
 		copy(pix, img.Pix[:n])
 		w, h = img.Width, img.Height
+		camMul = img.CamMul
 		note = "LibRaw " + strings.TrimSpace(img.Make+" "+img.Model)
+		if img.CamMul[1] > 0 {
+			note += fmt.Sprintf(" cam_mul=%.3f,%.3f,%.3f", img.CamMul[0], img.CamMul[1], img.CamMul[2])
+		}
 	}
 	if maxEdge > 0 && (w > maxEdge || h > maxEdge) {
 		pix, w, h = downscaleNN(pix, w, h, maxEdge)
 		note += " (preview)"
 	}
-	return pix, w, h, note, nil
+	return pix, w, h, note, camMul, nil
 }
 
 func downscaleNN(pix []uint16, w, h, maxEdge int) ([]uint16, int, int) {
@@ -447,7 +464,7 @@ func (u *ConvertUI) Page() TabPage {
 						MinSize: Size{Width: 420, Height: 280}, StretchFactor: 4,
 						ToolTipText: "Preview of the simulated colour negative (transmittance)."},
 					Label{AssignTo: &u.status, EllipsisMode: EllipsisEnd,
-						Text: "Open a Fujifilm RAF (or linear TIFF). Leveled-scan look: base 0.5, Kodak Status M D-logH (still stocks), rebate border, grain option, nss.scan/1 for OFX.",
+						Text:      "Open a Fujifilm RAF (or linear TIFF). Leveled-scan look: base 0.5, Kodak Status M D-logH (still stocks), rebate border, grain option, nss.scan/1 for OFX.",
 						TextColor: walk.RGB(128, 128, 136)},
 					Composite{Layout: HBox{MarginsZero: true, Spacing: 4}, Children: []Widget{
 						PushButton{Text: "Open files...", OnClicked: func() {
@@ -497,15 +514,19 @@ func (u *ConvertUI) Page() TabPage {
 							NumberEdit{AssignTo: &u.evNE, Value: 0, MinValue: -5, MaxValue: 5, Decimals: 2, Increment: 0.1,
 								OnValueChanged: func() { u.ev = u.evNE.Value(); u.reprocess() }},
 						}},
-						CheckBox{AssignTo: &u.camChk, Text: "Apply Chart camera profile (X-T3 CamCal)", Checked: true, OnCheckedChanged: func() {
+						CheckBox{AssignTo: &u.wbChk, Text: "Apply camera white balance (as-shot)", Checked: true, OnCheckedChanged: func() {
+							u.useWB = u.wbChk.Checked()
+							u.reprocess()
+						}, ToolTipText: "Multiplies the RAW by the camera's as-shot white-balance (cam_mul). Leave on for photographs. Turn off only if the file is already white-balanced. Without this, tungsten interiors invert as yellow-brown."},
+						CheckBox{AssignTo: &u.camChk, Text: "Apply Chart camera profile (X-T3 CamCal)", Checked: false, OnCheckedChanged: func() {
 							u.useCam = u.camChk.Checked()
 							u.reprocess()
-						}, ToolTipText: "Uses activeCam() matrix from camera_profiles.json via colorsci.ApplyCam - same as Light leveling."},
+						}, ToolTipText: "Uses activeCam() matrix from camera_profiles.json via colorsci.ApplyCam - same as Light leveling. For scanned film only. Leave off when converting ordinary photographs."},
 						Composite{Layout: HBox{MarginsZero: true, Spacing: 4}, Children: []Widget{
 							Label{Text: "Film-base border"},
 							NumberEdit{AssignTo: &u.borderNE, Value: 0.04, MinValue: 0, MaxValue: 0.15, Decimals: 3, Increment: 0.005,
 								OnValueChanged: func() { u.border = u.borderNE.Value(); u.reprocess() },
-								ToolTipText: "Rebate width on each side as a fraction of the short edge (like a scanned 35mm frame edge)."},
+								ToolTipText:    "Rebate width on each side as a fraction of the short edge (like a scanned 35mm frame edge)."},
 						}},
 						CheckBox{AssignTo: &u.softChk, Text: "Soft border edge", Checked: true, OnCheckedChanged: func() {
 							u.softBorder = u.softChk.Checked()
@@ -520,7 +541,7 @@ func (u *ConvertUI) Page() TabPage {
 								u.grain = convert.GrainISO400
 							default:
 								u.grain = convert.GrainOff
-	u.gStrength = 1
+								u.gStrength = 1
 							}
 							u.reprocess()
 						}, ToolTipText: "Poisson dye-cloud grain; local transmittance equalised so mean tone stays put. ISO 100 finer; ISO 400 coarser."},

@@ -104,3 +104,18 @@ cast from CSV R/B vs G density mismatch against OFX's simpler gamma model).
 5. DIR/interimage + a warm term (character parameters, not datasheet numbers).
 6. Row-normalised per-stock dye Jacobian from `colorsci` dye spectra.
 7. Output remains a leveled negative, base 0.5, grain unchanged.
+
+## v1.02-preview2 as-shot white balance
+
+LibRaw decode used by Convert is scan-oriented: `use_camera_wb=0`,
+`user_mul=1,1,1,1`, no camera matrix. That is correct for film scans
+(the enlarger and Light leveling set the balance). For a scene
+photograph it leaves tungsten interiors raw-orange (R much greater
+than B). The film model records that orange; OFX inversion then
+looks monochrome yellow-brown / sepia.
+
+v1.02-preview2 multiplies camera-RGB by the file's as-shot `cam_mul`
+(green-normalized) before the film model. The Convert checkbox
+"Apply camera white balance (as-shot)" is on by default. The Chart
+CamCal checkbox now defaults off: that matrix is for leveling a scan
+camera, not for ordinary photographs.
