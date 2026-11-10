@@ -4,7 +4,6 @@ import (
 	"math"
 	"runtime"
 	"sync"
-
 )
 
 // ProcessPixelsFast is a tiled, LUT-accelerated Convert pipeline.
@@ -37,17 +36,60 @@ func ProcessPixelsFast(rgb []float64, w, h int, o Options) {
 	}
 
 	cs := CurveFor(o.Stock.Name)
-	// Density via LUT on logH for full curves, or logistic eval.
+	lk := lookFor(o.Stock.Name)
+	// Camera-linear RGB -> film-layer exposures (spectral matrix).
+	parallelRows(h, workers, func(y0, y1 int) {
+		for y := y0; y < y1; y++ {
+			for x := 0; x < w; x++ {
+				i := (y*w + x) * 3
+				v := lk.FilmSens.Apply([3]float64{rgb[i], rgb[i+1], rgb[i+2]})
+				for c := 0; c < 3; c++ {
+					if v[c] < 0 {
+						v[c] = 0
+					}
+					rgb[i+c] = v[c]
+				}
+			}
+		}
+	})
+	// Density via LUT on logH. System contrast stretches log exposure
+	// about mid-grey; DIR acts in log-exposure; dye mix hits only the
+	// chromatic residual; DensOff makes a grey card invert neutral.
 	luts := buildDensityLUTs(o, cs)
+	pcon := lk.Contrast
+	if pcon <= 0 {
+		pcon = 1
+	}
 	parallelRows(h, workers, func(y0, y1 int) {
 		exp := math.Pow(2, o.EV)
 		for y := y0; y < y1; y++ {
 			for x := 0; x < w; x++ {
 				i := (y*w + x) * 3
+				var rel [3]float64
 				for c := 0; c < 3; c++ {
 					hlin := math.Max(rgb[i+c]*exp, 1e-12)
-					rgb[i+c] = luts[c].at(math.Log10(hlin / MidGrey))
+					rel[c] = math.Log10(hlin / MidGrey)
+					if pcon != 1 {
+						rel[c] *= pcon
+					}
 				}
+				rel = applyLogDIR(rel, lk)
+				var d [3]float64
+				for c := 0; c < 3; c++ {
+					d[c] = luts[c].at(rel[c])
+				}
+				d = applyDyeChromaLUT(d, rel, luts, lk)
+				for c := 0; c < 3; c++ {
+					if len(lk.OffLUT[c].v) > 0 {
+						d[c] += lk.OffLUT[c].at(rel[c])
+					} else {
+						d[c] += lk.DensOff[c]
+					}
+					if d[c] < 0 {
+						d[c] = 0
+					}
+				}
+				rgb[i], rgb[i+1], rgb[i+2] = d[0], d[1], d[2]
 			}
 		}
 	})

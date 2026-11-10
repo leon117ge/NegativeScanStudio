@@ -15,10 +15,10 @@ import (
 )
 
 type Stock struct {
-	Name      string
-	FileTag   string // compact name for output files
-	Source    string
-	Gamma     [3]float64 // logistic fallback mid-slopes
+	Name    string
+	FileTag string // compact name for output files
+	Source  string
+	Gamma   [3]float64 // logistic fallback mid-slopes
 }
 
 type Options struct {
@@ -55,17 +55,17 @@ var (
 func Stocks() []Stock {
 	stockOnce.Do(func() {
 		stockList = []Stock{
-			{Name: "Vision3 500T 5219", FileTag: "Vision3_500T", Source: "OFX Status M mid-slope; H-1-5219 (logistic fallback — no full D-logH CSV)",
+			{Name: "Vision3 500T 5219", FileTag: "Vision3_500T", Source: "OFX Status M mid-slope; H-1-5219 (logistic fallback). Dye spectra H-1-5219; interlayer character.",
 				Gamma: [3]float64{0.4482, 0.5266, 0.5096}},
-			{Name: "Vision3 250D 5207", FileTag: "Vision3_250D", Source: "OFX Status M mid-slope; H-1-5207 (logistic fallback — no full D-logH CSV)",
+			{Name: "Vision3 250D 5207", FileTag: "Vision3_250D", Source: "OFX Status M mid-slope; H-1-5207 (logistic fallback). Dye spectra H-1-5219 proxy; interlayer character.",
 				Gamma: [3]float64{0.48148148, 0.56018519, 0.54166667}},
-			{Name: "UltraMax 400", FileTag: "UltraMax400", Source: "Kodak E-7023 p.4 Status M full curve CSV",
+			{Name: "UltraMax 400", FileTag: "UltraMax400", Source: "Kodak E-7023 p.4 Status M full curve CSV; dye spectra E-7023 (decomposed); interlayer character.",
 				Gamma: [3]float64{0.518590585, 0.536316940, 0.604826092}},
-			{Name: "Portra 400", FileTag: "Portra400", Source: "Kodak E-4050 p.4 Status M full curve CSV",
+			{Name: "Portra 400", FileTag: "Portra400", Source: "Kodak E-4050 p.4 Status M full curve CSV; dye spectra E-4050 (decomposed); interlayer character.",
 				Gamma: [3]float64{0.555934584, 0.549589137, 0.640031943}},
-			{Name: "Gold 200", FileTag: "Gold200", Source: "Kodak E-7022 p.4 Status M full curve CSV",
+			{Name: "Gold 200", FileTag: "Gold200", Source: "Kodak E-7022 p.4 Status M full curve CSV; dye spectra E-7022 (decomposed); interlayer character.",
 				Gamma: [3]float64{0.550723702, 0.564449843, 0.610388122}},
-			{Name: "Ektar 100", FileTag: "Ektar100", Source: "Kodak E-4046 p.4 Status M full curve CSV",
+			{Name: "Ektar 100", FileTag: "Ektar100", Source: "Kodak E-4046 p.4 Status M full curve CSV; dye spectra E-4046 (decomposed); interlayer character.",
 				Gamma: [3]float64{0.580572786, 0.579564388, 0.663740443}},
 		}
 	})
@@ -86,7 +86,10 @@ func (o *Options) normalize() {
 		o.MidDensity = 0.75
 	}
 	if o.MaxDensity <= o.MidDensity {
-		o.MaxDensity = math.Max(2*o.MidDensity, 1.5)
+		// Logistic Dmax above Dmin. 2.1 matches typical Kodak Status M
+		// chart ranges (~1.6-2.2); 1.5 used to shoulder too early and
+		// left inverted highlights looking flat.
+		o.MaxDensity = math.Max(2*o.MidDensity, 2.1)
 	}
 	if o.BorderPct < 0 {
 		o.BorderPct = 0
@@ -144,19 +147,8 @@ func SceneToNeg(v [3]float64, o Options) [3]float64 {
 		v = colorsci.ApplyCam(o.CamMatrix, o.CamStrength, v)
 	}
 	cs := CurveFor(o.Stock.Name)
-	var out [3]float64
-	for c := 0; c < 3; c++ {
-		d := densityAboveFor(v[c], c, o, cs)
-		t := BaseFS * math.Pow(10, -d)
-		if t < 0 {
-			t = 0
-		}
-		if t > 1 {
-			t = 1
-		}
-		out[c] = t
-	}
-	return out
+	d := sceneToDensity(v, o, cs, lookFor(o.Stock.Name))
+	return transmittance(d)
 }
 
 func ProcessPixels(rgb []float64, w, h int, o Options) {
@@ -267,6 +259,7 @@ func Metadata(o Options) scanmeta.Metadata {
 	} else {
 		proc += "; curve=logistic-fallback"
 	}
+	proc += "; color=spectral+DIR+dye"
 	if o.Grain != GrainOff {
 		proc += "; grain=" + o.Grain.Label()
 		if o.GrainStrength != 1 {

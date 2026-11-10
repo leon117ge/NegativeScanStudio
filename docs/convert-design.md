@@ -63,3 +63,44 @@ English only. Stock dropdown, exposure EV, optional “apply camera profile”, 
 
 - Full Status M CSV + PCHIP for still stocks; Vision3 logistic fallback (see convert/data/SOURCES.md).
 - Naming OutputPath; grain ISO 100/400 in density domain.
+
+
+## v1.02 film colour character
+
+v0.93 designed a dye-mixing 3x3 (step 6) but Convert never applied it.
+The shipped path was: camera RGB (optional CamCal) -> independent per-channel
+H&D -> T = 0.5 * 10^(-D). OFX Positive-Out then inverts those 1D curves, so
+the inverted positive was approximately the original digital image. That is
+why stocks looked alike, why the result looked digital, and why it read as
+a faded/greyish print (scene-linear, no interimage saturation, plus a blue
+cast from CSV R/B vs G density mismatch against OFX's simpler gamma model).
+
+**What was wrong in principle vs. in implementation**
+
+- Principle: treating camera R,G,B as film-layer exposures and applying only
+  independent 1D characteristic curves cannot produce a film look that
+  survives a matching OFX invert. Spectral sensitivity, DIR/interimage and
+  chromatic dye mixing are the parts OFX does not undo.
+- Principle: Status M characteristic curves already include dye mix *for
+  neutrals*. Remixing neutrals again would double-count; chromatic colours
+  still need the off-diagonal mix (row-normalised forward Jacobian).
+- Principle: base 0.5 is correct (leveled scan). It does not by itself
+  flatten contrast — Density In divides by the same 0.5. A simple invert
+  that ignored the base *would* look washed out; OFX with base 0.5 does not.
+- Implementation: the designed dye-mix step was never coded.
+- Implementation: still-film LogHMid is placed on green D-Dmin = 0.75, so a
+  grey card's R and B densities differ; OFX's gamma/fog invert does not put
+  them back together, leaving a blue/magenta cast (faded look).
+- Implementation: Vision3 logistic used Dmax = 1.5, shouldering earlier than
+  typical datasheet ranges (~1.6-2.2), which flattened inverted highlights.
+
+**What v1.02 does (still no spektrafilm code)**
+
+1. Camera-linear RGB -> film-layer exposures via a row-normalised overlap
+   matrix (XT3Approx vs typical colour-negative sensitivity peaks 650/550/430 nm).
+2. Modest system contrast about mid-grey (survives OFX linearisation).
+3. Per-channel layer-speed offsets so a grey card inverts neutral.
+4. H&D as before (full Status M CSV or logistic; Vision3 logistic Dmax 2.1).
+5. DIR/interimage + a warm term (character parameters, not datasheet numbers).
+6. Row-normalised per-stock dye Jacobian from `colorsci` dye spectra.
+7. Output remains a leveled negative, base 0.5, grain unchanged.
