@@ -38,6 +38,7 @@ type stockLook struct {
 	Interimage float64 // log-exposure saturation (DIR proxy); 0 = off
 	Warm       float64 // extra yellow in chromatic colours; 0 = neutral hue
 	Contrast   float64 // linear-domain system contrast about mid-grey; 1 = off
+	Chroma     float64 // scale of dye-mix chromatic residual; 1 = off
 	DensOff    [3]float64
 	OffLUT     [3]densLUT // per-channel offset vs logRel; mid-grey matches DensOff
 	DyeMix     colorsci.Mat3
@@ -67,40 +68,40 @@ func initLooks() {
 }
 
 func makeLook(name string, fm colorsci.Mat3) stockLook {
-	ds, ok := colorsci.MatchStock(name)
-	if !ok {
-		ds = colorsci.Vision3Dyes
-	}
-	// Forward spectral Jacobian (scanner RGB vs Y/M/C dye amounts), then
-	// row-normalise: a grey residual [x,x,x] stays [x,x,x].
-	mix := ds.Jacobian(colorsci.XT3Approx, colorsci.LightFlat, [3]float64{0.5, 0.5, 0.5}).NormalizeRows()
+	// Published Status M H&D curves already include dye unwanted
+	// absorption along the grey scale. Remixing chromatic residuals
+	// through the scanner Jacobian therefore double-applies that mix
+	// and rotates greens toward yellow (olive/mustard). Leave DyeMix
+	// at identity; film colour character comes from spectral
+	// sensitivity, DIR, warmth, contrast, and the per-stock curves.
 	lk := stockLook{
-		Interimage: 0.20,
+		Interimage: 0.16,
 		Warm:       0.02,
-		Contrast:   1.12,
-		DyeMix:     mix,
+		Contrast:   1.16,
+		Chroma:     1,
+		DyeMix:     colorsci.Identity,
 		FilmSens:   fm,
 	}
 	n := strings.ToLower(name)
 	switch {
 	case strings.Contains(n, "ektar"):
 		// Kodak E-4046: "finest, most saturated color" / vivid colour.
-		lk.Interimage, lk.Warm, lk.Contrast = 0.48, 0.00, 1.22
+		lk.Interimage, lk.Warm, lk.Contrast, lk.Chroma = 0.32, 0.00, 1.24, 1
 	case strings.Contains(n, "portra"):
-		// Kodak E-4050: natural skin-tone reproduction, subdued colour.
-		lk.Interimage, lk.Warm, lk.Contrast = 0.16, 0.08, 1.12
+		// Kodak E-4050: natural skin-tone reproduction, not drab.
+		lk.Interimage, lk.Warm, lk.Contrast, lk.Chroma = 0.16, 0.04, 1.18, 1
 	case strings.Contains(n, "gold"):
 		// Kodak E-7022: warm, saturated consumer colour.
-		lk.Interimage, lk.Warm, lk.Contrast = 0.32, 0.16, 1.18
+		lk.Interimage, lk.Warm, lk.Contrast, lk.Chroma = 0.22, 0.10, 1.20, 1
 	case strings.Contains(n, "ultramax"):
 		// Kodak E-7023: rich, saturated, slightly warm consumer colour.
-		lk.Interimage, lk.Warm, lk.Contrast = 0.40, 0.10, 1.24
+		lk.Interimage, lk.Warm, lk.Contrast, lk.Chroma = 0.28, 0.06, 1.24, 1
 	case strings.Contains(n, "500t") || strings.Contains(n, "5219"):
 		// H-1-5219: tungsten motion-picture stock, wide latitude, restrained.
-		lk.Interimage, lk.Warm, lk.Contrast = 0.20, 0.02, 1.10
+		lk.Interimage, lk.Warm, lk.Contrast, lk.Chroma = 0.14, 0.02, 1.12, 1
 	case strings.Contains(n, "250d") || strings.Contains(n, "5207"):
 		// H-1-5207: daylight Vision3 sibling of 500T.
-		lk.Interimage, lk.Warm, lk.Contrast = 0.22, 0.00, 1.12
+		lk.Interimage, lk.Warm, lk.Contrast, lk.Chroma = 0.16, 0.00, 1.14, 1
 	}
 	s, err := StockByName(name)
 	if err == nil {
@@ -112,18 +113,16 @@ func makeLook(name string, fm colorsci.Mat3) stockLook {
 
 // cameraToFilmMatrix maps camera-linear RGB to film-layer exposures.
 //
-// Camera: colorsci.XT3Approx (Gaussian peaks 600/530/460 nm; documented
-// assumption — Fujifilm does not publish X-T3 SSFs).
-// Film layers: Gaussian approximation of published colour-negative
-// spectral-sensitivity charts (Kodak H-1-5219 p.3 and the still-film
-// "Spectral Sensitivity" charts on E-4046 / E-4050 / E-7022 / E-7023):
-// red-sensitive ~650 nm, green-sensitive ~550 nm, blue-sensitive ~430 nm.
-// Peaks are shared across stocks; per-stock balance of already-white-balanced
-// digital files is enforced by row normalisation (a camera grey stays a
-// film-layer grey). This is an overlap matrix, not a traced polyline.
+// Scene-referred input is linear sRGB (as-shot WB + camera matrix).
+// Approximate scene-RGB sensitivities as Gaussians around 625/545/460 nm
+// (display-referred RGB, not raw X-T3 camera RGB). Film layers: Gaussian
+// approximation of published colour-negative spectral-sensitivity charts
+// (Kodak H-1-5219 p.3 and still-film charts): red-sensitive ~650 nm,
+// green-sensitive ~550 nm, blue-sensitive ~430 nm. Row normalisation keeps
+// a scene grey as a film-layer grey.
 func cameraToFilmMatrix() colorsci.Mat3 {
 	film := colorsci.CameraModel{Peak: [3]float64{650, 550, 430}, Sigma: [3]float64{36, 32, 26}}
-	cam := colorsci.XT3Approx
+	cam := colorsci.CameraModel{Peak: [3]float64{625, 545, 460}, Sigma: [3]float64{40, 34, 28}, IRCut: 700}
 	var m colorsci.Mat3
 	for c := 0; c < 3; c++ {
 		for k := 0; k < 3; k++ {
@@ -261,7 +260,7 @@ func applyDyeChroma(d, rel [3]float64, o Options, cs *CurveSet, lk stockLook) [3
 		axis[c] = densityAboveFor(hMean, c, o, cs)
 	}
 	chroma := [3]float64{d[0] - axis[0], d[1] - axis[1], d[2] - axis[2]}
-	chroma = lk.DyeMix.Apply(chroma)
+	chroma = scaleChroma(lk.DyeMix.Apply(chroma), lk.Chroma)
 	return [3]float64{axis[0] + chroma[0], axis[1] + chroma[1], axis[2] + chroma[2]}
 }
 
@@ -272,8 +271,15 @@ func applyDyeChromaLUT(d, rel [3]float64, luts [3]densLUT, lk stockLook) [3]floa
 		axis[c] = luts[c].at(mean)
 	}
 	chroma := [3]float64{d[0] - axis[0], d[1] - axis[1], d[2] - axis[2]}
-	chroma = lk.DyeMix.Apply(chroma)
+	chroma = scaleChroma(lk.DyeMix.Apply(chroma), lk.Chroma)
 	return [3]float64{axis[0] + chroma[0], axis[1] + chroma[1], axis[2] + chroma[2]}
+}
+
+func scaleChroma(chroma [3]float64, g float64) [3]float64 {
+	if g <= 0 || g == 1 {
+		return chroma
+	}
+	return [3]float64{chroma[0] * g, chroma[1] * g, chroma[2] * g}
 }
 
 // sceneToDensity is the shared Convert colour path.

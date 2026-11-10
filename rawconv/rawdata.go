@@ -215,8 +215,13 @@ func (f *RawFrame) Binned(bin int) (w, h int, rgb []float32, clipped []bool) {
 	return
 }
 
-// Decode runs the full linear LibRaw pipeline (same as Convert). Call Free.
+// Decode runs the full linear LibRaw pipeline (same as Convert / HDR scan). Call Free.
 func Decode(path string) (*Image, error) { return decode(path, false) }
+
+// DecodeScene is the photograph path: as-shot white balance and the camera
+// colour matrix into linear sRGB (no display tone curve). Used as the
+// reference develop and, via cam_xyz copied from Decode, by Convert.
+func DecodeScene(path string) (*Image, error) { return decodeMode(path, false, true) }
 
 // WriteTIFF16 writes a linear 16-bit RGB TIFF with the converter's writer.
 func WriteTIFF16(path string, w, h int, pix []uint16, lzw bool, make_, model, software string) error {

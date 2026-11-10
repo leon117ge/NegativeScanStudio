@@ -193,3 +193,56 @@ func TestAsShotScalesRejectJunk(t *testing.T) {
 		t.Fatalf("got %v %v %v ok=%v", rm, gm, bm, ok)
 	}
 }
+
+func TestAutoEVScaleLeavesMidGrey(t *testing.T) {
+	const w, h = 16, 16
+	rgb := make([]float64, w*h*3)
+	for i := range rgb {
+		rgb[i] = MidGrey
+	}
+	got := AutoEVScale(rgb, w, h)
+	if math.Abs(got-1) > 0.08 {
+		t.Fatalf("mid-grey frame should stay put, scale=%v", got)
+	}
+}
+
+func TestAutoEVScaleLiftsDarkFrame(t *testing.T) {
+	const w, h = 16, 16
+	rgb := make([]float64, w*h*3)
+	for i := range rgb {
+		rgb[i] = 0.02
+	}
+	got := AutoEVScale(rgb, w, h)
+	want := MidGrey / 0.02
+	if math.Abs(got-want) > 0.8 {
+		t.Fatalf("dark frame scale=%v want ~%v", got, want)
+	}
+}
+
+func TestSceneRGBSkipsSecondWB(t *testing.T) {
+	s, _ := StockByName("Portra 400")
+	grey := [3]float64{MidGrey, MidGrey, MidGrey}
+	mul := [4]float32{2, 1, 3, 1}
+	with := SceneToNeg(grey, Options{Stock: s, AsShotWB: true, CamMul: mul, SceneRGB: true})
+	plain := SceneToNeg(grey, Options{Stock: s})
+	for c := 0; c < 3; c++ {
+		if math.Abs(with[c]-plain[c]) > 1e-6 {
+			t.Fatalf("SceneRGB must not re-apply cam_mul: %v vs %v", with, plain)
+		}
+	}
+}
+
+func TestGreenStaysGreenAfterInvert(t *testing.T) {
+	// Linearised lime-green (the frog body). Must not rotate to mustard.
+	src := [3]float64{0.143, 0.159, 0.045}
+	srcRG := src[0] / src[1]
+	for _, name := range []string{"Portra 400", "Ektar 100", "Gold 200"} {
+		s, _ := StockByName(name)
+		inv := invertPixel(SceneToNeg(src, Options{Stock: s}), s.Gamma, stockExpo(s))
+		rg := inv[0] / inv[1]
+		t.Logf("%s inv=%.3f/%.3f/%.3f R/G=%.3f (src R/G=%.3f)", name, inv[0], inv[1], inv[2], rg, srcRG)
+		if rg > srcRG+0.12 {
+			t.Errorf("%s rotated green toward yellow: R/G=%.3f src=%.3f inv=%v", name, rg, srcRG, inv)
+		}
+	}
+}

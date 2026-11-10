@@ -52,6 +52,8 @@ type ConvertUI struct {
 	cacheW, cacheH int
 	cacheNote      string
 	cacheCamMul    [4]float32
+	cacheCamXYZ    [4][3]float32
+	cacheSceneRGB  bool
 	pb             *walk.ProgressBar
 	logTE          *walk.TextEdit
 	view           *walk.CustomWidget
@@ -105,7 +107,8 @@ func (u *ConvertUI) options() convert.Options {
 		Stock: u.stock, EV: u.ev, ApplyCamProfile: u.useCam,
 		BorderPct: u.border, SoftBorder: u.softBorder, Grain: u.grain, GrainStrength: u.gStrength,
 		Software: appVersion, LZW: true,
-		AsShotWB: u.useWB, CamMul: u.cacheCamMul,
+		AsShotWB: u.useWB, CamMul: u.cacheCamMul, CamXYZ: u.cacheCamXYZ,
+		SceneRGB: u.cacheSceneRGB, AutoEV: true,
 	}
 	if p, k := activeCam(); p != nil && u.useCam {
 		o.CamMatrix, o.CamStrength = p.M, k
@@ -171,17 +174,21 @@ func (u *ConvertUI) loadPreview(path string) {
 	}
 	go func() {
 		defer func() { u.ui(func() { u.busy = false }) }()
-		pix, w, h, note, camMul, err := loadLinearRGB16(path, 1600)
+		pix, w, h, note, camMul, camXYZ, sceneRGB, err := loadLinearRGB16(path, 1600, u.useWB)
 		u.ui(func() {
 			if err != nil {
 				u.log("load failed: " + err.Error())
 				u.status.SetText("Load failed")
 				u.cachePath, u.cachePix = "", nil
 				u.cacheCamMul = [4]float32{}
+				u.cacheCamXYZ = [4][3]float32{}
+				u.cacheSceneRGB = false
 				return
 			}
 			u.cachePath, u.cachePix, u.cacheW, u.cacheH, u.cacheNote = path, pix, w, h, note
 			u.cacheCamMul = camMul
+			u.cacheCamXYZ = camXYZ
+			u.cacheSceneRGB = sceneRGB
 			u.renderPreviewFromCache()
 		})
 	}()
@@ -340,11 +347,14 @@ func convertFile(src string, o convert.Options, progress func(float64)) (string,
 	if progress != nil {
 		progress(0.05)
 	}
-	pix, w, h, note, camMul, err := loadLinearRGB16(src, 0)
+	pix, w, h, note, camMul, camXYZ, sceneRGB, err := loadLinearRGB16(src, 0, o.AsShotWB)
 	if err != nil {
 		return "", err
 	}
 	o.CamMul = camMul
+	o.CamXYZ = camXYZ
+	o.SceneRGB = sceneRGB
+	o.AutoEV = true
 	if strings.HasPrefix(note, "LibRaw") {
 		rest := strings.TrimPrefix(note, "LibRaw ")
 		if i := strings.Index(rest, " cam_mul="); i >= 0 {
@@ -385,19 +395,25 @@ func convertFile(src string, o convert.Options, progress func(float64)) (string,
 	return dst, nil
 }
 
-func loadLinearRGB16(path string, maxEdge int) (pix []uint16, w, h int, note string, camMul [4]float32, err error) {
+func loadLinearRGB16(path string, maxEdge int, scene bool) (pix []uint16, w, h int, note string, camMul [4]float32, camXYZ [4][3]float32, sceneRGB bool, err error) {
 	ext := strings.ToLower(filepath.Ext(path))
 	if ext == ".tif" || ext == ".tiff" {
 		im, e := cropper.Load(path)
 		if e != nil {
-			return nil, 0, 0, "", camMul, e
+			return nil, 0, 0, "", camMul, camXYZ, false, e
 		}
 		pix, w, h = im.Pix, im.W, im.H
 		note = "TIFF"
 	} else {
-		img, e := rawconv.Decode(path)
+		var img *rawconv.Image
+		var e error
+		if scene {
+			img, e = rawconv.DecodeScene(path)
+		} else {
+			img, e = rawconv.Decode(path)
+		}
 		if e != nil {
-			return nil, 0, 0, "", camMul, e
+			return nil, 0, 0, "", camMul, camXYZ, false, e
 		}
 		defer img.Free()
 		n := img.Width * img.Height * 3
@@ -405,16 +421,21 @@ func loadLinearRGB16(path string, maxEdge int) (pix []uint16, w, h int, note str
 		copy(pix, img.Pix[:n])
 		w, h = img.Width, img.Height
 		camMul = img.CamMul
+		camXYZ = img.CamXYZ
 		note = "LibRaw " + strings.TrimSpace(img.Make+" "+img.Model)
 		if img.CamMul[1] > 0 {
 			note += fmt.Sprintf(" cam_mul=%.3f,%.3f,%.3f", img.CamMul[0], img.CamMul[1], img.CamMul[2])
+		}
+		if scene {
+			sceneRGB = true
+			note += " scene-sRGB"
 		}
 	}
 	if maxEdge > 0 && (w > maxEdge || h > maxEdge) {
 		pix, w, h = downscaleNN(pix, w, h, maxEdge)
 		note += " (preview)"
 	}
-	return pix, w, h, note, camMul, nil
+	return pix, w, h, note, camMul, camXYZ, sceneRGB, nil
 }
 
 func downscaleNN(pix []uint16, w, h, maxEdge int) ([]uint16, int, int) {
@@ -515,9 +536,20 @@ func (u *ConvertUI) Page() TabPage {
 								OnValueChanged: func() { u.ev = u.evNE.Value(); u.reprocess() }},
 						}},
 						CheckBox{AssignTo: &u.wbChk, Text: "Apply camera white balance (as-shot)", Checked: true, OnCheckedChanged: func() {
-							u.useWB = u.wbChk.Checked()
+							on := u.wbChk.Checked()
+							if on == u.useWB {
+								return
+							}
+							u.useWB = on
+							// Decode path changes (scene-sRGB vs camera-RGB); reload.
+							if u.cachePath != "" {
+								path := u.cachePath
+								u.cachePath = ""
+								u.loadPreview(path)
+								return
+							}
 							u.reprocess()
-						}, ToolTipText: "Multiplies the RAW by the camera's as-shot white-balance (cam_mul). Leave on for photographs. Turn off only if the file is already white-balanced. Without this, tungsten interiors invert as yellow-brown."},
+						}, ToolTipText: "Decodes the RAW with as-shot white-balance and the camera colour matrix into linear sRGB (LibRaw photograph path). Leave on for photographs. Turn off only if the file is already white-balanced (a scan or a linear TIFF)."},
 						CheckBox{AssignTo: &u.camChk, Text: "Apply Chart camera profile (X-T3 CamCal)", Checked: false, OnCheckedChanged: func() {
 							u.useCam = u.camChk.Checked()
 							u.reprocess()

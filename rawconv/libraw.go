@@ -30,6 +30,7 @@ static void fbm_set_params(libraw_data_t *lr) {
 typedef struct {
 	libraw_processed_image_t *img;
 	float cam_mul[4];
+	float cam_xyz[4][3];
 	char make[64];
 	char model[64];
 	int err;
@@ -54,9 +55,22 @@ static fbm_result fbm_process(libraw_data_t *lr, int inset_crop) {
 	r.img = libraw_dcraw_make_mem_image(lr, &errc);
 	if (!r.img) { r.err = errc ? errc : -1; return r; }
 	for (int i = 0; i < 4; i++) r.cam_mul[i] = lr->color.cam_mul[i];
+	for (int i = 0; i < 4; i++)
+		for (int j = 0; j < 3; j++)
+			r.cam_xyz[i][j] = lr->color.cam_xyz[i][j];
 	strncpy(r.make, lr->idata.make, 63);
 	strncpy(r.model, lr->idata.model, 63);
 	return r;
+}
+
+// Photograph path: as-shot WB + camera matrix into linear sRGB.
+static void fbm_set_params_scene(libraw_data_t *lr) {
+	fbm_set_params(lr);
+	libraw_output_params_t *p = &lr->params;
+	p->use_camera_wb = 1;
+	p->use_auto_wb = 0;
+	p->output_color = 1;
+	p->use_camera_matrix = 1;
 }
 */
 import "C"
@@ -73,6 +87,7 @@ type Image struct {
 	Width, Height int
 	Pix           []uint16 // RGBRGB..., native (little) endian
 	CamMul        [4]float32
+	CamXYZ        [4][3]float32
 	Make, Model   string
 	img           *C.libraw_processed_image_t
 }
@@ -91,12 +106,20 @@ func librawErr(code C.int) string {
 
 // decode opens path with LibRaw and returns the processed linear image.
 func decode(path string, insetCrop bool) (*Image, error) {
+	return decodeMode(path, insetCrop, false)
+}
+
+func decodeMode(path string, insetCrop, scene bool) (*Image, error) {
 	lr := C.libraw_init(0)
 	if lr == nil {
 		return nil, errors.New("libraw_init failed")
 	}
 	defer C.libraw_close(lr)
-	C.fbm_set_params(lr)
+	if scene {
+		C.fbm_set_params_scene(lr)
+	} else {
+		C.fbm_set_params(lr)
+	}
 	if rc := openRaw(lr, path); rc != 0 {
 		return nil, fmt.Errorf("cannot open RAW: %s", librawErr(rc))
 	}
@@ -127,6 +150,11 @@ func decode(path string, insetCrop bool) (*Image, error) {
 	}
 	for i := 0; i < 4; i++ {
 		out.CamMul[i] = float32(r.cam_mul[i])
+	}
+	for i := 0; i < 4; i++ {
+		for j := 0; j < 3; j++ {
+			out.CamXYZ[i][j] = float32(r.cam_xyz[i][j])
+		}
 	}
 	return out, nil
 }

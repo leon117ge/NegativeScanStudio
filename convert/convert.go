@@ -45,6 +45,16 @@ type Options struct {
 	// file; leave it off for already-balanced linear TIFFs.
 	AsShotWB bool
 	CamMul   [4]float32
+	// CamXYZ is LibRaw's camera-RGB to XYZ matrix (adobe_coeff). When
+	// AsShotWB is on and the matrix is present, Convert white-balances
+	// then maps into linear sRGB before the film model.
+	CamXYZ [4][3]float32
+	// SceneRGB means pix is already white-balanced linear sRGB
+	// (LibRaw DecodeScene). Skip a second WB/matrix apply.
+	SceneRGB bool
+	// AutoEV scales a photograph so the frame's median luminance
+	// lands near mid-grey (0.18). A grey-card frame is unchanged.
+	AutoEV bool
 }
 
 const (
@@ -148,8 +158,9 @@ func applyCamMatrix(m colorsci.Mat3, strength float64, v [3]float64) [3]float64 
 
 func SceneToNeg(v [3]float64, o Options) [3]float64 {
 	o.normalize()
-	if o.AsShotWB {
+	if o.AsShotWB && !o.SceneRGB {
 		v = applyAsShot(v, o.CamMul)
+		v = applyCamXYZ(v, o.CamXYZ)
 	}
 	if o.ApplyCamProfile && o.CamStrength > 0 {
 		v = colorsci.ApplyCam(o.CamMatrix, o.CamStrength, v)
@@ -274,8 +285,14 @@ func Metadata(o Options) scanmeta.Metadata {
 		} else {
 			proc += "; wb=as-shot"
 		}
+		if o.SceneRGB || camXYZValid(o.CamXYZ) {
+			proc += "; matrix=camera-sRGB"
+		}
 	} else {
 		proc += "; wb=none"
+	}
+	if o.AutoEV {
+		proc += "; ev=auto-median"
 	}
 	if o.Grain != GrainOff {
 		proc += "; grain=" + o.Grain.Label()
