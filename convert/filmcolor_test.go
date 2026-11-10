@@ -255,3 +255,69 @@ func TestGreenStaysGreenAfterInvert(t *testing.T) {
 		}
 	}
 }
+
+func TestDIRPreservesGreyRamp(t *testing.T) {
+	for _, name := range []string{"Portra 400", "Ektar 100", "Gold 200", "UltraMax 400", "Vision3 500T 5219", "Vision3 250D 5207"} {
+		lk := lookFor(name)
+		for _, e := range []float64{-1.5, -0.5, 0, 0.5, 1.2} {
+			rel := [3]float64{e, e, e}
+			out := applyLogDIR(rel, lk)
+			for c := 0; c < 3; c++ {
+				if math.Abs(out[c]-e) > 1e-9 {
+					t.Fatalf("%s DIR moved a grey at rel=%.2f: %v", name, e, out)
+				}
+			}
+		}
+	}
+}
+
+func TestFilmSensKeepsGrey(t *testing.T) {
+	grey := [3]float64{0.18, 0.18, 0.18}
+	for _, s := range Stocks() {
+		m := filmExposureMatrix(s.Name)
+		v := m.Apply(grey)
+		dev := math.Abs(v[0]-v[1]) + math.Abs(v[1]-v[2])
+		if dev > 1e-9 {
+			t.Errorf("%s film matrix moved a grey: %v", s.Name, v)
+		}
+	}
+}
+
+func TestStillPaperKeepsGrey(t *testing.T) {
+	for _, lin := range []float64{0.04, 0.18, 0.50} {
+		c := CineonEncode(lin)
+		r, g, b := ApplyStillPaper(c, c, c)
+		dev := math.Abs(r-g) + math.Abs(g-b)
+		if dev > 1e-9 {
+			t.Fatalf("paper LUT split a grey at lin=%.2f: %v %v %v", lin, r, g, b)
+		}
+		if r <= 0 || r >= 1 {
+			t.Fatalf("paper LUT grey out of range at lin=%.2f: %v", lin, r)
+		}
+	}
+	// Mid-grey should land near a display mid (~0.4-0.6 in gamma 2.4).
+	c := CineonEncode(MidGrey)
+	r, _, _ := ApplyStillPaper(c, c, c)
+	if r < 0.35 || r > 0.65 {
+		t.Fatalf("paper mid-grey display %.3f, expected ~0.5", r)
+	}
+}
+
+func TestCamXYZNotApplied(t *testing.T) {
+	// A colour-space matrix must not run: Convert stays in camera-native RGB.
+	s, _ := StockByName("Portra 400")
+	src := [3]float64{0.05, 0.40, 0.02}
+	fake := [4][3]float32{
+		{2, -0.8, -0.2},
+		{-0.4, 1.6, -0.2},
+		{-0.1, -0.5, 1.6},
+		{0, 0, 0},
+	}
+	a := SceneToNeg(src, Options{Stock: s, AsShotWB: true, CamMul: [4]float32{1, 1, 1, 1}, CamXYZ: fake})
+	b := SceneToNeg(src, Options{Stock: s})
+	for c := 0; c < 3; c++ {
+		if math.Abs(a[c]-b[c]) > 1e-9 {
+			t.Fatalf("CamXYZ must not change camera-native input: %v vs %v", a, b)
+		}
+	}
+}

@@ -34,13 +34,13 @@ const ScanFramePx = 6246
 // flat peach/wall patches give RMS ≈ 0.015/0.022/0.055, corr ≈ 0.20/0.05/0.06,
 // ac50 ≈ 2.0 px, with B much stronger than G — that is the grain colour.
 var profile500T = GrainProfile{
-	ChanLoad:  [3]float64{0.49, 0.41, 0.12},
-	ChanScale: [3]float64{1.71, 1.54, 3.20},
-	ChanSize:  [3]float64{1.00, 1.00, 1.00},
-	DensRef:   [3]float64{0.167, 0.396, 0.554},
-	Amp:       2.4,
-	Size:      0.61,
-	Note:      "ISO400 matched to flat patches of 500T 0212 scan (v0.96.3)",
+	ChanLoad:  [3]float64{0.80, 0.90, 0.42},
+	ChanScale: [3]float64{3.13, 3.16, 8.80},
+	ChanSize:  [3]float64{1.00, 0.95, 1.45},
+	DensRef:   [3]float64{0.189, 0.383, 0.442},
+	Amp:       3.1,
+	Size:      0.78,
+	Note:      "ISO400 matched to grain_real crop_mid 500T stats (v1.02-preview5)",
 }
 
 // iso100FromISO400 documents how the ISO 100 preset is derived from the

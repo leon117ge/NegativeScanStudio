@@ -1,7 +1,8 @@
-// looksheet renders preview4 Convert positives of a RAF through the
+// looksheet renders preview5 Convert positives of a RAF (camera-native
+// linear RGB, as-shot WB, no sRGB/Rec.709) through the
 // plugin path the user views real scans with: CameraCal matrix,
-// Density In, stock Positive Out (Cineon), Kodak 2383 LUT, displayed
-// as sRGB with no further transform.
+// Density In, stock Positive Out (Cineon), then either the still-paper
+// LUT or Kodak 2383, displayed as Rec.709 gamma 2.4.
 package main
 
 import (
@@ -13,6 +14,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"basetool/colorsci"
 	"basetool/convert"
@@ -181,40 +183,48 @@ func densStats(neg []float64, w, h int, m colorsci.Mat3) {
 	fmt.Printf("  p99=%.3f/%.3f/%.3f\n", p99[0], p99[1], p99[2])
 }
 
-func viewProgram(s convert.Stock) develop.Program {
+func cineonProgram(s convert.Stock) develop.Program {
 	ch := develop.DefaultChain()
 	d := &ch.Nodes[0]
 	d.V["base_r"], d.V["base_g"], d.V["base_b"] = convert.BaseFS, convert.BaseFS, convert.BaseFS
 	d.V["preset"], d.V["cast_on"], d.V["out_trans"], d.V["in_di"] = 0, 0, 0, 0
 	ch.Nodes[1].Bypass = true
 	p := &ch.Nodes[2]
-	p.V["gam_r"] = s.Gamma[0] * 1.15
-	p.V["gam_g"] = s.Gamma[1] * 1.15
-	p.V["gam_b"] = s.Gamma[2] * 1.15
-	p.V["expo"] = 0.9
+	p.V["gam_r"], p.V["gam_g"], p.V["gam_b"] = s.Gamma[0], s.Gamma[1], s.Gamma[2]
+	p.V["expo"] = 0
 	p.V["bal_r"], p.V["bal_g"], p.V["bal_b"] = 0, 0, 0
 	p.V["film_wb"], p.V["gray_on"], p.V["contrast"], p.V["out_mode"] = 0, 0, 0, 2
-	for i := 3; i <= 6; i++ {
+	for i := 3; i < len(ch.Nodes); i++ {
 		ch.Nodes[i].Bypass = true
 	}
-	ch.Nodes[7].Bypass = false
-	ch.Nodes[7].V["white"] = 2
-	ch.Nodes[7].V["source"] = 0
-	ch.Nodes[8].Bypass = true
-	prog := ch.Compile(&develop.Context{}, -1)
-	for _, n := range prog.Notes {
-		fmt.Println("  chain:", n)
-	}
-	return prog
+	return ch.Compile(&develop.Context{}, -1)
 }
 
-func invertView(neg []float64, w, h int, s convert.Stock, m colorsci.Mat3) []float64 {
-	prog := viewProgram(s)
+func invertCineon(neg []float64, w, h int, s convert.Stock, m colorsci.Mat3) []float64 {
+	prog := cineonProgram(s)
 	out := make([]float64, len(neg))
 	for i := 0; i < len(neg); i += 3 {
 		p := colorsci.ApplyCam(m, 1, [3]float64{neg[i], neg[i+1], neg[i+2]})
 		r, g, b := prog.Pixel(float32(p[0]), float32(p[1]), float32(p[2]))
 		out[i], out[i+1], out[i+2] = float64(r), float64(g), float64(b)
+	}
+	return out
+}
+
+func apply2383(cin []float64, lut *develop.LUT) []float64 {
+	out := make([]float64, len(cin))
+	for i := 0; i < len(cin); i += 3 {
+		r, g, b := lut.Apply(float32(cin[i]), float32(cin[i+1]), float32(cin[i+2]), true)
+		out[i], out[i+1], out[i+2] = float64(r), float64(g), float64(b)
+	}
+	return out
+}
+
+func applyPaper(cin []float64) []float64 {
+	out := make([]float64, len(cin))
+	for i := 0; i < len(cin); i += 3 {
+		r, g, b := convert.ApplyStillPaper(cin[i], cin[i+1], cin[i+2])
+		out[i], out[i+1], out[i+2] = r, g, b
 	}
 	return out
 }
@@ -264,8 +274,148 @@ func scaleTo(rgb []float64, w, h, nw, nh int) []float64 {
 
 func report(tag string, rgb []float64, w, h int) {
 	mean, p1, p50, p99, rb, sat := stats(rgb, 0.06, w, h)
-	fmt.Printf("%-22s mean=%.3f/%.3f/%.3f  R/B=%.3f sat=%.3f  Y p1/p50/p99=%.3f/%.3f/%.3f\n",
+	fmt.Printf("%-28s mean=%.3f/%.3f/%.3f  R/B=%.3f sat=%.3f  Y p1/p50/p99=%.3f/%.3f/%.3f\n",
 		tag, mean[0], mean[1], mean[2], rb, sat, p1, p50, p99)
+}
+
+func isStill(name string) bool {
+	n := strings.ToLower(name)
+	return strings.Contains(n, "portra") || strings.Contains(n, "ektar") ||
+		strings.Contains(n, "gold") || strings.Contains(n, "ultramax")
+}
+
+// greenPatch averages linear-sRGB pixels that look like foliage/frog green.
+func greenPatch(rgb []float64, w, h int) (avg [3]float64, n int) {
+	x0, x1 := int(float64(w)*0.08), int(float64(w)*0.92)
+	y0, y1 := int(float64(h)*0.08), int(float64(h)*0.92)
+	var sum [3]float64
+	for y := y0; y < y1; y++ {
+		for x := x0; x < x1; x++ {
+			i := (y*w + x) * 3
+			r, g, b := rgb[i], rgb[i+1], rgb[i+2]
+			if g > 0.06 && g > r*1.02 && g > b*1.8 && r > b {
+				sum[0] += r
+				sum[1] += g
+				sum[2] += b
+				n++
+			}
+		}
+	}
+	if n == 0 {
+		return avg, 0
+	}
+	return [3]float64{sum[0] / float64(n), sum[1] / float64(n), sum[2] / float64(n)}, n
+}
+
+func dispRG(v [3]float64, linear bool) float64 {
+	var r, g float64
+	if linear {
+		r, g = float64(srgbEnc(v[0])), float64(srgbEnc(v[1]))
+	} else {
+		r, g = float64(dispByte(v[0])), float64(dispByte(v[1]))
+	}
+	if g < 1 {
+		return 0
+	}
+	return r / g
+}
+
+func greyRamp(s convert.Stock, lut string, lut2383 *develop.LUT) {
+	fmt.Printf("  grey ramp %s [%s]\n", s.FileTag, lut)
+	maxDev := 0.0
+	for _, stops := range []float64{-2, -1, 0, 1, 2} {
+		L := convert.MidGrey * math.Pow(2, stops)
+		neg := convert.SceneToNeg([3]float64{L, L, L}, convert.Options{Stock: s})
+		cin := invertCineon([]float64{neg[0], neg[1], neg[2]}, 1, 1, s, convert.DefaultXT3Trichrome)
+		var pos []float64
+		if lut == "2383" {
+			pos = apply2383(cin, lut2383)
+		} else {
+			pos = applyPaper(cin)
+		}
+		dev := math.Abs(pos[0]-pos[1]) + math.Abs(pos[1]-pos[2])
+		if dev > maxDev {
+			maxDev = dev
+		}
+		fmt.Printf("    %+.0f stop  Cineon=%.4f/%.4f/%.4f  disp=%.4f/%.4f/%.4f  dev=%.4f\n",
+			stops, cin[0], cin[1], cin[2], pos[0], pos[1], pos[2], dev)
+	}
+	fmt.Printf("    max channel-dev %.4f\n", maxDev)
+}
+
+func syntheticFrog(s convert.Stock, lut string, lut2383 *develop.LUT) (disp [3]float64, rg float64) {
+	src := [3]float64{0.143, 0.159, 0.045}
+	neg := convert.SceneToNeg(src, convert.Options{Stock: s})
+	cin := invertCineon([]float64{neg[0], neg[1], neg[2]}, 1, 1, s, convert.DefaultXT3Trichrome)
+	var pos []float64
+	if lut == "2383" {
+		pos = apply2383(cin, lut2383)
+	} else {
+		pos = applyPaper(cin)
+	}
+	disp = [3]float64{pos[0], pos[1], pos[2]}
+	return disp, dispRG(disp, false)
+}
+
+func convertAsShot(mul [4]float32) (rm, gm, bm float64, ok bool) {
+	g := float64(mul[1])
+	if g < 1e-6 {
+		return 1, 1, 1, false
+	}
+	rm = float64(mul[0]) / g
+	bm = float64(mul[2]) / g
+	if rm < 0.05 || bm < 0.05 || rm > 16 || bm > 16 {
+		return 1, 1, 1, false
+	}
+	return rm, 1, bm, true
+}
+
+func displayFromCamera(rgb []float64, w, h int, m colorsci.Mat3) []float64 {
+	out := make([]float64, len(rgb))
+	for i := 0; i < len(rgb); i += 3 {
+		v := colorsci.ApplyCam(m, 1, [3]float64{rgb[i], rgb[i+1], rgb[i+2]})
+		// Display encode only: Rec.709 cannot show out-of-gamut camera colours.
+		for c := 0; c < 3; c++ {
+			if v[c] < 0 {
+				v[c] = 0
+			}
+		}
+		out[i], out[i+1], out[i+2] = v[0], v[1], v[2]
+	}
+	return out
+}
+
+func satRGB(v [3]float64) float64 {
+	mx := math.Max(v[0], math.Max(v[1], v[2]))
+	mn := math.Min(v[0], math.Min(v[1], v[2]))
+	if mx < 1e-8 {
+		return 0
+	}
+	return (mx - mn) / mx
+}
+
+func reportSatRetention(s convert.Stock, lut string, lut2383 *develop.LUT, camGreen, camRed [3]float64) {
+	run := func(src [3]float64, tag string) {
+		neg := convert.SceneToNeg(src, convert.Options{Stock: s})
+		cin := invertCineon([]float64{neg[0], neg[1], neg[2]}, 1, 1, s, convert.DefaultXT3Trichrome)
+		var pos []float64
+		if lut == "2383" {
+			pos = apply2383(cin, lut2383)
+		} else {
+			pos = applyPaper(cin)
+		}
+		srcSat := satRGB(src)
+		out := [3]float64{pos[0], pos[1], pos[2]}
+		outSat := satRGB(out)
+		ret := 0.0
+		if srcSat > 1e-8 {
+			ret = outSat / srcSat
+		}
+		fmt.Printf("  sat retain %s [%s] src=%.3f out=%.3f ratio=%.3f  srcRGB=%.3f/%.3f/%.3f out=%.3f/%.3f/%.3f\n",
+			tag, lut, srcSat, outSat, ret, src[0], src[1], src[2], out[0], out[1], out[2])
+	}
+	run(camGreen, "cam-green")
+	run(camRed, "cam-red")
 }
 
 func main() {
@@ -280,37 +430,77 @@ func main() {
 	os.MkdirAll(outDir, 0755)
 	m := convert.DefaultXT3Trichrome
 
-	fmt.Println("decoding scene", src)
-	refImg, err := rawconv.DecodeScene(src)
+	cube := filepath.Join(outDir, "NSS_StillPaper_v1.cube")
+	if err := convert.WriteStillPaperCube(cube, 33); err != nil {
+		fmt.Fprintln(os.Stderr, "paper cube", err)
+		os.Exit(1)
+	}
+	if err := convert.WriteStillPaperCube("/workspace/NSS_StillPaper_v1.cube", 33); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+	}
+	if err := convert.WriteStillPaperCube("/workspace/basetool/convert/data/NSS_StillPaper_v1.cube", 33); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+	}
+	fmt.Println("wrote", cube)
+
+	lut2383, err := develop.LoadEmbedded("D65")
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "DecodeScene", err)
+		fmt.Fprintln(os.Stderr, "2383", err)
+		os.Exit(1)
+	}
+
+	fmt.Println("decoding camera-native", src)
+	refImg, err := rawconv.Decode(src)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Decode", err)
 		os.Exit(1)
 	}
 	fmt.Printf("camera=%s %s  %dx%d  cam_mul=%.3f,%.3f,%.3f\n",
 		refImg.Make, refImg.Model, refImg.Width, refImg.Height, refImg.CamMul[0], refImg.CamMul[1], refImg.CamMul[2])
+	camMul := refImg.CamMul
 	rp := make([]uint16, refImg.Width*refImg.Height*3)
 	copy(rp, refImg.Pix[:len(rp)])
 	rp, rw, rh := downscale(rp, refImg.Width, refImg.Height, 1600)
 	refImg.Free()
 	refLin := toFloat(rp)
+	// White-balance in camera-native RGB (no colour-space matrix).
+	if rm, gm, bm, ok := convertAsShot(camMul); ok {
+		for i := 0; i < len(refLin); i += 3 {
+			refLin[i] *= rm
+			refLin[i+1] *= gm
+			refLin[i+2] *= bm
+		}
+	}
 	sc := convert.AutoEVScale(refLin, rw, rh)
 	fmt.Printf("AutoEV scale=%.3f (%.2f EV)\n", sc, math.Log2(sc))
 	ref := append([]float64(nil), refLin...)
 	for i := range ref {
 		ref[i] *= sc
 	}
-	report("reference +AutoEV", ref, rw, rh)
-	if err := writePNGDisp(filepath.Join(outDir, "p4_reference.png"), ref, rw, rh, true); err != nil {
+	report("reference cam-native +AutoEV", ref, rw, rh)
+	// Display-only: XT3 chart matrix so the contact sheet is viewable.
+	// This matrix is not used by Convert itself.
+	refDisp := displayFromCamera(ref, rw, rh, m)
+	if err := writePNGDisp(filepath.Join(outDir, "p5_reference.png"), refDisp, rw, rh, true); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+	gRef, gn := greenPatch(ref, rw, rh)
+	fmt.Printf("reference green patch n=%d camera-native=%.3f/%.3f/%.3f  R/G=%.3f sat=%.3f  disp R/G=%.3f\n",
+		gn, gRef[0], gRef[1], gRef[2], gRef[0]/math.Max(gRef[1], 1e-8), satRGB(gRef), dispRG(gRef, true))
+	// Saturated camera-native patches (no Rec.709 encoding).
+	camGreen := [3]float64{0.08, 0.28, 0.04}
+	camRed := [3]float64{0.30, 0.06, 0.04}
+	fmt.Printf("synth camera green sat=%.3f R/G=%.3f   camera red sat=%.3f R/B=%.3f\n",
+		satRGB(camGreen), camGreen[0]/camGreen[1], satRGB(camRed), camRed[0]/math.Max(camRed[2], 1e-8))
 
 	type cell struct {
 		name string
 		rgb  []float64
 		lin  bool
 	}
-	cells := []cell{{"reference (DecodeScene + AutoEV)", ref, true}}
+	cells := []cell{{"reference (camera-native WB + AutoEV, display matrix)", refDisp, true}}
+	negByStock := map[string][]float64{}
 
 	for _, s := range convert.Stocks() {
 		neg := append([]float64(nil), refLin...)
@@ -319,16 +509,48 @@ func main() {
 			ScanMatrix: m, ScanStrength: 1, ScanProfile: convert.DefaultXT3Profile,
 			BorderPct: 0.04, SoftBorder: true,
 		})
+		negByStock[s.Name] = neg
 		fmt.Print(s.FileTag)
 		densStats(neg, rw, rh, m)
-		pos := invertView(neg, rw, rh, s, m)
-		report("p4 "+s.FileTag, pos, rw, rh)
-		name := "p4_" + s.FileTag + ".png"
+		cin := invertCineon(neg, rw, rh, s, m)
+
+		rec := "paper"
+		var pos []float64
+		if isStill(s.Name) {
+			pos = applyPaper(cin)
+		} else {
+			pos = apply2383(cin, lut2383)
+			rec = "2383"
+		}
+		report("p5 "+s.FileTag+" "+rec, pos, rw, rh)
+		name := "p5_" + s.FileTag + ".png"
 		if err := writePNGDisp(filepath.Join(outDir, name), pos, rw, rh, false); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
-		cells = append(cells, cell{s.Name + " (Cineon+2383)", pos, false})
+		cells = append(cells, cell{s.Name + " (" + rec + ")", pos, false})
+
+		if isStill(s.Name) {
+			pos2383 := apply2383(cin, lut2383)
+			report("p5 "+s.FileTag+" 2383", pos2383, rw, rh)
+			if err := writePNGDisp(filepath.Join(outDir, "p5_"+s.FileTag+"_2383.png"), pos2383, rw, rh, false); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			cells = append(cells, cell{s.Name + " (2383 cmp)", pos2383, false})
+		}
+
+		greyRamp(s, rec, lut2383)
+		if isStill(s.Name) {
+			greyRamp(s, "2383", lut2383)
+		}
+		frog, rg := syntheticFrog(s, rec, lut2383)
+		fmt.Printf("  synth frog [%s] disp=%.3f/%.3f/%.3f R/G=%.3f (src lin R/G=0.899)\n", rec, frog[0], frog[1], frog[2], rg)
+		reportSatRetention(s, rec, lut2383, camGreen, camRed)
+		if isStill(s.Name) {
+			f2, rg2 := syntheticFrog(s, "2383", lut2383)
+			fmt.Printf("  synth frog [2383] disp=%.3f/%.3f/%.3f R/G=%.3f\n", f2[0], f2[1], f2[2], rg2)
+		}
 	}
 
 	cellW, cellH := 480, 321
@@ -354,7 +576,7 @@ func main() {
 		}
 		label(sheet, ox+8, oy+cellH+16, c.name)
 	}
-	f, err := os.Create(filepath.Join(outDir, "p4_sheet.png"))
+	f, err := os.Create(filepath.Join(outDir, "p5_sheet.png"))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -365,5 +587,5 @@ func main() {
 		os.Exit(1)
 	}
 	f.Close()
-	fmt.Println("wrote", filepath.Join(outDir, "p4_sheet.png"), "cells", len(cells))
+	fmt.Println("wrote", filepath.Join(outDir, "p5_sheet.png"), "cells", len(cells))
 }

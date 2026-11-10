@@ -41,16 +41,15 @@ type Options struct {
 	Model           string
 	LZW             bool
 	// AsShotWB multiplies camera-RGB by CamMul (LibRaw as-shot, green-
-	// normalized) before the film model. Convert sets this from the RAW
-	// file; leave it off for already-balanced linear TIFFs.
+	// normalized) before the film model. The working space stays
+	// camera-native; there is no conversion to sRGB/Rec.709/XYZ.
 	AsShotWB bool
 	CamMul   [4]float32
-	// CamXYZ is LibRaw's camera-RGB to XYZ matrix (adobe_coeff). When
-	// AsShotWB is on and the matrix is present, Convert white-balances
-	// then maps into linear sRGB before the film model.
+	// CamXYZ is kept from the RAW file for diagnostics. It is not
+	// applied: Convert does not leave camera-native RGB.
 	CamXYZ [4][3]float32
-	// SceneRGB means pix is already white-balanced linear sRGB
-	// (LibRaw DecodeScene). Skip a second WB/matrix apply.
+	// SceneRGB means pix is already white-balanced camera-native RGB.
+	// Skip a second WB apply.
 	SceneRGB bool
 	// AutoEV scales a photograph so the frame's median luminance
 	// lands near mid-grey (0.18). A grey-card frame is unchanged.
@@ -167,7 +166,6 @@ func SceneToNeg(v [3]float64, o Options) [3]float64 {
 	o.normalize()
 	if o.AsShotWB && !o.SceneRGB {
 		v = applyAsShot(v, o.CamMul)
-		v = applyCamXYZ(v, o.CamXYZ)
 	}
 	if o.ApplyCamProfile && o.CamStrength > 0 {
 		v = colorsci.ApplyCam(o.CamMatrix, o.CamStrength, v)

@@ -1,5 +1,7 @@
 package convert
 
+import "math"
+
 // asShotScales returns green-normalized white-balance multipliers from
 // LibRaw cam_mul (as-shot). ok is false when the multipliers are missing
 // or outside a sane range, so a scan or TIFF without cam_mul is left alone.
@@ -97,8 +99,14 @@ func applyCamXYZ(v [3]float64, cam [4][3]float32) [3]float64 {
 }
 
 // AutoEVScale returns the multiplier that places the interior median
-// luminance at MidGrey. Clamped to +/- 4 stops so a wild histogram
-// cannot blow out a frame.
+// luminance at MidGrey, then lifts further if needed so a low shadow
+// percentile stays inside the film's colour window.
+//
+// On colour-negative stocks the image dyes lose chroma in the toe,
+// several stops above the tonal floor. Parking a photograph's shadows
+// there is what reads as a faded "old photo" wash. A uniform mid-grey
+// card is unchanged (median and shadows already sit at MidGrey).
+// Clamped to +/- 4 stops so a wild histogram cannot blow out a frame.
 func AutoEVScale(rgb []float64, w, h int) float64 {
 	if w < 4 || h < 4 {
 		return 1
@@ -125,18 +133,36 @@ func AutoEVScale(rgb []float64, w, h int) float64 {
 	if n == 0 {
 		return 1
 	}
-	want, acc, med := n/2, 0, 0.0
-	for i, c := range hist {
-		acc += c
-		if acc >= want {
-			med = (float64(i) + 0.5) / 511
-			break
+	pick := func(frac float64) float64 {
+		want, acc := int(frac*float64(n)), 0
+		if want < 1 {
+			want = 1
 		}
+		for i, c := range hist {
+			acc += c
+			if acc >= want {
+				return (float64(i) + 0.5) / 511
+			}
+		}
+		return 1
 	}
+	med := pick(0.50)
 	if med < 1e-5 {
 		return 1
 	}
 	s := MidGrey / med
+	// Colour window floor: about 2.3 stops below mid-grey. The 12th
+	// percentile (important shadow content, not the extreme tail)
+	// should not sit below this.
+	const colourStops = 2.3
+	floor := MidGrey * math.Pow(2, -colourStops)
+	p12 := pick(0.12)
+	if p12 < 1e-5 {
+		p12 = 1e-5
+	}
+	if shadow := floor / p12; shadow > s {
+		s = shadow
+	}
 	if s > 16 {
 		s = 16
 	}

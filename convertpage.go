@@ -410,13 +410,11 @@ func loadLinearRGB16(path string, maxEdge int, scene bool) (pix []uint16, w, h i
 		pix, w, h = im.Pix, im.W, im.H
 		note = "TIFF"
 	} else {
-		var img *rawconv.Image
-		var e error
-		if scene {
-			img, e = rawconv.DecodeScene(path)
-		} else {
-			img, e = rawconv.Decode(path)
-		}
+		// Always decode to camera-native linear RGB (no LibRaw colour
+		// matrix, no sRGB/Rec.709). White balance is applied later in
+		// Convert from cam_mul, matching how a scanned TIFF stays in
+		// camera-native RGB.
+		img, e := rawconv.Decode(path)
 		if e != nil {
 			return nil, 0, 0, "", camMul, camXYZ, false, e
 		}
@@ -427,14 +425,11 @@ func loadLinearRGB16(path string, maxEdge int, scene bool) (pix []uint16, w, h i
 		w, h = img.Width, img.Height
 		camMul = img.CamMul
 		camXYZ = img.CamXYZ
-		note = "LibRaw " + strings.TrimSpace(img.Make+" "+img.Model)
+		note = "LibRaw " + strings.TrimSpace(img.Make+" "+img.Model) + " camera-native"
 		if img.CamMul[1] > 0 {
 			note += fmt.Sprintf(" cam_mul=%.3f,%.3f,%.3f", img.CamMul[0], img.CamMul[1], img.CamMul[2])
 		}
-		if scene {
-			sceneRGB = true
-			note += " scene-sRGB"
-		}
+		_ = scene
 	}
 	if maxEdge > 0 && (w > maxEdge || h > maxEdge) {
 		pix, w, h = downscaleNN(pix, w, h, maxEdge)

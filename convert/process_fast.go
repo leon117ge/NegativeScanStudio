@@ -22,8 +22,8 @@ func ProcessPixelsFast(rgb []float64, w, h int, o Options) {
 		workers = 16
 	}
 
-	// As-shot white balance (RAW cam_mul) then camera-RGB -> linear sRGB.
-	// Skipped when the pixels are already DecodeScene linear sRGB.
+	// As-shot white balance only. Working space stays camera-native
+	// RGB (same as a scanned TIFF). No sRGB/Rec.709 matrix, no clip.
 	if o.AsShotWB && !o.SceneRGB {
 		if rm, gm, bm, ok := asShotScales(o.CamMul); ok {
 			parallelRows(h, workers, func(y0, y1 int) {
@@ -33,29 +33,6 @@ func ProcessPixelsFast(rgb []float64, w, h int, o Options) {
 						rgb[i] *= rm
 						rgb[i+1] *= gm
 						rgb[i+2] *= bm
-					}
-				}
-			})
-		}
-		if mat, ok := camXYZToSRGB(o.CamXYZ); ok {
-			parallelRows(h, workers, func(y0, y1 int) {
-				for y := y0; y < y1; y++ {
-					for x := 0; x < w; x++ {
-						i := (y*w + x) * 3
-						r, g, b := rgb[i], rgb[i+1], rgb[i+2]
-						rr := mat[0][0]*r + mat[0][1]*g + mat[0][2]*b
-						gg := mat[1][0]*r + mat[1][1]*g + mat[1][2]*b
-						bb := mat[2][0]*r + mat[2][1]*g + mat[2][2]*b
-						if rr < 0 {
-							rr = 0
-						}
-						if gg < 0 {
-							gg = 0
-						}
-						if bb < 0 {
-							bb = 0
-						}
-						rgb[i], rgb[i+1], rgb[i+2] = rr, gg, bb
 					}
 				}
 			})
@@ -92,7 +69,7 @@ func ProcessPixelsFast(rgb []float64, w, h int, o Options) {
 
 	cs := CurveFor(o.Stock.Name)
 	lk := lookFor(o.Stock.Name)
-	// Camera-linear RGB -> film-layer exposures (spectral matrix).
+	// Camera-native RGB -> film-layer exposures (XT3Measured x film sensitivity).
 	parallelRows(h, workers, func(y0, y1 int) {
 		for y := y0; y < y1; y++ {
 			for x := 0; x < w; x++ {

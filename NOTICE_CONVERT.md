@@ -11,3 +11,8 @@ NegativeScan Studio Convert (v0.93+) is **inspired by** the pipeline shape of
 Stock numbers in Convert come from public Kodak datasheets already digitised in
 `colorsci/` and OFX gamma tables (`ofx/src/still_gammas.inc`), with sources cited
 on each stock in the Convert UI and in `docs/convert-design.md`.
+
+v1.02-preview5 also compared pipeline shape with
+[Silverphase](https://github.com/akinal5765-byte/Silverphase) (GPLv3,
+profiles CC BY-SA 4.0). That project's code, coupler coefficients and
+profile numbers are **not** used here.

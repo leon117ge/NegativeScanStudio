@@ -26,9 +26,15 @@ func (g GrainISO) Label() string {
 	}
 }
 
-// grainParams returns dye-cloud density quantum δ (fast/slow) and blur σ in
-// pixels for a 36x24 mm frame of width refW.
-func grainParams(refW int, stock string, iso GrainISO, strength, sizeMul float64) (deltaFast, deltaSlow, sigmaFast, sigmaSlow float64, prof GrainProfile) {
+// grainLayer is one emulsion sublayer (fast / mid / slow).
+type grainLayer struct {
+	delta, sigma float64
+}
+
+// grainParams returns fast/mid/slow dye-cloud quanta and blur σ in pixels
+// for a 36x24 mm frame of width refW. Cloud sizes are specified in microns
+// and mapped through the pixel pitch (36000 µm / refW).
+func grainParams(refW int, stock string, iso GrainISO, strength, sizeMul float64) (layers [3]grainLayer, prof GrainProfile) {
 	if strength <= 0 {
 		strength = 1
 	}
@@ -39,21 +45,47 @@ func grainParams(refW int, stock string, iso GrainISO, strength, sizeMul float64
 		refW = 8
 	}
 	prof = grainProfile(stock, iso)
-	// Base quantum; Amp from 500T calibration.
-	df, ds := 0.018*prof.Amp, 0.006*prof.Amp
-	umFast, umSlow := 14.0*prof.Size, 5.5*prof.Size
-	df *= strength
-	ds *= strength
+	// Physical dye-cloud diameters at ISO 400, then scaled by prof.Size.
+	// Fast (large) records low exposure; slow (small) records high exposure.
+	um := [3]float64{18.0 * prof.Size, 10.0 * prof.Size, 5.0 * prof.Size}
+	delta0 := [3]float64{0.020 * prof.Amp, 0.012 * prof.Amp, 0.006 * prof.Amp}
 	pxUM := 36000.0 / float64(refW)
-	sigmaFast = (umFast * sizeMul) / pxUM
-	sigmaSlow = (umSlow * sizeMul) / pxUM
-	if sigmaFast < 0.7 {
-		sigmaFast = 0.7
+	minSig := [3]float64{0.70, 0.50, 0.40}
+	for i := 0; i < 3; i++ {
+		sig := (um[i] * sizeMul) / pxUM
+		if sig < minSig[i] {
+			sig = minSig[i]
+		}
+		layers[i] = grainLayer{delta: delta0[i] * strength, sigma: sig}
 	}
-	if sigmaSlow < 0.45 {
-		sigmaSlow = 0.45
+	return layers, prof
+}
+
+// layerWeights returns fast/mid/slow mixing weights at density D.
+// High density (optically darker negative) shifts weight onto the
+// slower, finer grains; thin negative areas are dominated by the
+// larger fast grains. Weights always sum to 1.
+func layerWeights(D float64) (wFast, wMid, wSlow float64) {
+	t := D / 0.85
+	if t < 0 {
+		t = 0
 	}
-	return df, ds, sigmaFast, sigmaSlow, prof
+	if t > 1 {
+		t = 1
+	}
+	wFast = 0.55*(1-t) + 0.15*t
+	wSlow = 0.15*(1-t) + 0.50*t
+	wMid = 1 - wFast - wSlow
+	if wMid < 0.10 {
+		wMid = 0.10
+		s := wFast + wSlow
+		if s > 0 {
+			k := (1 - wMid) / s
+			wFast *= k
+			wSlow *= k
+		}
+	}
+	return wFast, wMid, wSlow
 }
 
 // applyGrainPoisson replaces density-above-Dmin samples with a Poisson /
@@ -75,9 +107,8 @@ func applyGrainAtScale(d []float64, w, h, refW int, stock string, iso GrainISO, 
 	if refW < 8 {
 		refW = w
 	}
-	df, ds, sigF, sigS, prof := grainParams(refW, stock, iso, strength, sizeMul)
-	// Equalisation blur a bit larger than the coarse cloud so LF tone is matched.
-	sigmaEq = sigF * 2.0
+	layers, prof := grainParams(refW, stock, iso, strength, sizeMul)
+	sigmaEq = layers[0].sigma * 2.0
 	if sigmaEq < 2 {
 		sigmaEq = 2
 	}
@@ -86,26 +117,30 @@ func applyGrainAtScale(d []float64, w, h, refW int, stock string, iso GrainISO, 
 	}
 
 	n := w * h
-	fastP := [3][]float64{make([]float64, n), make([]float64, n), make([]float64, n)}
-	slowP := [3][]float64{make([]float64, n), make([]float64, n), make([]float64, n)}
-	sharedF := make([]float64, n)
-	sharedS := make([]float64, n)
-	chF := [3][]float64{make([]float64, n), make([]float64, n), make([]float64, n)}
-	chS := [3][]float64{make([]float64, n), make([]float64, n), make([]float64, n)}
+	plane := [3][3][]float64{} // [layer][channel]
+	for li := 0; li < 3; li++ {
+		for c := 0; c < 3; c++ {
+			plane[li][c] = make([]float64, n)
+		}
+	}
+	shared := [3][]float64{make([]float64, n), make([]float64, n), make([]float64, n)}
+	chN := [3][3][]float64{}
+	for li := 0; li < 3; li++ {
+		for c := 0; c < 3; c++ {
+			chN[li][c] = make([]float64, n)
+		}
+	}
 	rng := rand.New(rand.NewSource(seed))
 	for i := 0; i < n; i++ {
-		sharedF[i] = rng.NormFloat64()
-		sharedS[i] = rng.NormFloat64()
-		for c := 0; c < 3; c++ {
-			chF[c][i] = rng.NormFloat64()
-			chS[c][i] = rng.NormFloat64()
+		for li := 0; li < 3; li++ {
+			shared[li][i] = rng.NormFloat64()
+			for c := 0; c < 3; c++ {
+				chN[li][c][i] = rng.NormFloat64()
+			}
 		}
 	}
 	load := prof.ChanLoad
 	cs := prof.ChanScale
-
-	// Split mean density ~60% slow (fine) / 40% fast (coarse) dye clouds.
-	const wFast, wSlow = 0.40, 0.60
 
 	var wg sync.WaitGroup
 	workers := 8
@@ -130,8 +165,8 @@ func applyGrainAtScale(d []float64, w, h, refW int, stock string, iso GrainISO, 
 					i := y*w + x
 					for c := 0; c < 3; c++ {
 						D := math.Max(d[i*3+c], 0)
-						lamF := wFast * D / df
-						lamS := wSlow * D / ds
+						wf, wm, ws := layerWeights(D)
+						ww := [3]float64{wf, wm, ws}
 						lc := load[c]
 						if lc < 0 {
 							lc = 0
@@ -140,26 +175,22 @@ func applyGrainAtScale(d []float64, w, h, refW int, stock string, iso GrainISO, 
 							lc = 0.98
 						}
 						sCorr := math.Sqrt(1 - lc*lc)
-						zF := lc*sharedF[i] + sCorr*chF[c][i]
-						zS := lc*sharedS[i] + sCorr*chS[c][i]
-						// Normal approx to Poisson: N = λ + √λ Z, E[N]=λ.
-						nF := lamF + math.Sqrt(math.Max(lamF, 1e-8))*zF
-						nS := lamS + math.Sqrt(math.Max(lamS, 1e-8))*zS
-						if nF < 0 {
-							nF = 0
-						}
-						if nS < 0 {
-							nS = 0
-						}
-						// Store only the zero-mean grain fluctuation; the image
-						// density itself must not be blurred (v0.96 blurred the
-						// whole frame, which made exports soft).
 						scale := 1.0
 						if prof.DensRef[c] > 0 {
-							scale = math.Sqrt(prof.DensRef[c] / math.Max(D, 0.04))
+							// Mild vs-density flatten (exponent 0.25, not
+							// 0.5) so Poisson still varies with D.
+							scale = math.Pow(prof.DensRef[c]/math.Max(D, 0.04), 0.25)
 						}
-						fastP[c][i] = (nF*df - wFast*D) * cs[c] * scale
-						slowP[c][i] = (nS*ds - wSlow*D) * cs[c] * scale
+						for li := 0; li < 3; li++ {
+							del := layers[li].delta
+							lam := ww[li] * D / del
+							z := lc*shared[li][i] + sCorr*chN[li][c][i]
+							nn := lam + math.Sqrt(math.Max(lam, 1e-8))*z
+							if nn < 0 {
+								nn = 0
+							}
+							plane[li][c][i] = (nn*del - ww[li]*D) * cs[c] * scale
+						}
 					}
 				}
 			}
@@ -173,21 +204,30 @@ func applyGrainAtScale(d []float64, w, h, refW int, stock string, iso GrainISO, 
 	}
 	for c := 0; c < 3; c++ {
 		sz := chanSizeMul(prof, c)
-		sigFc := sigF * sz
-		sigSc := sigS * sz
-		if sigFc < 0.7 {
-			sigFc = 0.7
+		for li := 0; li < 3; li++ {
+			sig := layers[li].sigma * sz
+			if sig < 0.35 {
+				sig = 0.35
+			}
+			blurInPlaceFast(plane[li][c], w, h, sig, passes)
 		}
-		if sigSc < 0.45 {
-			sigSc = 0.45
-		}
-		blurInPlaceFast(fastP[c], w, h, sigFc, passes)
-		blurInPlaceFast(slowP[c], w, h, sigSc, passes)
 	}
 
+	// Combine sublayers and subtract the per-channel mean so clipping of
+	// negative Poisson samples cannot lift or drop mean density.
+	var sum [3]float64
+	comb := [3][]float64{make([]float64, n), make([]float64, n), make([]float64, n)}
 	for i := 0; i < n; i++ {
 		for c := 0; c < 3; c++ {
-			v := d[i*3+c] + fastP[c][i] + slowP[c][i]
+			g := plane[0][c][i] + plane[1][c][i] + plane[2][c][i]
+			comb[c][i] = g
+			sum[c] += g
+		}
+	}
+	invN := 1 / float64(n)
+	for i := 0; i < n; i++ {
+		for c := 0; c < 3; c++ {
+			v := d[i*3+c] + comb[c][i] - sum[c]*invN
 			if v < 0 {
 				v = 0
 			}

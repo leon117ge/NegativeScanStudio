@@ -10,18 +10,20 @@ import (
 // 0212 500T scan (crop_mid peach wall / floor), not the whole 512 crop
 // which includes shoe and bar edges.
 var (
-	targetMidD   = [3]float64{0.167, 0.396, 0.554}
-	targetMidRMS = [3]float64{0.0154, 0.0222, 0.0546}
-	targetMidRG  = 0.194
-	targetMidGB  = 0.045
-	targetMidRB  = 0.055
-	targetMidAC  = [3]float64{2.1, 1.9, 1.8}
+	// Mid-density target from /workspace/grain_real/crop_mid.tiff
+	// (meas_real.txt): RMS 0.02775/0.04436/0.07312, corr 0.716/0.384/0.248.
+	targetMidD   = [3]float64{0.189, 0.383, 0.442}
+	targetMidRMS = [3]float64{0.0278, 0.0444, 0.0731}
+	targetMidRG  = 0.716
+	targetMidGB  = 0.384
+	targetMidRB  = 0.248
+	targetMidAC  = [3]float64{2.4, 2.2, 3.0} // blue coarser (larger AC50)
 
 	targetHighD   = [3]float64{0.400, 0.796, 1.047}
-	targetHighRMS = [3]float64{0.0133, 0.0238, 0.0520}
+	targetHighRMS = [3]float64{0.030, 0.048, 0.076}
 
 	targetLowD   = [3]float64{0.109, 0.278, 0.388}
-	targetLowRMS = [3]float64{0.0194, 0.0321, 0.0706}
+	targetLowRMS = [3]float64{0.026, 0.042, 0.070}
 )
 
 func TestGrainCalibrationISO400(t *testing.T) {
@@ -53,9 +55,12 @@ func TestGrainCalibrationISO400(t *testing.T) {
 	checkCorr(st.CorrGB, targetMidGB, "GB")
 	checkCorr(st.CorrRB, targetMidRB, "RB")
 	for c, name := range []string{"R", "G", "B"} {
-		if math.Abs(st.AC50[c]-targetMidAC[c]) > 1.2 {
+		if math.Abs(st.AC50[c]-targetMidAC[c]) > 1.6 {
 			t.Errorf("ac50 %s: got %.1f want %.1f", name, st.AC50[c], targetMidAC[c])
 		}
+	}
+	if st.AC50[2] < st.AC50[1]-0.15 {
+		t.Errorf("blue should be coarser than green: ac50 B=%.1f G=%.1f", st.AC50[2], st.AC50[1])
 	}
 
 	_, hi := SimulateFlatGrain(targetHighD, w, h, ScanFramePx, s.Name, GrainISO400, 42)

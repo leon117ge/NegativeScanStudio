@@ -119,3 +119,46 @@ v1.02-preview2 multiplies camera-RGB by the file's as-shot `cam_mul`
 "Apply camera white balance (as-shot)" is on by default. The Chart
 CamCal checkbox now defaults off: that matrix is for leveling a scan
 camera, not for ordinary photographs.
+
+
+## v1.02-preview5 film colour and grain
+
+Ideas compared with the public Silverphase / spektrafilm write-ups (both
+GPLv3, profiles CC BY-SA). No code, constants, DIR coefficients or LUT
+numbers were copied.
+
+1. Per-stock spectral exposure: linear sRGB is reconstructed with a
+   smooth display-primary basis, re-lit by the stock's reference
+   illuminant (Planck 3200 K for 500T, Planck 5500 K as a D55 stand-in
+   for daylight / still stocks) and integrated against that stock's
+   spectral sensitivity. Vision3 500T / 250D use the digitised Kodak
+   H-1-5219 and H-1-5207 log-sensitivity CSVs. Still films use Gaussian
+   approximations of the published chart shapes (peaks near 650/550/430 nm)
+   with modest per-stock width and peak tweaks.
+2. Asymmetric interlayer DIR in log-exposure, applied only to the
+   residual around the grey axis so a grey ramp still follows the
+   datasheet H&D curves after OFX inversion. Warmth is applied only when
+   R > G, so foliage greens are not rotated toward yellow.
+3. AutoEV still places the median at mid-grey, then lifts if needed so
+   the 12th-percentile shadows stay within about 2.3 stops of mid-grey
+   (the colour window; chroma dies in the toe well above the tonal floor).
+4. Still stocks are meant to be viewed through `NSS_StillPaper_v1.cube`
+   (Cineon in, Rec.709 gamma 2.4 out): a parametric RA-4 paper
+   approximation (system contrast 1.50, chroma 1.12, soft shoulder,
+   neutrals stay neutral). Vision3 keeps the Kodak 2383 print-film LUT.
+   The OFX plugin is unchanged.
+
+Working space: Convert keeps the source camera's native raw RGB
+(white-balanced, demosaiced, linear). There is no conversion to
+sRGB, Rec.709, ProPhoto or XYZ and no Rec.709 clamp. Film-layer
+exposure uses the measured X-T3 sensitivities (Weta XT3Measured)
+overlapped with each stock's spectral sensitivity. The output
+negative remains X-T3 camera-native with the XT3 trichrome 2026-11-02
+matrix, like a real scan.
+
+5. FilmGrain: three emulsion sublayers (fast / mid / slow) with dye-cloud
+   sizes in microns mapped through a 36x24 mm frame, Poisson-like
+   density statistics, mean density recentered, blur applied only to the
+   zero-mean grain planes. ISO 400 is calibrated to the 500T
+   `grain_real/crop_mid.tiff` mid RMS and channel correlations; ISO 100
+   is scaled by the published PGI / sqrt(ISO) ratios.

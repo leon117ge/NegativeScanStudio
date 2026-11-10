@@ -35,14 +35,19 @@ import (
 // punchy warm; Vision3: motion-picture, restrained). Dye spectra and
 // H&D curves are from the digitised Kodak datasheets already in this repo.
 type stockLook struct {
-	Interimage float64 // log-exposure saturation (DIR proxy); 0 = off
-	Warm       float64 // extra yellow in chromatic colours; 0 = neutral hue
+	Interimage float64 // fallback symmetric DIR strength; 0 = off
+	Warm       float64 // extra yellow on reds/oranges only (R>G); 0 = off
 	Contrast   float64 // linear-domain system contrast about mid-grey; 1 = off
 	Chroma     float64 // scale of dye-mix chromatic residual; 1 = off
 	DensOff    [3]float64
 	OffLUT     [3]densLUT // per-channel offset vs logRel; mid-grey matches DensOff
 	DyeMix     colorsci.Mat3
 	FilmSens   colorsci.Mat3
+	// DIR is applied to log-exposure residuals (e - mean) so a grey
+	// ramp is unchanged and still follows the datasheet H&D curves.
+	// Rows act on R, G, B; off-diagonals are asymmetric interlayer
+	// inhibition (character parameters, not Kodak coupler numbers).
+	DIR [3][3]float64
 }
 
 var (
@@ -63,7 +68,7 @@ func initLooks() {
 	filmSens = cameraToFilmMatrix()
 	lookMap = map[string]stockLook{}
 	for _, s := range Stocks() {
-		lookMap[s.Name] = makeLook(s.Name, filmSens)
+		lookMap[s.Name] = makeLook(s.Name, filmExposureMatrix(s.Name))
 	}
 }
 
@@ -86,22 +91,59 @@ func makeLook(name string, fm colorsci.Mat3) stockLook {
 	switch {
 	case strings.Contains(n, "ektar"):
 		// Kodak E-4046: "finest, most saturated color" / vivid colour.
-		lk.Interimage, lk.Warm, lk.Contrast, lk.Chroma = 0.32, 0.00, 1.24, 1
+		lk.Interimage, lk.Warm, lk.Contrast, lk.Chroma = 0.38, 0.00, 1.30, 1
+		lk.DIR = [3][3]float64{
+			{1.38, -0.08, -0.02},
+			{-0.06, 1.40, -0.04},
+			{-0.02, 0.04, 1.36},
+		}
 	case strings.Contains(n, "portra"):
 		// Kodak E-4050: natural skin-tone reproduction, not drab.
-		lk.Interimage, lk.Warm, lk.Contrast, lk.Chroma = 0.16, 0.04, 1.18, 1
+		lk.Interimage, lk.Warm, lk.Contrast, lk.Chroma = 0.18, 0.06, 1.16, 1
+		lk.DIR = [3][3]float64{
+			{1.18, -0.04, 0.02},
+			{-0.03, 1.16, -0.02},
+			{0.01, 0.05, 1.14},
+		}
 	case strings.Contains(n, "gold"):
 		// Kodak E-7022: warm, saturated consumer colour.
-		lk.Interimage, lk.Warm, lk.Contrast, lk.Chroma = 0.22, 0.10, 1.20, 1
+		lk.Interimage, lk.Warm, lk.Contrast, lk.Chroma = 0.26, 0.12, 1.22, 1
+		lk.DIR = [3][3]float64{
+			{1.24, -0.05, -0.02},
+			{-0.04, 1.22, -0.03},
+			{-0.08, 0.04, 1.20},
+		}
 	case strings.Contains(n, "ultramax"):
 		// Kodak E-7023: rich, saturated, slightly warm consumer colour.
-		lk.Interimage, lk.Warm, lk.Contrast, lk.Chroma = 0.28, 0.06, 1.24, 1
+		lk.Interimage, lk.Warm, lk.Contrast, lk.Chroma = 0.34, 0.07, 1.28, 1
+		lk.DIR = [3][3]float64{
+			{1.32, -0.07, -0.02},
+			{-0.05, 1.34, -0.03},
+			{-0.03, 0.04, 1.30},
+		}
 	case strings.Contains(n, "500t") || strings.Contains(n, "5219"):
 		// H-1-5219: tungsten motion-picture stock, wide latitude, restrained.
-		lk.Interimage, lk.Warm, lk.Contrast, lk.Chroma = 0.14, 0.02, 1.12, 1
+		lk.Interimage, lk.Warm, lk.Contrast, lk.Chroma = 0.12, 0.02, 1.08, 1
+		lk.DIR = [3][3]float64{
+			{1.12, -0.03, 0.00},
+			{-0.02, 1.12, -0.02},
+			{0.00, 0.04, 1.10},
+		}
 	case strings.Contains(n, "250d") || strings.Contains(n, "5207"):
 		// H-1-5207: daylight Vision3 sibling of 500T.
-		lk.Interimage, lk.Warm, lk.Contrast, lk.Chroma = 0.16, 0.00, 1.14, 1
+		lk.Interimage, lk.Warm, lk.Contrast, lk.Chroma = 0.14, 0.00, 1.10, 1
+		lk.DIR = [3][3]float64{
+			{1.14, -0.03, 0.00},
+			{-0.02, 1.14, -0.02},
+			{0.00, 0.04, 1.12},
+		}
+	default:
+		s := 1 + lk.Interimage
+		lk.DIR = [3][3]float64{{s, 0, 0}, {0, s, 0}, {0, 0, s}}
+	}
+	if lk.DIR[0][0] == 0 && lk.DIR[1][1] == 0 && lk.DIR[2][2] == 0 {
+		sat := 1 + lk.Interimage
+		lk.DIR = [3][3]float64{{sat, 0, 0}, {0, sat, 0}, {0, 0, sat}}
 	}
 	s, err := StockByName(name)
 	if err == nil {
@@ -111,29 +153,11 @@ func makeLook(name string, fm colorsci.Mat3) stockLook {
 	return lk
 }
 
-// cameraToFilmMatrix maps camera-linear RGB to film-layer exposures.
-//
-// Scene-referred input is linear sRGB (as-shot WB + camera matrix).
-// Approximate scene-RGB sensitivities as Gaussians around 625/545/460 nm
-// (display-referred RGB, not raw X-T3 camera RGB). Film layers: Gaussian
-// approximation of published colour-negative spectral-sensitivity charts
-// (Kodak H-1-5219 p.3 and still-film charts): red-sensitive ~650 nm,
-// green-sensitive ~550 nm, blue-sensitive ~430 nm. Row normalisation keeps
-// a scene grey as a film-layer grey.
+// cameraToFilmMatrix is the fallback overlap for an unknown stock name:
+// XT3Measured camera sensitivities against a generic colour-negative
+// sensitivity shape. Known stocks use filmExposureMatrix instead.
 func cameraToFilmMatrix() colorsci.Mat3 {
-	film := colorsci.CameraModel{Peak: [3]float64{650, 550, 430}, Sigma: [3]float64{36, 32, 26}}
-	cam := colorsci.CameraModel{Peak: [3]float64{625, 545, 460}, Sigma: [3]float64{40, 34, 28}, IRCut: 700}
-	var m colorsci.Mat3
-	for c := 0; c < 3; c++ {
-		for k := 0; k < 3; k++ {
-			var sum float64
-			for wl := 380.0; wl <= 780; wl += 5 {
-				sum += film.Sens(c, wl) * cam.Sens(k, wl)
-			}
-			m[c][k] = sum
-		}
-	}
-	return m.NormalizeRows()
+	return filmExposureMatrix("")
 }
 
 // ofxLin is the OFX Positive-Out linear reconstruction of one channel
@@ -241,18 +265,27 @@ func applyContrast(v [3]float64, p float64) [3]float64 {
 	return v
 }
 
-// applyLogDIR applies interimage and warmth in log10-exposure (relative to
-// mid-grey). Equal layer exposures (a grey) are unchanged.
+// applyLogDIR applies asymmetric interlayer DIR and warmth in
+// log10-exposure (relative to mid-grey). Equal layer exposures (a grey)
+// are unchanged, so the grey ramp still follows the datasheet curves.
 func applyLogDIR(rel [3]float64, lk stockLook) [3]float64 {
 	mean := (rel[0] + rel[1] + rel[2]) / 3
-	s := lk.Interimage
-	out := [3]float64{
-		mean + (1+s)*(rel[0]-mean),
-		mean + (1+s)*(rel[1]-mean),
-		mean + (1+s)*(rel[2]-mean),
+	d := [3]float64{rel[0] - mean, rel[1] - mean, rel[2] - mean}
+	var out [3]float64
+	if lk.DIR[0][0] == 0 && lk.DIR[1][1] == 0 && lk.DIR[2][2] == 0 {
+		sat := 1 + lk.Interimage
+		out = [3]float64{mean + sat*d[0], mean + sat*d[1], mean + sat*d[2]}
+	} else {
+		for i := 0; i < 3; i++ {
+			out[i] = mean + lk.DIR[i][0]*d[0] + lk.DIR[i][1]*d[1] + lk.DIR[i][2]*d[2]
+		}
 	}
+	// Warmth only on reds/oranges (R > G). Applying it to greens was
+	// rotating foliage toward yellow.
 	if lk.Warm != 0 {
-		out[2] -= lk.Warm * (out[0] + out[1] - 2*out[2]) / 2
+		if wr := out[0] - out[1]; wr > 0 {
+			out[2] -= lk.Warm * wr
+		}
 	}
 	return out
 }
