@@ -166,11 +166,12 @@ matrix, like a real scan.
 
 ## v1.02-preview6 still-stock contrast
 
-User feedback on preview5: usable colour, but shadows too dark.
-Still stocks (Portra, Ektar, Gold, UltraMax) had a higher display
-slope around mid-grey through Cineon+2383 than intended. Their
-Convert contrast factors were scaled by 0.85 (about 15 percent)
-so the viewing-path slope drops by roughly that amount. Mid-grey
-placement is unchanged (contrast pivots at 0.18). Vision3 500T and
-250D contrast is unchanged. The OFX plugin and the still-paper LUT
-curve were not modified.
+Released as v1.02: still-stock Convert contrast (Portra, Ektar, Gold,
+UltraMax) was scaled by 0.85 to lift shadows. Vision3 was unchanged.
+The user preferred the preview5 look, so this scale is not current.
+
+## v1.03 still-stock contrast
+
+v1.03 restores the preview5 contrast values: Ektar 1.30, Portra 1.16,
+Gold 1.22, UltraMax 1.28. Vision3 500T (1.08) and 250D (1.10) were
+never changed. The OFX plugin and the still-paper LUT are unchanged.
