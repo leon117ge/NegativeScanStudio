@@ -26,35 +26,17 @@ func (g GrainISO) Label() string {
 	}
 }
 
-// stockGrainScale: relative dye-cloud density quantum (smaller = finer /
-// more grains). Tuned; Ektar extremely fine. Not a Kodak PGI table copy.
-func stockGrainScale(name string) float64 {
-	switch name {
-	case "Ektar 100":
-		return 0.55
-	case "Portra 400":
-		return 1.0
-	case "Gold 200":
-		return 1.05
-	case "UltraMax 400":
-		return 1.2
-	case "Vision3 500T 5219":
-		return 1.15
-	case "Vision3 250D 5207":
-		return 1.05
-	default:
-		return 1.0
-	}
-}
-
 // grainParams returns dye-cloud density quantum δ (fast/slow) and blur σ in
-// pixels for a 36x24 mm frame at width w.
-func grainParams(w int, stock string, iso GrainISO, strength, sizeMul float64) (deltaFast, deltaSlow, sigmaFast, sigmaSlow float64, prof GrainProfile) {
+// pixels for a 36x24 mm frame of width refW.
+func grainParams(refW int, stock string, iso GrainISO, strength, sizeMul float64) (deltaFast, deltaSlow, sigmaFast, sigmaSlow float64, prof GrainProfile) {
 	if strength <= 0 {
 		strength = 1
 	}
 	if sizeMul <= 0 {
 		sizeMul = 1
+	}
+	if refW < 8 {
+		refW = 8
 	}
 	prof = grainProfile(stock, iso)
 	// Base quantum; Amp from 500T calibration.
@@ -62,7 +44,7 @@ func grainParams(w int, stock string, iso GrainISO, strength, sizeMul float64) (
 	umFast, umSlow := 14.0*prof.Size, 5.5*prof.Size
 	df *= strength
 	ds *= strength
-	pxUM := 36000.0 / float64(w)
+	pxUM := 36000.0 / float64(refW)
 	sigmaFast = (umFast * sizeMul) / pxUM
 	sigmaSlow = (umSlow * sizeMul) / pxUM
 	if sigmaFast < 0.7 {
@@ -75,15 +57,25 @@ func grainParams(w int, stock string, iso GrainISO, strength, sizeMul float64) (
 }
 
 // applyGrainPoisson replaces density-above-Dmin samples with a Poisson /
-// normal dye-cloud realisation (fast+slow sublayers), then lightly blurs.
+// normal dye-cloud realisation (fast+slow sublayers), then blurs only the
+// zero-mean fluctuation planes so image detail stays sharp.
 // Expected density is preserved before the transmittance equalisation step
-// in ProcessPixels. Approach inspired by spektrafilm's stochastic negative
-// grain (GPLv3 — ideas only, no code copied).
+// in ProcessPixels.
 func applyGrainPoisson(d []float64, w, h int, stock string, iso GrainISO, seed int64, strength, sizeMul float64) (sigmaEq float64) {
+	return applyGrainAtScale(d, w, h, w, stock, iso, seed, strength, sizeMul)
+}
+
+// applyGrainAtScale is applyGrainPoisson but computes dye-cloud size from
+// refW (pixels across 36 mm) instead of the buffer width. Used so a 512 px
+// calibration patch can be measured at the scan's 6246 px scale.
+func applyGrainAtScale(d []float64, w, h, refW int, stock string, iso GrainISO, seed int64, strength, sizeMul float64) (sigmaEq float64) {
 	if iso == GrainOff || w < 8 || h < 8 {
 		return 0
 	}
-	df, ds, sigF, sigS, prof := grainParams(w, stock, iso, strength, sizeMul)
+	if refW < 8 {
+		refW = w
+	}
+	df, ds, sigF, sigS, prof := grainParams(refW, stock, iso, strength, sizeMul)
 	// Equalisation blur a bit larger than the coarse cloud so LF tone is matched.
 	sigmaEq = sigF * 2.0
 	if sigmaEq < 2 {
@@ -94,9 +86,8 @@ func applyGrainPoisson(d []float64, w, h int, stock string, iso GrainISO, seed i
 	}
 
 	n := w * h
-	// Work planes: realised density per channel.
-	planes := [3][]float64{make([]float64, n), make([]float64, n), make([]float64, n)}
-	// Shared / per-channel unit normals for partial correlation of counts.
+	fastP := [3][]float64{make([]float64, n), make([]float64, n), make([]float64, n)}
+	slowP := [3][]float64{make([]float64, n), make([]float64, n), make([]float64, n)}
 	sharedF := make([]float64, n)
 	sharedS := make([]float64, n)
 	chF := [3][]float64{make([]float64, n), make([]float64, n), make([]float64, n)}
@@ -110,14 +101,7 @@ func applyGrainPoisson(d []float64, w, h int, stock string, iso GrainISO, seed i
 			chS[c][i] = rng.NormFloat64()
 		}
 	}
-	corr := prof.Corr
-	if corr < 0 {
-		corr = 0
-	}
-	if corr > 0.95 {
-		corr = 0.95
-	}
-	sCorr := math.Sqrt(1 - corr*corr)
+	load := prof.ChanLoad
 	cs := prof.ChanScale
 
 	// Split mean density ~60% slow (fine) / 40% fast (coarse) dye clouds.
@@ -146,11 +130,18 @@ func applyGrainPoisson(d []float64, w, h int, stock string, iso GrainISO, seed i
 					i := y*w + x
 					for c := 0; c < 3; c++ {
 						D := math.Max(d[i*3+c], 0)
-						// Expected cloud counts from mean density.
 						lamF := wFast * D / df
 						lamS := wSlow * D / ds
-						zF := corr*sharedF[i] + sCorr*chF[c][i]
-						zS := corr*sharedS[i] + sCorr*chS[c][i]
+						lc := load[c]
+						if lc < 0 {
+							lc = 0
+						}
+						if lc > 0.98 {
+							lc = 0.98
+						}
+						sCorr := math.Sqrt(1 - lc*lc)
+						zF := lc*sharedF[i] + sCorr*chF[c][i]
+						zS := lc*sharedS[i] + sCorr*chS[c][i]
 						// Normal approx to Poisson: N = λ + √λ Z, E[N]=λ.
 						nF := lamF + math.Sqrt(math.Max(lamF, 1e-8))*zF
 						nS := lamS + math.Sqrt(math.Max(lamS, 1e-8))*zS
@@ -163,7 +154,12 @@ func applyGrainPoisson(d []float64, w, h int, stock string, iso GrainISO, seed i
 						// Store only the zero-mean grain fluctuation; the image
 						// density itself must not be blurred (v0.96 blurred the
 						// whole frame, which made exports soft).
-						planes[c][i] = ((nF*df + nS*ds) - D) * cs[c]
+						scale := 1.0
+						if prof.DensRef[c] > 0 {
+							scale = math.Sqrt(prof.DensRef[c] / math.Max(D, 0.04))
+						}
+						fastP[c][i] = (nF*df - wFast*D) * cs[c] * scale
+						slowP[c][i] = (nS*ds - wSlow*D) * cs[c] * scale
 					}
 				}
 			}
@@ -171,26 +167,27 @@ func applyGrainPoisson(d []float64, w, h int, stock string, iso GrainISO, seed i
 	}
 	wg.Wait()
 
-	// Dye-cloud spatial extent: blur each channel (fast then mix with slow).
-	// Approximate two scales by blurring the whole plane at an intermediate σ,
-	// then blending with a finer-blurred copy.
 	passes := 3
 	if w*h < 2_500_000 {
 		passes = 2
 	}
 	for c := 0; c < 3; c++ {
-		fine := append([]float64(nil), planes[c]...)
-		blurInPlaceFast(planes[c], w, h, sigF, passes)
-		blurInPlaceFast(fine, w, h, sigS, passes)
-		for i := 0; i < n; i++ {
-			// Re-weight so mean of blend ≈ mean of pre-blur (box blur preserves mean).
-			planes[c][i] = wFast*planes[c][i] + wSlow*fine[i]
+		sz := chanSizeMul(prof, c)
+		sigFc := sigF * sz
+		sigSc := sigS * sz
+		if sigFc < 0.7 {
+			sigFc = 0.7
 		}
+		if sigSc < 0.45 {
+			sigSc = 0.45
+		}
+		blurInPlaceFast(fastP[c], w, h, sigFc, passes)
+		blurInPlaceFast(slowP[c], w, h, sigSc, passes)
 	}
 
 	for i := 0; i < n; i++ {
 		for c := 0; c < 3; c++ {
-			v := d[i*3+c] + planes[c][i]
+			v := d[i*3+c] + fastP[c][i] + slowP[c][i]
 			if v < 0 {
 				v = 0
 			}
@@ -236,4 +233,3 @@ func equalizeTransmittance(grainy, clean []float64, w, h int, sigma float64) {
 func blurInPlace(buf []float64, w, h int, sigma float64) {
 	blurInPlaceFast(buf, w, h, sigma, 3)
 }
-
