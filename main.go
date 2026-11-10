@@ -28,8 +28,8 @@ func main() {
 		navItem{"Camera & Light", iconLight}, navItem{"HDR Scan", iconHDR}, navItem{"Crop & Merge", iconCrop}, navItem{"Convert", iconConvert})
 	camTabs := newPager(2)
 	camSeg := newNavBar(camTabs, true, navItem{label: "Camera"}, navItem{label: "Light"})
-	scanTabs := newPager(2)
-	scanSeg := newNavBar(scanTabs, true, navItem{label: "White light scan"}, navItem{label: "Trichrome"})
+	scanTabs := newPager(4)
+	scanSeg := newNavBar(scanTabs, true, navItem{label: "White light scan"}, navItem{label: "Trichrome"}, navItem{label: "Mono trichrome"}, navItem{label: "Focus check"})
 	cropTabs := newPager(4)
 	cropSeg := newNavBar(cropTabs, true, navItem{label: "Crop"}, navItem{label: "Merge files"}, navItem{label: "Remove hairs"}, navItem{label: "Batch RAW to TIFF"})
 	module := func(title string, seg *navBar, pg *pager, pages ...TabPage) TabPage {
@@ -46,6 +46,10 @@ func main() {
 	hdrui.light = lightui
 	triui := &TriUI{hdr: hdrui, light: lightui}
 	hdrui.tri = triui
+	monoui := &MonoUI{hdr: hdrui, light: lightui}
+	focusui := &FocusUI{hdr: hdrui, light: lightui, mono: monoui}
+	hdrui.mono = monoui
+	hdrui.focus = focusui
 	hdrui.subTabs = cropTabs // Merge files = sub-page 1, Remove hairs = 2
 	hp := hdrui.Pages(rawui.Page())
 	var appImg walk.Image
@@ -113,7 +117,7 @@ func main() {
 			// the window itself never needs to be taller than the screen.
 			ScrollView{StretchFactor: 10, Layout: VBox{MarginsZero: true, Spacing: 0}, Children: append(tabs.Stack(
 				module("  1. Camera & Light  ", camSeg, camTabs, hp.Camera, lightui.Page()),
-				module("  2. HDR Scan  ", scanSeg, scanTabs, hp.White, triui.Page()),
+				module("  2. HDR Scan  ", scanSeg, scanTabs, hp.White, triui.Page(), monoui.Page(), focusui.Page()),
 				module("  3. Crop & Merge  ", cropSeg, cropTabs, cropui.Page(), hp.Merge, hp.Hairs, hp.Batch),
 				convui.Page(),
 			), VSpacer{StretchFactor: 1})},
@@ -141,11 +145,22 @@ func main() {
 				k = 0
 			}
 		case 1:
-			if scanTabs.CurrentIndex() == 1 {
+			switch scanTabs.CurrentIndex() {
+			case 1:
 				k = 2
-			} else {
+			case 2, 3:
+				k = -1 // Mono trichrome and Focus check run their own preview
+			default:
 				k = 1
 			}
+			if scanTabs.CurrentIndex() == 3 {
+				focusui.enter()
+			} else if focusui.active {
+				focusui.leave()
+			}
+		}
+		if tabs.CurrentIndex() != 1 && focusui.active {
+			focusui.leave()
 		}
 		hdrui.setLivePage(k)
 	}
@@ -164,6 +179,8 @@ func main() {
 	hdrui.AfterCreate()
 	lightui.AfterCreate()
 	triui.AfterCreate()
+	monoui.AfterCreate()
+	focusui.AfterCreate()
 	convui.init()
 	applyDark(mw)
 	fitToWorkArea(mw)
@@ -187,6 +204,14 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "--tri" {
 		tabs.SetCurrentIndex(1)
 		scanTabs.SetCurrentIndex(1)
+	}
+	if len(os.Args) > 1 && os.Args[1] == "--mono" {
+		tabs.SetCurrentIndex(1)
+		scanTabs.SetCurrentIndex(2)
+	}
+	if len(os.Args) > 1 && os.Args[1] == "--focus" {
+		tabs.SetCurrentIndex(1)
+		scanTabs.SetCurrentIndex(3)
 	}
 	// "--camera" / "--white" / "--merge" (v0.83) open those sub-pages
 	if len(os.Args) > 1 {

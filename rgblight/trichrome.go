@@ -69,3 +69,11 @@ func (s *ChannelSwitch) Only(ch int) error {
 
 // Off switches every channel off (values kept) - disconnect / app close.
 func (s *ChannelSwitch) Off() error { return s.set([3]bool{}, s.Values) }
+
+// Green lights only the green channel (trichrome focus baseline).
+func (s *ChannelSwitch) Green() error { return s.Only(1) }
+
+// White lights every channel at the stored scan brightness.
+func (s *ChannelSwitch) White() error {
+	return s.set([3]bool{true, true, true}, s.Values)
+}

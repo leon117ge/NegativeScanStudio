@@ -28,3 +28,14 @@
 
 ## 计划：Hikrobot 工业相机
 `lightlevel.Camera` 是接口，注释写明以后可由单色工业相机（如 Hikrobot MVS 机身）实现。单色机配合三色灯可直接做 trichrome 扫描，无 Bayer 串扰。目前**尚未实现**。
+
+
+## Hikrobot monochrome camera (v0.97-mono-preview)
+
+Implemented in `hikcam/` (runtime load of `MvCameraControl.dll`, no
+link-time dependency) and the HDR Scan pages **Mono trichrome** and
+**Focus check**. See [mono-trichrome.md](mono-trichrome.md).
+
+Intended model: Hikrobot MV-CS240-90UM (USB3 monochrome, GMAX2424,
+6016 x 4096, Mono 8/10/12). The app enumerates any USB3 or GigE MVS
+device and always offers a simulator when the SDK or the camera is absent.

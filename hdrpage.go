@@ -31,7 +31,7 @@ import (
 )
 
 const appName = "NegativeScan Studio"
-const appVersion = appName + " v0.96.2"
+const appVersion = appName + " v0.97-mono-preview"
 
 // legacyAppName: the program was called Film Base Meter up to v0.67; its
 // settings folder is still read (copied once, never changed) by migrateLegacyConfig.
@@ -434,6 +434,8 @@ type HDRUI struct {
 	dustCB, f0CB, isoCB, stockCB, tolCB, mDustCB *walk.ComboBox
 	shutCB                                       *walk.ComboBox // v0.81 base shutter
 	tri                                          *TriUI         // v0.82 Trichrome page
+	mono                                         *MonoUI        // v0.97 Mono trichrome page
+	focus                                        *FocusUI       // v0.97 Focus check page
 	handoff                                      *baseHandoff   // v0.82 leveling / stored light handed to the lock
 	autoLocking                                  bool
 	lockSrc                                      string   // what locked frame 0 ("" = Meter base)
@@ -678,6 +680,9 @@ func (u *HDRUI) updateButtons() {
 	u.refreshLevelingUI()
 	if u.tri != nil {
 		u.tri.updateButtons()
+	}
+	if u.mono != nil {
+		u.mono.updateButtons()
 	}
 }
 
