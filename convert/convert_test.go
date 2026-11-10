@@ -44,15 +44,17 @@ func TestPCHIPMonotoneMid(t *testing.T) {
 func TestBaseAndMid(t *testing.T) {
 	s, _ := StockByName("Ektar 100")
 	v := SceneToNeg([3]float64{1e-6, 1e-6, 1e-6}, Options{Stock: s})
+	p := colorsci.ApplyCam(DefaultXT3Trichrome, 1, v)
 	for c := 0; c < 3; c++ {
-		if math.Abs(v[c]-BaseFS) > 0.05 {
-			t.Fatalf("shadow near base: %v", v)
+		if math.Abs(p[c]-BaseFS) > 0.05 {
+			t.Fatalf("shadow after profile near base 0.5: cam=%v after=%v", v, p)
 		}
 	}
 	m := SceneToNeg([3]float64{MidGrey, MidGrey, MidGrey}, Options{Stock: s})
+	pm := colorsci.ApplyCam(DefaultXT3Trichrome, 1, m)
 	for c := 0; c < 3; c++ {
-		if !(m[c] < BaseFS-0.05) {
-			t.Fatalf("mid denser than base: %v", m)
+		if !(pm[c] < BaseFS-0.05) {
+			t.Fatalf("mid denser than base after profile: cam=%v after=%v", m, pm)
 		}
 	}
 }
@@ -84,6 +86,15 @@ func TestMetadata(t *testing.T) {
 	if got.FilmBase == nil || *got.FilmBase != [3]float64{0.5, 0.5, 0.5} {
 		t.Fatalf("%+v", got)
 	}
+	if got.FilmBaseSpace != scanmeta.AfterProfile || got.CameraApplied || got.CameraMatrix == nil || got.CameraStrength != 1 {
+		t.Fatalf("scan metadata %+v", got)
+	}
+	if got.Processing != "" {
+		t.Fatalf("processing must stay empty for OFX auto-load, got %q", got.Processing)
+	}
+	if got.LightModel == "" || got.CameraProfile != DefaultXT3Profile {
+		t.Fatalf("light/profile %+v", got)
+	}
 }
 
 func pluginInvert(negR, negG, negB float32, gam [3]float64, expo float32) (float32, float32, float32) {
@@ -107,9 +118,10 @@ func pluginInvert(negR, negG, negB float32, gam [3]float64, expo float32) (float
 
 func findExpo(s Stock) float32 {
 	neg := SceneToNeg([3]float64{MidGrey, MidGrey, MidGrey}, Options{Stock: s})
+	p := colorsci.ApplyCam(DefaultXT3Trichrome, 1, neg)
 	bestE, bestErr := float32(1), float32(1e9)
 	for e := float32(-1); e <= 4; e += 0.05 {
-		lr, lg, lb := pluginInvert(float32(neg[0]), float32(neg[1]), float32(neg[2]), s.Gamma, e)
+		lr, lg, lb := pluginInvert(float32(p[0]), float32(p[1]), float32(p[2]), s.Gamma, e)
 		err := float32(math.Abs(float64((lr+lg+lb)/3) - MidGrey))
 		if err < bestErr {
 			bestErr, bestE = err, e
@@ -126,7 +138,8 @@ func TestRoundTripEktarCSV(t *testing.T) {
 	for _, stops := range []float64{-4, -3, -2, -1, 0, 1, 2, 3} {
 		L := MidGrey * math.Pow(2, stops)
 		neg := SceneToNeg([3]float64{L, L, L}, Options{Stock: s})
-		or, og, ob := pluginInvert(float32(neg[0]), float32(neg[1]), float32(neg[2]), s.Gamma, expo)
+		pr := colorsci.ApplyCam(DefaultXT3Trichrome, 1, neg)
+		or, og, ob := pluginInvert(float32(pr[0]), float32(pr[1]), float32(pr[2]), s.Gamma, expo)
 		mean := (or + og + ob) / 3
 		t.Logf("stops=%+.0f L=%.4f neg=%.4f/%.4f/%.4f out=%.4f/%.4f/%.4f mean=%.4f",
 			stops, L, neg[0], neg[1], neg[2], or, og, ob, mean)
@@ -226,5 +239,22 @@ func TestGrainContrastNeutral(t *testing.T) {
 	t.Logf("max row local-avg rel=%.4f%%", maxRowRel*100)
 	if maxRowRel > 0.005 {
 		t.Fatalf("local tone curve shifted by %.3f%% > 0.5%%", maxRowRel*100)
+	}
+}
+
+func TestGreyRampInvertsNeutralWithMatrix(t *testing.T) {
+	s, _ := StockByName("Portra 400")
+	expo := findExpo(s)
+	for _, stops := range []float64{-2, -1, 0, 1, 2} {
+		L := MidGrey * math.Pow(2, stops)
+		neg := SceneToNeg([3]float64{L, L, L}, Options{Stock: s})
+		p := colorsci.ApplyCam(DefaultXT3Trichrome, 1, neg)
+		or, og, ob := pluginInvert(float32(p[0]), float32(p[1]), float32(p[2]), s.Gamma, expo)
+		dev := math.Abs(float64(or-og)) + math.Abs(float64(og-ob))
+		t.Logf("stops=%+.0f afterM=%.4f/%.4f/%.4f inv=%.4f/%.4f/%.4f dev=%.4f",
+			stops, p[0], p[1], p[2], or, og, ob, dev)
+		if dev > 0.04 {
+			t.Errorf("grey ramp not neutral at %+0.f stops: %v/%v/%v", stops, or, og, ob)
+		}
 	}
 }

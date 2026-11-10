@@ -55,6 +55,13 @@ type Options struct {
 	// AutoEV scales a photograph so the frame's median luminance
 	// lands near mid-grey (0.18). A grey-card frame is unchanged.
 	AutoEV bool
+	// ScanMatrix is the camera->linear Rec.709 matrix written into
+	// nss.scan metadata and used to level the simulated scan so the
+	// film base is 0.5 per channel after the plugin's CameraCal.
+	// Zero value means DefaultXT3Trichrome. ScanStrength 0 means 1.
+	ScanMatrix   colorsci.Mat3
+	ScanStrength float64
+	ScanProfile  string
 }
 
 const (
@@ -167,7 +174,7 @@ func SceneToNeg(v [3]float64, o Options) [3]float64 {
 	}
 	cs := CurveFor(o.Stock.Name)
 	d := sceneToDensity(v, o, cs, lookFor(o.Stock.Name))
-	return transmittance(d)
+	return ScanTransmit(d, o)
 }
 
 func ProcessPixels(rgb []float64, w, h int, o Options) {
@@ -178,6 +185,7 @@ func applyBorder(rgb []float64, w, h int, o Options) {
 	if o.BorderPct <= 0 || w < 8 || h < 8 {
 		return
 	}
+	pre := ScanPreBase(scanMatrixOf(o))
 	short := w
 	if h < w {
 		short = h
@@ -222,7 +230,7 @@ func applyBorder(rgb []float64, w, h int, o Options) {
 			}
 			i := (y*w + x) * 3
 			for c := 0; c < 3; c++ {
-				rgb[i+c] = rgb[i+c]*a + BaseFS*(1-a)
+				rgb[i+c] = rgb[i+c]*a + pre[c]*(1-a)
 			}
 		}
 	}
@@ -272,42 +280,22 @@ func OutputPath(src string, stock Stock) string {
 
 func Metadata(o Options) scanmeta.Metadata {
 	b := [3]float64{BaseFS, BaseFS, BaseFS}
-	proc := "digital-to-negative; stock=" + o.Stock.Name
-	if cs := CurveFor(o.Stock.Name); cs != nil {
-		proc += "; curve=StatusM-CSV"
-	} else {
-		proc += "; curve=logistic-fallback"
-	}
-	proc += "; color=spectral+DIR+dye"
-	if o.AsShotWB {
-		if _, _, _, ok := asShotScales(o.CamMul); ok {
-			proc += fmt.Sprintf("; wb=as-shot; cam_mul=%.3f,%.3f,%.3f,%.3f", o.CamMul[0], o.CamMul[1], o.CamMul[2], o.CamMul[3])
-		} else {
-			proc += "; wb=as-shot"
-		}
-		if o.SceneRGB || camXYZValid(o.CamXYZ) {
-			proc += "; matrix=camera-sRGB"
-		}
-	} else {
-		proc += "; wb=none"
-	}
-	if o.AutoEV {
-		proc += "; ev=auto-median"
-	}
-	if o.Grain != GrainOff {
-		proc += "; grain=" + o.Grain.Label()
-		if o.GrainStrength != 1 {
-			proc += fmt.Sprintf("; grain_strength=%.2f", o.GrainStrength)
-		}
-	}
+	mtrx, k := scanMatrixOf(o)
+	nine := matrix9(mtrx)
+	// Processing is left empty so the OFX plugin's nss.scan loader
+	// accepts the file the same way it accepts a real trichrome scan.
 	m := scanmeta.Metadata{
-		Mode:          "convert",
-		Encoding:      "linear",
-		FilmBase:      &b,
-		FilmBaseSpace: scanmeta.AfterProfile,
-		BaseSource:    "convert simulated levelled base",
-		Processing:    proc,
-		Roll:          o.Roll,
+		Mode:           "convert",
+		Encoding:       "linear",
+		LightModel:     "CuteNewDesign RGB Light Air",
+		FilmBase:       &b,
+		FilmBaseSpace:  scanmeta.AfterProfile,
+		BaseSource:     "convert simulated levelled base",
+		CameraMatrix:   &nine,
+		CameraStrength: k,
+		CameraApplied:  false,
+		CameraProfile:  scanProfileName(o),
+		Roll:           o.Roll,
 	}
 	if m.Roll == "" {
 		m.Roll = o.Stock.Name

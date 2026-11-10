@@ -109,6 +109,11 @@ func (u *ConvertUI) options() convert.Options {
 		Software: appVersion, LZW: true,
 		AsShotWB: u.useWB, CamMul: u.cacheCamMul, CamXYZ: u.cacheCamXYZ,
 		SceneRGB: u.cacheSceneRGB, AutoEV: true,
+		ScanMatrix: convert.DefaultXT3Trichrome, ScanStrength: 1,
+		ScanProfile: convert.DefaultXT3Profile,
+	}
+	if p, k := activeCam(); p != nil {
+		o.ScanMatrix, o.ScanStrength, o.ScanProfile = p.M, k, p.Name
 	}
 	if p, k := activeCam(); p != nil && u.useCam {
 		o.CamMatrix, o.CamStrength = p.M, k

@@ -155,9 +155,8 @@ func ProcessPixelsFast(rgb []float64, w, h int, o Options) {
 			for y := y0; y < y1; y++ {
 				for x := 0; x < w; x++ {
 					i := (y*w + x) * 3
-					for c := 0; c < 3; c++ {
-						cleanT[i+c] = BaseFS * math.Pow(10, -rgb[i+c])
-					}
+					t := ScanTransmit([3]float64{rgb[i], rgb[i+1], rgb[i+2]}, o)
+					cleanT[i], cleanT[i+1], cleanT[i+2] = t[0], t[1], t[2]
 				}
 			}
 		})
@@ -166,16 +165,8 @@ func ProcessPixelsFast(rgb []float64, w, h int, o Options) {
 			for y := y0; y < y1; y++ {
 				for x := 0; x < w; x++ {
 					i := (y*w + x) * 3
-					for c := 0; c < 3; c++ {
-						t := BaseFS * math.Pow(10, -rgb[i+c])
-						if t < 0 {
-							t = 0
-						}
-						if t > 1 {
-							t = 1
-						}
-						rgb[i+c] = t
-					}
+					t := ScanTransmit([3]float64{rgb[i], rgb[i+1], rgb[i+2]}, o)
+					rgb[i], rgb[i+1], rgb[i+2] = t[0], t[1], t[2]
 				}
 			}
 		})
@@ -185,16 +176,8 @@ func ProcessPixelsFast(rgb []float64, w, h int, o Options) {
 			for y := y0; y < y1; y++ {
 				for x := 0; x < w; x++ {
 					i := (y*w + x) * 3
-					for c := 0; c < 3; c++ {
-						t := BaseFS * math.Pow(10, -rgb[i+c])
-						if t < 0 {
-							t = 0
-						}
-						if t > 1 {
-							t = 1
-						}
-						rgb[i+c] = t
-					}
+					t := ScanTransmit([3]float64{rgb[i], rgb[i+1], rgb[i+2]}, o)
+					rgb[i], rgb[i+1], rgb[i+2] = t[0], t[1], t[2]
 				}
 			}
 		})

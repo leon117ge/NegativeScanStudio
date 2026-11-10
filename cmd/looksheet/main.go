@@ -1,4 +1,7 @@
-// looksheet renders reference / before / after / defaults positives of a RAF.
+// looksheet renders preview4 Convert positives of a RAF through the
+// plugin path the user views real scans with: CameraCal matrix,
+// Density In, stock Positive Out (Cineon), Kodak 2383 LUT, displayed
+// as sRGB with no further transform.
 package main
 
 import (
@@ -9,10 +12,13 @@ import (
 	"image/png"
 	"math"
 	"os"
+	"path/filepath"
 
+	"basetool/colorsci"
 	"basetool/convert"
 	"basetool/develop"
 	"basetool/rawconv"
+
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/basicfont"
 	"golang.org/x/image/math/fixed"
@@ -32,6 +38,16 @@ func srgbEnc(c float64) uint8 {
 		s = 1.055*math.Pow(c, 1.0/2.4) - 0.055
 	}
 	return uint8(s*255 + 0.5)
+}
+
+func dispByte(c float64) uint8 {
+	if c <= 0 {
+		return 0
+	}
+	if c >= 1 {
+		return 255
+	}
+	return uint8(c*255 + 0.5)
 }
 
 func downscale(pix []uint16, w, h, maxEdge int) ([]uint16, int, int) {
@@ -70,16 +86,16 @@ func toFloat(pix []uint16) []float64 {
 	return out
 }
 
-func stats(rgb []float64, skipBorder float64, w, h int) (mean [3]float64, p1, p50, p99 float64, rb, sat float64) {
+func stats(rgb []float64, skipBorder float64, w, h int) (mean [3]float64, p1, p50, p99, rb, sat float64) {
 	x0, x1 := int(float64(w)*skipBorder), int(float64(w)*(1-skipBorder))
 	y0, y1 := int(float64(h)*skipBorder), int(float64(h)*(1-skipBorder))
 	if x1 <= x0 || y1 <= y0 {
 		x0, y0, x1, y1 = 0, 0, w, h
 	}
 	n := (x1 - x0) * (y1 - y0)
-	ys := make([]float64, 0, n)
 	var sum [3]float64
 	var satSum float64
+	hist := make([]int, 1000)
 	for y := y0; y < y1; y++ {
 		for x := x0; x < x1; x++ {
 			i := (y*w + x) * 3
@@ -92,26 +108,21 @@ func stats(rgb []float64, skipBorder float64, w, h int) (mean [3]float64, p1, p5
 			if mx > 1e-8 {
 				satSum += (mx - mn) / mx
 			}
-			ys = append(ys, 0.2126*r+0.7152*g+0.0722*b)
+			Y := 0.2126*r + 0.7152*g + 0.0722*b
+			k := int(Y * 999)
+			if k < 0 {
+				k = 0
+			}
+			if k > 999 {
+				k = 999
+			}
+			hist[k]++
 		}
 	}
 	nf := float64(n)
 	mean = [3]float64{sum[0] / nf, sum[1] / nf, sum[2] / nf}
 	rb = mean[0] / math.Max(mean[2], 1e-8)
 	sat = satSum / nf
-	// percentiles of luma
-	// cheap nth via sort-less histogram
-	hist := make([]int, 1000)
-	for _, y := range ys {
-		k := int(y * 999)
-		if k < 0 {
-			k = 0
-		}
-		if k > 999 {
-			k = 999
-		}
-		hist[k]++
-	}
 	pick := func(p float64) float64 {
 		want := int(p * nf)
 		acc := 0
@@ -126,7 +137,7 @@ func stats(rgb []float64, skipBorder float64, w, h int) (mean [3]float64, p1, p5
 	return mean, pick(0.01), pick(0.50), pick(0.99), rb, sat
 }
 
-func densStats(neg []float64, w, h int) {
+func densStats(neg []float64, w, h int, m colorsci.Mat3) {
 	x0, x1 := int(float64(w)*0.08), int(float64(w)*0.92)
 	y0, y1 := int(float64(h)*0.08), int(float64(h)*0.92)
 	var sum, p99 [3]float64
@@ -135,8 +146,9 @@ func densStats(neg []float64, w, h int) {
 	for y := y0; y < y1; y++ {
 		for x := x0; x < x1; x++ {
 			i := (y*w + x) * 3
+			p := colorsci.ApplyCam(m, 1, [3]float64{neg[i], neg[i+1], neg[i+2]})
 			for c := 0; c < 3; c++ {
-				t := math.Max(neg[i+c], 1e-6)
+				t := math.Max(p[c], 1e-6)
 				d := -math.Log10(t / convert.BaseFS)
 				if d < 0 {
 					d = 0
@@ -154,7 +166,7 @@ func densStats(neg []float64, w, h int) {
 			n++
 		}
 	}
-	fmt.Printf("  Convert D-Dmin mean=%.3f/%.3f/%.3f", sum[0]/float64(n), sum[1]/float64(n), sum[2]/float64(n))
+	fmt.Printf("  after-profile D-Dmin mean=%.3f/%.3f/%.3f", sum[0]/float64(n), sum[1]/float64(n), sum[2]/float64(n))
 	for c := 0; c < 3; c++ {
 		want := int(0.99 * float64(n))
 		acc := 0
@@ -169,56 +181,58 @@ func densStats(neg []float64, w, h int) {
 	fmt.Printf("  p99=%.3f/%.3f/%.3f\n", p99[0], p99[1], p99[2])
 }
 
-func invertLin(neg []float64, gam [3]float64, expo, balR, balG, balB float64) []float64 {
+func viewProgram(s convert.Stock) develop.Program {
 	ch := develop.DefaultChain()
 	d := &ch.Nodes[0]
 	d.V["base_r"], d.V["base_g"], d.V["base_b"] = convert.BaseFS, convert.BaseFS, convert.BaseFS
 	d.V["preset"], d.V["cast_on"], d.V["out_trans"], d.V["in_di"] = 0, 0, 0, 0
 	ch.Nodes[1].Bypass = true
 	p := &ch.Nodes[2]
-	p.V["gam_r"], p.V["gam_g"], p.V["gam_b"] = gam[0], gam[1], gam[2]
-	p.V["expo"] = expo
-	p.V["bal_r"], p.V["bal_g"], p.V["bal_b"] = balR, balG, balB
-	p.V["film_wb"], p.V["gray_on"], p.V["contrast"], p.V["out_mode"] = 0, 0, 0, 4
-	for i := range ch.Nodes {
-		if i >= 3 {
-			ch.Nodes[i].Bypass = true
-		}
+	p.V["gam_r"] = s.Gamma[0] * 1.15
+	p.V["gam_g"] = s.Gamma[1] * 1.15
+	p.V["gam_b"] = s.Gamma[2] * 1.15
+	p.V["expo"] = 0.9
+	p.V["bal_r"], p.V["bal_g"], p.V["bal_b"] = 0, 0, 0
+	p.V["film_wb"], p.V["gray_on"], p.V["contrast"], p.V["out_mode"] = 0, 0, 0, 2
+	for i := 3; i <= 6; i++ {
+		ch.Nodes[i].Bypass = true
 	}
-	pix := ch.Compile(&develop.Context{}, -1)
+	ch.Nodes[7].Bypass = false
+	ch.Nodes[7].V["white"] = 2
+	ch.Nodes[7].V["source"] = 0
+	ch.Nodes[8].Bypass = true
+	prog := ch.Compile(&develop.Context{}, -1)
+	for _, n := range prog.Notes {
+		fmt.Println("  chain:", n)
+	}
+	return prog
+}
+
+func invertView(neg []float64, w, h int, s convert.Stock, m colorsci.Mat3) []float64 {
+	prog := viewProgram(s)
 	out := make([]float64, len(neg))
 	for i := 0; i < len(neg); i += 3 {
-		r, g, b := pix.Pixel(float32(neg[i]), float32(neg[i+1]), float32(neg[i+2]))
+		p := colorsci.ApplyCam(m, 1, [3]float64{neg[i], neg[i+1], neg[i+2]})
+		r, g, b := prog.Pixel(float32(p[0]), float32(p[1]), float32(p[2]))
 		out[i], out[i+1], out[i+2] = float64(r), float64(g), float64(b)
 	}
 	return out
 }
 
-func findExpo(s convert.Stock) float64 {
-	neg := convert.SceneToNeg([3]float64{convert.MidGrey, convert.MidGrey, convert.MidGrey}, convert.Options{Stock: s})
-	bestE, bestErr := 1.0, 1e9
-	for e := -1.0; e <= 4; e += 0.05 {
-		v := invertLin([]float64{neg[0], neg[1], neg[2]}, s.Gamma, e, 0, 0, 0)
-		err := math.Abs((v[0]+v[1]+v[2])/3 - convert.MidGrey)
-		if err < bestErr {
-			bestErr, bestE = err, e
-		}
-	}
-	return bestE
-}
-
-func writePNG(path string, rgb []float64, w, h int) error {
+func writePNGDisp(path string, rgb []float64, w, h int, linear bool) error {
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
 			i := (y*w + x) * 3
-			img.SetRGBA(x, y, color.RGBA{srgbEnc(rgb[i]), srgbEnc(rgb[i+1]), srgbEnc(rgb[i+2]), 255})
+			var pix color.RGBA
+			if linear {
+				pix = color.RGBA{srgbEnc(rgb[i]), srgbEnc(rgb[i+1]), srgbEnc(rgb[i+2]), 255}
+			} else {
+				pix = color.RGBA{dispByte(rgb[i]), dispByte(rgb[i+1]), dispByte(rgb[i+2]), 255}
+			}
+			img.SetRGBA(x, y, pix)
 		}
 	}
-	return savePNG(path, img)
-}
-
-func savePNG(path string, img image.Image) error {
 	f, err := os.Create(path)
 	if err != nil {
 		return err
@@ -254,32 +268,6 @@ func report(tag string, rgb []float64, w, h int) {
 		tag, mean[0], mean[1], mean[2], rb, sat, p1, p50, p99)
 }
 
-func rgbaFromLin(rgb []float64, w, h int) *image.RGBA {
-	img := image.NewRGBA(image.Rect(0, 0, w, h))
-	for y := 0; y < h; y++ {
-		for x := 0; x < w; x++ {
-			i := (y*w + x) * 3
-			img.SetRGBA(x, y, color.RGBA{srgbEnc(rgb[i]), srgbEnc(rgb[i+1]), srgbEnc(rgb[i+2]), 255})
-		}
-	}
-	return img
-}
-
-func drawCell(sheet *image.RGBA, src image.Image, col, row, cellW, cellH int, title string) {
-	b := src.Bounds()
-	iw, ih := b.Dx(), b.Dy()
-	ox, oy := col*cellW, row*(cellH+22)
-	for y := 0; y < cellH; y++ {
-		sy := b.Min.Y + y*ih/cellH
-		for x := 0; x < cellW; x++ {
-			sx := b.Min.X + x*iw/cellW
-			r, g, bl, a := src.At(sx, sy).RGBA()
-			sheet.SetRGBA(ox+x, oy+y, color.RGBA{uint8(r >> 8), uint8(g >> 8), uint8(bl >> 8), uint8(a >> 8)})
-		}
-	}
-	label(sheet, ox+8, oy+cellH+16, title)
-}
-
 func main() {
 	src := "/workspace/user_raf/DSCF5795.RAF"
 	outDir := "/workspace/convert_compare"
@@ -290,14 +278,7 @@ func main() {
 		outDir = os.Args[2]
 	}
 	os.MkdirAll(outDir, 0755)
-
-	s, err := convert.StockByName("Portra 400")
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-	expo := findExpo(s)
-	fmt.Printf("Portra matching expo=%.2f\n", expo)
+	m := convert.DefaultXT3Trichrome
 
 	fmt.Println("decoding scene", src)
 	refImg, err := rawconv.DecodeScene(src)
@@ -311,70 +292,78 @@ func main() {
 	copy(rp, refImg.Pix[:len(rp)])
 	rp, rw, rh := downscale(rp, refImg.Width, refImg.Height, 1600)
 	refImg.Free()
-	fmt.Printf("preview %dx%d\n", rw, rh)
-
 	refLin := toFloat(rp)
 	sc := convert.AutoEVScale(refLin, rw, rh)
 	fmt.Printf("AutoEV scale=%.3f (%.2f EV)\n", sc, math.Log2(sc))
-
 	ref := append([]float64(nil), refLin...)
 	for i := range ref {
 		ref[i] *= sc
 	}
 	report("reference +AutoEV", ref, rw, rh)
-	if err := writePNG(outDir+"/user_DSCF5795_reference.png", ref, rw, rh); err != nil {
+	if err := writePNGDisp(filepath.Join(outDir, "p4_reference.png"), ref, rw, rh, true); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 
-	negAfter := append([]float64(nil), refLin...)
-	convert.ProcessPixelsFast(negAfter, rw, rh, convert.Options{
-		Stock: s, SceneRGB: true, AsShotWB: true, AutoEV: true,
-		BorderPct: 0.04, SoftBorder: true,
-	})
-	fmt.Print("after")
-	densStats(negAfter, rw, rh)
-	posAfter := invertLin(negAfter, s.Gamma, expo, 0, 0, 0)
-	report("after (scene+AutoEV)", posAfter, rw, rh)
-	if err := writePNG(outDir+"/user_DSCF5795_after.png", posAfter, rw, rh); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+	type cell struct {
+		name string
+		rgb  []float64
+		lin  bool
 	}
+	cells := []cell{{"reference (DecodeScene + AutoEV)", ref, true}}
 
-	posDef := invertLin(negAfter, [3]float64{s.Gamma[0] * 1.15, s.Gamma[1] * 1.15, s.Gamma[2] * 1.15}, 0.9, 1.07, 0, 0.67)
-	report("defaults on after", posDef, rw, rh)
-	if err := writePNG(outDir+"/user_DSCF5795_defaults.png", posDef, rw, rh); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-
-	beforePath := outDir + "/user_DSCF5795_before.png"
-	var beforeImg image.Image
-	if f, err := os.Open(beforePath); err == nil {
-		beforeImg, err = png.Decode(f)
-		f.Close()
-		if err != nil {
-			fmt.Println("before png decode:", err)
-			beforeImg = nil
-		} else {
-			fmt.Println("loaded existing before", beforePath)
+	for _, s := range convert.Stocks() {
+		neg := append([]float64(nil), refLin...)
+		convert.ProcessPixelsFast(neg, rw, rh, convert.Options{
+			Stock: s, SceneRGB: true, AsShotWB: true, AutoEV: true,
+			ScanMatrix: m, ScanStrength: 1, ScanProfile: convert.DefaultXT3Profile,
+			BorderPct: 0.04, SoftBorder: true,
+		})
+		fmt.Print(s.FileTag)
+		densStats(neg, rw, rh, m)
+		pos := invertView(neg, rw, rh, s, m)
+		report("p4 "+s.FileTag, pos, rw, rh)
+		name := "p4_" + s.FileTag + ".png"
+		if err := writePNGDisp(filepath.Join(outDir, name), pos, rw, rh, false); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
 		}
-	}
-	if beforeImg == nil {
-		fmt.Println("WARN: no preview2 before.png; sheet will reuse after")
-		beforeImg = rgbaFromLin(posAfter, rw, rh)
+		cells = append(cells, cell{s.Name + " (Cineon+2383)", pos, false})
 	}
 
-	cellW, cellH := 640, 428
-	sheet := image.NewRGBA(image.Rect(0, 0, cellW*2, (cellH+22)*2))
+	cellW, cellH := 480, 321
+	cols := 4
+	rows := (len(cells) + cols - 1) / cols
+	sheet := image.NewRGBA(image.Rect(0, 0, cellW*cols, (cellH+22)*rows))
 	draw.Draw(sheet, sheet.Bounds(), image.NewUniform(color.RGBA{16, 16, 16, 255}), image.Point{}, draw.Src)
-	drawCell(sheet, rgbaFromLin(ref, rw, rh), 0, 0, cellW, cellH, "reference (DecodeScene + AutoEV)")
-	drawCell(sheet, beforeImg, 1, 0, cellW, cellH, "before (preview2 recommended invert)")
-	drawCell(sheet, rgbaFromLin(posAfter, rw, rh), 0, 1, cellW, cellH, "after (scene-sRGB + AutoEV + film)")
-	drawCell(sheet, rgbaFromLin(posDef, rw, rh), 1, 1, cellW, cellH, "defaults on after (bal 1.07/0/0.67)")
-	if err := savePNG(outDir+"/user_DSCF5795_sheet.png", sheet); err != nil {
+	for i, c := range cells {
+		col, row := i%cols, i/cols
+		th := scaleTo(c.rgb, rw, rh, cellW, cellH)
+		ox, oy := col*cellW, row*(cellH+22)
+		for y := 0; y < cellH; y++ {
+			for x := 0; x < cellW; x++ {
+				k := (y*cellW + x) * 3
+				var pix color.RGBA
+				if c.lin {
+					pix = color.RGBA{srgbEnc(th[k]), srgbEnc(th[k+1]), srgbEnc(th[k+2]), 255}
+				} else {
+					pix = color.RGBA{dispByte(th[k]), dispByte(th[k+1]), dispByte(th[k+2]), 255}
+				}
+				sheet.SetRGBA(ox+x, oy+y, pix)
+			}
+		}
+		label(sheet, ox+8, oy+cellH+16, c.name)
+	}
+	f, err := os.Create(filepath.Join(outDir, "p4_sheet.png"))
+	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	fmt.Println("wrote sheet")
+	if err := png.Encode(f, sheet); err != nil {
+		f.Close()
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	f.Close()
+	fmt.Println("wrote", filepath.Join(outDir, "p4_sheet.png"), "cells", len(cells))
 }

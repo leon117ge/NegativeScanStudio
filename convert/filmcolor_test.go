@@ -4,6 +4,7 @@ import (
 	"math"
 	"testing"
 
+	"basetool/colorsci"
 	"basetool/develop"
 )
 
@@ -27,11 +28,19 @@ func invertPixel(neg [3]float64, gam [3]float64, expo float32) [3]float64 {
 	return [3]float64{float64(r), float64(g), float64(b)}
 }
 
+func afterProfile(neg [3]float64) [3]float64 {
+	return colorsci.ApplyCam(DefaultXT3Trichrome, 1, neg)
+}
+
+func invertScanned(neg [3]float64, gam [3]float64, expo float32) [3]float64 {
+	return invertPixel(afterProfile(neg), gam, expo)
+}
+
 func stockExpo(s Stock) float32 {
 	neg := SceneToNeg([3]float64{MidGrey, MidGrey, MidGrey}, Options{Stock: s})
 	bestE, bestErr := float32(1), float32(1e9)
 	for e := float32(-1); e <= 4; e += 0.05 {
-		v := invertPixel(neg, s.Gamma, e)
+		v := invertScanned(neg, s.Gamma, e)
 		err := float32(math.Abs((v[0]+v[1]+v[2])/3 - MidGrey))
 		if err < bestErr {
 			bestErr, bestE = err, e
@@ -44,7 +53,7 @@ func TestGreyInvertsNeutral(t *testing.T) {
 	for _, s := range Stocks() {
 		expo := stockExpo(s)
 		neg := SceneToNeg([3]float64{MidGrey, MidGrey, MidGrey}, Options{Stock: s})
-		v := invertPixel(neg, s.Gamma, expo)
+		v := invertScanned(neg, s.Gamma, expo)
 		dev := math.Abs(v[0]-v[1]) + math.Abs(v[1]-v[2])
 		t.Logf("%s expo=%.2f neg=%.4f/%.4f/%.4f inv=%.4f/%.4f/%.4f dev=%.4f",
 			s.FileTag, expo, neg[0], neg[1], neg[2], v[0], v[1], v[2], dev)
@@ -89,7 +98,7 @@ func TestStockDifferentiation(t *testing.T) {
 	ektar, _ := StockByName("Ektar 100")
 	gold, _ := StockByName("Gold 200")
 	inv := func(s Stock, src [3]float64) [3]float64 {
-		return invertPixel(SceneToNeg(src, Options{Stock: s}), s.Gamma, stockExpo(s))
+		return invertScanned(SceneToNeg(src, Options{Stock: s}), s.Gamma, stockExpo(s))
 	}
 	ps, es, gs := inv(portra, skin), inv(ektar, skin), inv(gold, skin)
 	pr, er := inv(portra, red), inv(ektar, red)
@@ -153,9 +162,9 @@ func TestAsShotWBFixesTungstenGrey(t *testing.T) {
 	// cam_mul that restores the grey (green-normalized: G/R, 1, G/B).
 	mul := [4]float32{float32(raw[1] / raw[0]), 1, float32(raw[1] / raw[2]), 1}
 
-	noWB := invertPixel(SceneToNeg(raw, Options{Stock: s}), s.Gamma, expo)
-	with := invertPixel(SceneToNeg(raw, Options{Stock: s, AsShotWB: true, CamMul: mul}), s.Gamma, expo)
-	ref := invertPixel(SceneToNeg([3]float64{MidGrey, MidGrey, MidGrey}, Options{Stock: s}), s.Gamma, expo)
+	noWB := invertScanned(SceneToNeg(raw, Options{Stock: s}), s.Gamma, expo)
+	with := invertScanned(SceneToNeg(raw, Options{Stock: s, AsShotWB: true, CamMul: mul}), s.Gamma, expo)
+	ref := invertScanned(SceneToNeg([3]float64{MidGrey, MidGrey, MidGrey}, Options{Stock: s}), s.Gamma, expo)
 
 	t.Logf("no WB  inv=%.3f/%.3f/%.3f  R/B=%.2f", noWB[0], noWB[1], noWB[2], noWB[0]/math.Max(noWB[2], 1e-6))
 	t.Logf("with WB inv=%.3f/%.3f/%.3f", with[0], with[1], with[2])
@@ -238,7 +247,7 @@ func TestGreenStaysGreenAfterInvert(t *testing.T) {
 	srcRG := src[0] / src[1]
 	for _, name := range []string{"Portra 400", "Ektar 100", "Gold 200"} {
 		s, _ := StockByName(name)
-		inv := invertPixel(SceneToNeg(src, Options{Stock: s}), s.Gamma, stockExpo(s))
+		inv := invertScanned(SceneToNeg(src, Options{Stock: s}), s.Gamma, stockExpo(s))
 		rg := inv[0] / inv[1]
 		t.Logf("%s inv=%.3f/%.3f/%.3f R/G=%.3f (src R/G=%.3f)", name, inv[0], inv[1], inv[2], rg, srcRG)
 		if rg > srcRG+0.12 {

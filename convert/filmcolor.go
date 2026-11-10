@@ -169,25 +169,33 @@ func ofxDens(lin, gam float64) float64 {
 }
 
 func buildOffLUT(s Stock) [3]densLUT {
+	// After-profile D equals the complementary density written by
+	// ScanTransmit, so this is a 1D gamma-model alignment on greys.
 	cs := CurveFor(s.Name)
 	o := Options{Stock: s}
-	const n = 1024
+	const n = 256
 	lo, hi := -5.0, 4.0
 	step := (hi - lo) / float64(n-1)
-	var out [3]densLUT
-	for c := 0; c < 3; c++ {
-		v := make([]float64, n)
-		for i := 0; i < n; i++ {
-			rel := lo + float64(i)*step
-			h := MidGrey * math.Pow(10, rel)
-			dG := densityAboveFor(h, 1, o, cs)
-			target := ofxLin(dG, s.Gamma[1], 0)
-			dC := densityAboveFor(h, c, o, cs)
-			v[i] = ofxDens(target, s.Gamma[c]) - dC
+	offR := make([]float64, n)
+	offG := make([]float64, n)
+	offB := make([]float64, n)
+	for i := 0; i < n; i++ {
+		rel := lo + float64(i)*step
+		h := MidGrey * math.Pow(10, rel)
+		var d0 [3]float64
+		for c := 0; c < 3; c++ {
+			d0[c] = densityAboveFor(h, c, o, cs)
 		}
-		out[c] = densLUT{lo: lo, step: step, v: v}
+		target := ofxLin(d0[1], s.Gamma[1], 0)
+		offR[i] = ofxDens(target, s.Gamma[0]) - d0[0]
+		offG[i] = ofxDens(target, s.Gamma[1]) - d0[1]
+		offB[i] = ofxDens(target, s.Gamma[2]) - d0[2]
 	}
-	return out
+	return [3]densLUT{
+		{lo: lo, step: step, v: offR},
+		{lo: lo, step: step, v: offG},
+		{lo: lo, step: step, v: offB},
+	}
 }
 
 // alignDensOffsets finds per-channel density offsets so a mid-grey card
