@@ -162,3 +162,15 @@ matrix, like a real scan.
    zero-mean grain planes. ISO 400 is calibrated to the 500T
    `grain_real/crop_mid.tiff` mid RMS and channel correlations; ISO 100
    is scaled by the published PGI / sqrt(ISO) ratios.
+
+
+## v1.02-preview6 still-stock contrast
+
+User feedback on preview5: usable colour, but shadows too dark.
+Still stocks (Portra, Ektar, Gold, UltraMax) had a higher display
+slope around mid-grey through Cineon+2383 than intended. Their
+Convert contrast factors were scaled by 0.85 (about 15 percent)
+so the viewing-path slope drops by roughly that amount. Mid-grey
+placement is unchanged (contrast pivots at 0.18). Vision3 500T and
+250D contrast is unchanged. The OFX plugin and the still-paper LUT
+curve were not modified.

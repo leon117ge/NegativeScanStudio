@@ -91,7 +91,8 @@ func makeLook(name string, fm colorsci.Mat3) stockLook {
 	switch {
 	case strings.Contains(n, "ektar"):
 		// Kodak E-4046: "finest, most saturated color" / vivid colour.
-		lk.Interimage, lk.Warm, lk.Contrast, lk.Chroma = 0.38, 0.00, 1.30, 1
+		// Contrast 1.105 = preview5 1.30 * 0.85 (~15% lower display slope).
+		lk.Interimage, lk.Warm, lk.Contrast, lk.Chroma = 0.38, 0.00, 1.105, 1
 		lk.DIR = [3][3]float64{
 			{1.38, -0.08, -0.02},
 			{-0.06, 1.40, -0.04},
@@ -99,7 +100,8 @@ func makeLook(name string, fm colorsci.Mat3) stockLook {
 		}
 	case strings.Contains(n, "portra"):
 		// Kodak E-4050: natural skin-tone reproduction, not drab.
-		lk.Interimage, lk.Warm, lk.Contrast, lk.Chroma = 0.18, 0.06, 1.16, 1
+		// Contrast 0.986 = preview5 1.16 * 0.85 (~15% lower display slope).
+		lk.Interimage, lk.Warm, lk.Contrast, lk.Chroma = 0.18, 0.06, 0.986, 1
 		lk.DIR = [3][3]float64{
 			{1.18, -0.04, 0.02},
 			{-0.03, 1.16, -0.02},
@@ -107,7 +109,8 @@ func makeLook(name string, fm colorsci.Mat3) stockLook {
 		}
 	case strings.Contains(n, "gold"):
 		// Kodak E-7022: warm, saturated consumer colour.
-		lk.Interimage, lk.Warm, lk.Contrast, lk.Chroma = 0.26, 0.12, 1.22, 1
+		// Contrast 1.037 = preview5 1.22 * 0.85 (~15% lower display slope).
+		lk.Interimage, lk.Warm, lk.Contrast, lk.Chroma = 0.26, 0.12, 1.037, 1
 		lk.DIR = [3][3]float64{
 			{1.24, -0.05, -0.02},
 			{-0.04, 1.22, -0.03},
@@ -115,7 +118,8 @@ func makeLook(name string, fm colorsci.Mat3) stockLook {
 		}
 	case strings.Contains(n, "ultramax"):
 		// Kodak E-7023: rich, saturated, slightly warm consumer colour.
-		lk.Interimage, lk.Warm, lk.Contrast, lk.Chroma = 0.34, 0.07, 1.28, 1
+		// Contrast 1.088 = preview5 1.28 * 0.85 (~15% lower display slope).
+		lk.Interimage, lk.Warm, lk.Contrast, lk.Chroma = 0.34, 0.07, 1.088, 1
 		lk.DIR = [3][3]float64{
 			{1.32, -0.07, -0.02},
 			{-0.05, 1.34, -0.03},
