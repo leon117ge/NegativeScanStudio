@@ -82,3 +82,36 @@ func TestProcessMonoTrichromeRejectsEmpty(t *testing.T) {
 		t.Fatal("expected empty error")
 	}
 }
+
+func TestProcessMonoTrichromeMeasuresLevelingBase(t *testing.T) {
+	const w, h = 48, 32
+	mk := func(v uint16) MonoPlane {
+		p := make([]uint16, w*h)
+		for i := range p {
+			p[i] = v
+		}
+		return MonoPlane{W: w, H: h, Pix: p}
+	}
+	dir := t.TempDir()
+	out := filepath.Join(dir, "check_RGB.tiff")
+	res, err := ProcessMonoTrichrome(mk(32768), mk(32768), mk(32768), MonoTriOptions{
+		OutPath:             out,
+		MeasureLevelingBase: true,
+		BaseNorm:            Rect{X0: 0.25, Y0: 0.25, X1: 0.75, Y1: 0.75},
+		Metadata:            scanmeta.Metadata{Mode: "mono-trichrome", Encoding: "linear"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.BaseErr != "" {
+		t.Fatal(res.BaseErr)
+	}
+	if res.BaseN == 0 {
+		t.Fatal("no samples")
+	}
+	for c, v := range res.Base {
+		if v < 0.49 || v > 0.51 {
+			t.Fatalf("base[%d]=%v, want ~0.50", c, v)
+		}
+	}
+}

@@ -140,11 +140,19 @@ func main() {
 		switch tabs.CurrentIndex() {
 		case 0:
 			if camTabs.CurrentIndex() == 1 {
-				k = 3
+				if lightui.usesMonoCam() {
+					k = -1 // Hikrobot / sim preview is injected into the Light live view
+					lightui.startHikPreview()
+				} else {
+					lightui.stopHikPreview()
+					k = 3
+				}
 			} else {
+				lightui.stopHikPreview()
 				k = 0
 			}
 		case 1:
+			lightui.stopHikPreview()
 			switch scanTabs.CurrentIndex() {
 			case 1:
 				k = 2
@@ -158,12 +166,15 @@ func main() {
 			} else if focusui.active {
 				focusui.leave()
 			}
+		default:
+			lightui.stopHikPreview()
 		}
 		if tabs.CurrentIndex() != 1 && focusui.active {
 			focusui.leave()
 		}
 		hdrui.setLivePage(k)
 	}
+	hdrui.liveRoute = func() { updateLivePage(0) }
 	tabs.onChange, camTabs.onChange, scanTabs.onChange = updateLivePage, updateLivePage, updateLivePage
 	updateLivePage(0)
 	lightui.cast.toDevelop = func(c filmdb.ColourCast) {

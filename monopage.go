@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"math"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -31,12 +32,14 @@ type MonoUI struct {
 	devices []hikcam.Info // real cameras from the last refresh; index 0 in the combo is always the simulator
 	sdkMsg  string
 
-	devCB, fmtCB, trigCB                             *walk.ComboBox
+	devCB, fmtCB, trigCB, presetCB, capModeCB, brCB  *walk.ComboBox
 	expNE, gainNE, blackNE                           *walk.NumberEdit
 	wNE, hNE, xNE, yNE                               *walk.NumberEdit
 	fullCB, gammaCB, caCB                            *walk.CheckBox
 	connBtn, applyBtn, capBtn, stopBtn, refreshBtn   *walk.PushButton
 	camLbl, sdkLbl, lightLbl, valLbl, whyLbl, outLbl *walk.Label
+	presetTip                                        *walk.Label
+	levelSim                                         hikcam.Device
 	repTE, logTE                                     *walk.TextEdit
 	pb                                               *walk.ProgressBar
 	view                                             *walk.CustomWidget
@@ -160,7 +163,7 @@ func (u *MonoUI) updateButtons() {
 	}
 	if u.whyLbl != nil {
 		if why == "" {
-			setStatusWide(u.whyLbl, "READY - press Capture for R, then G, then B.")
+			setStatusWide(u.whyLbl, "READY - press Capture for R, then G, then B. Exposure is metered automatically per channel.")
 		} else {
 			setStatusWide(u.whyLbl, "Capture disabled: "+why)
 		}
@@ -243,7 +246,13 @@ func (u *MonoUI) readSettings() hikcam.Settings {
 		st.BlackLevel = u.blackNE.Value()
 	}
 	if u.fmtCB != nil {
-		st.PixelFormat = hikcam.PixelFormat(max(0, u.fmtCB.CurrentIndex()))
+		i := u.fmtCB.CurrentIndex()
+		if i >= 0 && i < len(hikcam.PixelFormatChoices) {
+			st.PixelFormat = hikcam.PixelFormatChoices[i]
+		}
+	}
+	if u.presetCB != nil && u.presetCB.CurrentIndex() == 1 {
+		st.QualityPreset = true
 	}
 	if u.gammaCB != nil {
 		st.GammaEnable = u.gammaCB.Checked()
@@ -282,6 +291,87 @@ func (u *MonoUI) applySettings() error {
 		got.ExposureUS, got.GainDB, got.BlackLevel, got.PixelFormat, got.SoftwareTrigger,
 		got.Width, got.Height, got.OffsetX, got.OffsetY))
 	return nil
+}
+
+func (u *MonoUI) usingBestScan() bool {
+	return u.presetCB != nil && u.presetCB.CurrentIndex() == 1
+}
+
+func (u *MonoUI) fillBestScanUI() {
+	st := hikcam.BestScanQuality()
+	if u.fmtCB != nil {
+		u.fmtCB.SetCurrentIndex(hikcam.PixelFormatIndex(st.PixelFormat))
+	}
+	if u.expNE != nil {
+		u.expNE.SetValue(st.ExposureUS)
+	}
+	if u.gainNE != nil {
+		u.gainNE.SetValue(st.GainDB)
+	}
+	if u.blackNE != nil {
+		u.blackNE.SetValue(st.BlackLevel)
+	}
+	if u.gammaCB != nil {
+		u.gammaCB.SetChecked(false)
+	}
+	if u.fullCB != nil {
+		u.fullCB.SetChecked(true)
+	}
+	if u.trigCB != nil {
+		u.trigCB.SetCurrentIndex(1)
+	}
+	if u.wNE != nil {
+		u.wNE.SetValue(float64(hikcam.CS240Width))
+	}
+	if u.hNE != nil {
+		u.hNE.SetValue(float64(hikcam.CS240Height))
+	}
+	if u.xNE != nil {
+		u.xNE.SetValue(0)
+	}
+	if u.yNE != nil {
+		u.yNE.SetValue(0)
+	}
+	if u.presetTip != nil {
+		u.presetTip.SetText(hikcam.BestScanExplain())
+	}
+}
+
+func (u *MonoUI) onPresetChanged() {
+	if u.presetCB == nil {
+		return
+	}
+	if u.presetCB.CurrentIndex() == 1 {
+		u.fillBestScanUI()
+		u.say("Preset: Best scan quality (MV-CS240-90UM). Press Capture — exposure is metered automatically per R, G and B so highlights do not clip.")
+	} else if u.presetTip != nil {
+		u.presetTip.SetText("Custom camera settings. Capture still meters each channel so highlights do not clip; use Best scan quality for the recommended MV-CS240-90UM film-scan values.")
+	}
+	u.updateCaptureLabel()
+}
+
+func (u *MonoUI) captureEVs() []int {
+	if u.capModeCB != nil && u.capModeCB.CurrentIndex() == 1 {
+		br := 0
+		if u.brCB != nil {
+			br = clampIdx(u.brCB.CurrentIndex(), len(bracketEVs))
+		}
+		return append([]int(nil), bracketEVs[br]...)
+	}
+	return []int{0}
+}
+
+func (u *MonoUI) updateCaptureLabel() {
+	if u.capBtn == nil {
+		return
+	}
+	evs := u.captureEVs()
+	text := "Capture mono trichrome  (R, G, B"
+	if len(evs) > 1 {
+		text = "Capture mono trichrome HDR  (R, G, B x " + evText(evs)
+	}
+	text += "; auto exposure)"
+	u.capBtn.SetText(text)
 }
 
 func (u *MonoUI) startPreview() {
@@ -415,7 +505,20 @@ func (u *MonoUI) capture() {
 		}
 	}
 	correct := u.caCB == nil || u.caCB.Checked()
+	if u.usingBestScan() {
+		u.fillBestScanUI()
+	}
+	if err := u.applySettings(); err != nil {
+		u.say("Apply settings: " + err.Error())
+		walk.MsgBox(u.hdr.win(), "Mono trichrome", "Could not apply camera settings:\n\n"+err.Error(), walk.MsgBoxIconWarning)
+		return
+	}
+	evs := u.captureEVs()
+	po := u.hdr.processOptions(dir)
 	u.stopPreview()
+	if u.light != nil {
+		u.light.stopHikPreview()
+	}
 	u.running = true
 	u.updateButtons()
 	var sw *rgblight.ChannelSwitch
@@ -427,8 +530,8 @@ func (u *MonoUI) capture() {
 	if sim, ok := cam.(*hikcam.Sim); ok {
 		sim.LightChannel = func() int { return chVar }
 	}
-	u.say(fmt.Sprintf("==== Mono trichrome: light R %d G %d B %d (%s), settle %v, CA correction %v ====",
-		vals[0], vals[1], vals[2], src, settle, correct))
+	u.say(fmt.Sprintf("==== Mono trichrome: light R %d G %d B %d (%s), settle %v, CA correction %v, bracket %v ====",
+		vals[0], vals[1], vals[2], src, settle, correct, evs))
 	if u.repTE != nil {
 		u.repTE.SetText("Capturing R, G, B ...")
 	}
@@ -462,6 +565,11 @@ func (u *MonoUI) capture() {
 		}
 		defer func() { _ = cam.StopGrab() }()
 		var planes [3]hdrscan.MonoPlane
+		box := hdrscan.Rect{}
+		if u.hdr != nil {
+			box = u.hdr.roi
+		}
+		cfg := hdrscan.ScanMeterConfig()
 		for ch := 0; ch < 3; ch++ {
 			chVar = ch
 			if sw != nil {
@@ -471,14 +579,68 @@ func (u *MonoUI) capture() {
 				}
 			}
 			time.Sleep(settle)
-			fr, err := cam.Grab(5 * time.Second)
-			if err != nil {
-				res.err = fmt.Errorf("%s grab: %w", hdrscan.TriTags[ch], err)
-				return
+			st := cam.Settings()
+			var last *hikcam.Frame
+			for attempt := 0; attempt < 4; attempt++ {
+				fr, err := cam.Grab(5 * time.Second)
+				if err != nil {
+					res.err = fmt.Errorf("%s meter grab: %w", hdrscan.TriTags[ch], err)
+					return
+				}
+				last = fr
+				full := hdrscan.FrameSamples(fr.Pix, fr.W, fr.H, hdrscan.Rect{})
+				base := hdrscan.FrameSamples(fr.Pix, fr.W, fr.H, box)
+				cur := hdrscan.ExposureState{ExposureUS: st.ExposureUS, GainDB: st.GainDB}
+				next, why := hdrscan.MeterScanExposure(full, base, cur, cfg)
+				u.ui(func() {
+					u.say(fmt.Sprintf("%s meter %d: %s (%.0f us, %.2f dB)", hdrscan.TriTags[ch], attempt+1, why, next.ExposureUS, next.GainDB))
+				})
+				if why == "on target" || (math.Abs(next.ExposureUS-st.ExposureUS) < 1 && math.Abs(next.GainDB-st.GainDB) < 0.05) {
+					break
+				}
+				st.ExposureUS, st.GainDB = next.ExposureUS, next.GainDB
+				if err := cam.Apply(st); err != nil {
+					res.err = fmt.Errorf("%s apply metered exposure: %w", hdrscan.TriTags[ch], err)
+					return
+				}
 			}
-			pix := append([]uint16(nil), fr.Pix...)
-			planes[ch] = hdrscan.MonoPlane{W: fr.W, H: fr.H, Pix: pix}
-			u.ui(func() { u.say(fmt.Sprintf("Captured %s: %dx%d %s", hdrscan.TriTags[ch], fr.W, fr.H, fr.PixelFormat)) })
+			frames := []hdrscan.MonoPlane{{W: last.W, H: last.H, Pix: append([]uint16(nil), last.Pix...)}}
+			gotEVs := []int{0}
+			for _, ev := range evs {
+				if ev == 0 {
+					continue
+				}
+				evSt := st
+				evSt.ExposureUS = math.Min(hikcam.CS240ExpMaxUS, st.ExposureUS*hdrscan.EVScale(ev))
+				if err := cam.Apply(evSt); err != nil {
+					res.err = fmt.Errorf("%s +%d EV apply: %w", hdrscan.TriTags[ch], ev, err)
+					return
+				}
+				fr, err := cam.Grab(8 * time.Second)
+				if err != nil {
+					res.err = fmt.Errorf("%s +%d EV grab: %w", hdrscan.TriTags[ch], ev, err)
+					return
+				}
+				frames = append(frames, hdrscan.MonoPlane{W: fr.W, H: fr.H, Pix: append([]uint16(nil), fr.Pix...)})
+				gotEVs = append(gotEVs, ev)
+				u.ui(func() {
+					u.say(fmt.Sprintf("Captured %s +%d EV: %dx%d %s (%.0f us)", hdrscan.TriTags[ch], ev, fr.W, fr.H, fr.PixelFormat, fr.ExposureUS))
+				})
+			}
+			_ = cam.Apply(st)
+			if len(frames) == 1 {
+				planes[ch] = frames[0]
+			} else {
+				merged, err := hdrscan.MergeMonoBracket(frames, gotEVs, po)
+				if err != nil {
+					res.err = fmt.Errorf("%s HDR merge: %w", hdrscan.TriTags[ch], err)
+					return
+				}
+				planes[ch] = merged
+			}
+			u.ui(func() {
+				u.say(fmt.Sprintf("Captured %s: %dx%d (bracket %v)", hdrscan.TriTags[ch], planes[ch].W, planes[ch].H, gotEVs))
+			})
 		}
 		roll, last := u.hdr.cfg.Roll, u.hdr.cfg.Counter
 		base, num := hdrscan.NextShot(dir, roll, time.Now(), last)
@@ -501,7 +663,7 @@ func (u *MonoUI) capture() {
 			OutPath:   out,
 			LZW:       true,
 			CorrectCA: correct,
-			Software:  appVersion,
+			Software:  appVersion + monoHDRTag(evs),
 			Make:      info.Vendor,
 			Model:     info.Model,
 			Metadata:  meta,
@@ -579,9 +741,13 @@ func (u *MonoUI) Page() TabPage {
 						}},
 						Label{AssignTo: &u.camLbl, Text: "Camera: not connected", Font: bold},
 						Composite{Layout: Grid{Columns: 2, MarginsZero: true, Spacing: 4}, Children: []Widget{
+							Label{Text: "Preset", MinSize: Size{Width: 110}},
+							ComboBox{AssignTo: &u.presetCB, Model: []string{"Custom", "Best scan quality (MV-CS240-90UM)"}, CurrentIndex: 1,
+								ToolTipText:           hikcam.BestScanExplain(),
+								OnCurrentIndexChanged: u.onPresetChanged},
 							Label{Text: "Pixel format", MinSize: Size{Width: 110}},
-							ComboBox{AssignTo: &u.fmtCB, Model: pixItems, CurrentIndex: 0,
-								ToolTipText: "Auto prefers Mono12, then Mono10, then Mono8 (native bit depth, unpacked to 16-bit linear)."},
+							ComboBox{AssignTo: &u.fmtCB, Model: pixItems, CurrentIndex: hikcam.PixelFormatIndex(hikcam.PixelMono12),
+								ToolTipText: "Auto prefers Mono12, then Mono10, then Mono8 (native bit depth, unpacked to 16-bit linear). Best scan quality selects Mono12."},
 							Label{Text: "Exposure"},
 							NumberEdit{AssignTo: &u.expNE, Value: 10000, MinValue: 0, MaxValue: 10000000, Decimals: 0, Increment: 100,
 								Suffix: " us", SpinButtonsVisible: true, ToolTipText: "ExposureTime in microseconds (MV-CS240-90UM: 32 us to 10 s)."},
@@ -589,10 +755,12 @@ func (u *MonoUI) Page() TabPage {
 							NumberEdit{AssignTo: &u.gainNE, Value: 0, MinValue: 0, MaxValue: 24, Decimals: 2, Increment: 0.1,
 								Suffix: " dB", SpinButtonsVisible: true, ToolTipText: "Analog gain in dB (MV-CS240-90UM: 0 to 24)."},
 							Label{Text: "Black level"},
-							NumberEdit{AssignTo: &u.blackNE, Value: 0, MinValue: 0, MaxValue: 4095, Decimals: 0, Increment: 1,
-								SpinButtonsVisible: true},
+							NumberEdit{AssignTo: &u.blackNE, Value: float64(hikcam.BestScanBlackLevel), MinValue: 0, MaxValue: 4095, Decimals: 0, Increment: 1,
+								SpinButtonsVisible: true,
+								ToolTipText:        "BlackLevel pedestal in DN at the current bit depth. Best scan quality uses 32 (~0.8% of 12-bit full scale) so readout noise is not clipped at 0."},
 							Label{Text: "Trigger"},
-							ComboBox{AssignTo: &u.trigCB, Model: []string{"Free run", "Software trigger"}, CurrentIndex: 0},
+							ComboBox{AssignTo: &u.trigCB, Model: []string{"Free run", "Software trigger"}, CurrentIndex: 1,
+								ToolTipText: "Software trigger grabs after the RGB light has settled. Best scan quality uses this so the frame is not a free-running rolling exposure."},
 						}},
 						CheckBox{AssignTo: &u.gammaCB, Text: "Enable camera gamma (off: linear readout)", Checked: false},
 						CheckBox{AssignTo: &u.fullCB, Text: "Full frame (ignore ROI)", Checked: true},
@@ -606,7 +774,11 @@ func (u *MonoUI) Page() TabPage {
 							Label{Text: "Offset Y"},
 							NumberEdit{AssignTo: &u.yNE, Value: 0, MinValue: 0, MaxValue: 8192, Decimals: 0, Increment: 16, SpinButtonsVisible: true},
 						}},
+						Label{AssignTo: &u.presetTip, Text: hikcam.BestScanExplain()},
 						PushButton{AssignTo: &u.applyBtn, Text: "Apply camera settings", Enabled: false, OnClicked: func() {
+							if u.usingBestScan() {
+								u.fillBestScanUI()
+							}
 							if err := u.applySettings(); err != nil {
 								u.say("Apply failed: " + err.Error())
 							}
@@ -623,8 +795,18 @@ func (u *MonoUI) Page() TabPage {
 						Label{AssignTo: &u.outLbl, Text: "Output: -"},
 						CheckBox{AssignTo: &u.caCB, Text: "Correct chromatic-aberration focus shift (green reference)", Checked: true,
 							ToolTipText: "Estimate R and B translation, magnification and blur against green, warp them onto green, and match sharpness only when a channel is measurably softer. Green is never sharpened."},
+						Composite{Layout: Grid{Columns: 2, MarginsZero: true, Spacing: 4}, Children: []Widget{
+							Label{Text: "Mode"},
+							ComboBox{AssignTo: &u.capModeCB, Model: []string{"Single frame per channel", "HDR bracket per channel (same options as HDR Scan)"}, CurrentIndex: 0,
+								ToolTipText:           "HDR reuses the White light / Trichrome bracket list (0/+2 or 0/+2/+3), merge method, alignment and LZW options. Each R, G and B channel captures the bracket on the mono camera, merges to linear, then CA correction and the trichrome merge run as usual.",
+								OnCurrentIndexChanged: u.updateCaptureLabel},
+							Label{Text: "HDR bracket"},
+							ComboBox{AssignTo: &u.brCB, Model: bracketItems, CurrentIndex: 0,
+								ToolTipText:           "Same presets as White light scan and Trichrome: 0 / +2 EV or 0 / +2 / +3 EV. Used only when Mode is HDR.",
+								OnCurrentIndexChanged: u.updateCaptureLabel},
+						}},
 						Composite{Layout: HBox{MarginsZero: true, Spacing: 6}, Children: []Widget{
-							PushButton{AssignTo: &u.capBtn, Text: "Capture mono trichrome  (R, G, B)", Enabled: false,
+							PushButton{AssignTo: &u.capBtn, Text: "Capture mono trichrome  (R, G, B; auto exposure)", Enabled: false,
 								MinSize: Size{Height: 34}, StretchFactor: 3,
 								Font: Font{Family: "Segoe UI", PointSize: 10, Bold: true}, OnClicked: u.capture},
 							PushButton{AssignTo: &u.stopBtn, Text: "Stop", Enabled: false, MinSize: Size{Height: 34}, StretchFactor: 1,
@@ -647,8 +829,17 @@ func (u *MonoUI) Page() TabPage {
 func (u *MonoUI) AfterCreate() {
 	u.sdkMsg = hikcam.SDKStatus()
 	u.refreshDevices()
-	u.say(appVersion + " Mono trichrome page ready. The monochrome camera is not required to open the app; Connect uses the MVS SDK when it is installed.")
+	u.fillBestScanUI()
+	u.updateCaptureLabel()
+	u.say(appVersion + " Mono trichrome page ready. The monochrome camera is not required to open the app; Connect uses the MVS SDK when it is installed. Best scan quality is selected; Capture meters each channel automatically.")
 	u.updateButtons()
+}
+
+func monoHDRTag(evs []int) string {
+	if len(evs) <= 1 {
+		return ""
+	}
+	return " HDR " + evText(evs)
 }
 
 // Keep color import used (preview may later tint the overlay).

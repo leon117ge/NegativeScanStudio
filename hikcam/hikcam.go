@@ -70,6 +70,19 @@ func (p PixelFormat) GenICamNames() []string {
 	}
 }
 
+// PixelFormatChoices is the UI order: Auto (highest), Mono12, Mono10, Mono8.
+var PixelFormatChoices = []PixelFormat{PixelAuto, PixelMono12, PixelMono10, PixelMono8}
+
+// PixelFormatIndex returns the index of p in PixelFormatChoices (0 if unknown).
+func PixelFormatIndex(p PixelFormat) int {
+	for i, x := range PixelFormatChoices {
+		if x == p {
+			return i
+		}
+	}
+	return 0
+}
+
 // Info describes an enumerated device.
 type Info struct {
 	Index     int
@@ -111,7 +124,16 @@ type Settings struct {
 	OffsetX         int
 	OffsetY         int
 	SoftwareTrigger bool
+	// QualityPreset asks Apply to also try noise-relevant GenICam nodes
+	// (ExposureAuto/GainAuto Off, DigitalShift 0, sharpness/denoise/LUT
+	// off, ADC 12-bit). Missing nodes are ignored so older firmware still
+	// applies the required settings above.
+	QualityPreset bool
 }
+
+// BestScanBlackLevel is a small 12-bit pedestal (~0.8 % of full scale)
+// so readout noise is not clipped at code 0.
+const BestScanBlackLevel = 32
 
 // DefaultSettings matches a conservative CS240 setup: 10 ms, 0 dB, gamma
 // off, full frame, free-run, highest available bit depth.
@@ -126,6 +148,38 @@ func DefaultSettings() Settings {
 		Width:       CS240Width,
 		Height:      CS240Height,
 	}
+}
+
+// BestScanQuality is the MV-CS240-90UM preset for maximum film-scan
+// quality: highest bit depth, lowest analog gain, linear readout, full
+// frame, software trigger, and extras that turn off in-camera processing.
+// ExposureTime starts at 10 ms; capture meters each R/G/B channel so the
+// film base / highlights do not clip.
+func BestScanQuality() Settings {
+	return Settings{
+		ExposureUS:      10_000,
+		GainDB:          0,
+		BlackLevel:      BestScanBlackLevel,
+		PixelFormat:     PixelMono12,
+		GammaEnable:     false,
+		FullFrame:       true,
+		Width:           CS240Width,
+		Height:          CS240Height,
+		SoftwareTrigger: true,
+		QualityPreset:   true,
+	}
+}
+
+// BestScanExplain is the English justification shown in the UI and docs.
+func BestScanExplain() string {
+	return "Best scan quality (MV-CS240-90UM): Mono12 (highest native bit depth, unpacked to 16-bit linear); " +
+		"gain 0 dB (base / lowest analog noise — brightness comes from exposure time, not gain); " +
+		"black level 32 (a ~0.8% 12-bit pedestal so readout noise is not clipped at 0); " +
+		"gamma off (linear radiometric response for HDR merge and film-base math); " +
+		"full frame 6016x4096 (every photosite); software trigger (grab after the RGB light has settled); " +
+		"ExposureAuto and GainAuto off (the software meters each R, G and B channel so highlights do not clip); " +
+		"DigitalShift 0, sharpness / denoise / LUT off, ADC 12-bit when the camera exposes those nodes. " +
+		"After this preset is applied, press Capture — exposure is set automatically per channel."
 }
 
 func (s Settings) Clamp() Settings {

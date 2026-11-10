@@ -91,3 +91,69 @@ capture exposure (and the light state) are restored when the page is left.
 The sharpness meter is the variance of a 4-neighbour Laplacian plus a
 smaller term of mid/high-frequency energy (the band where resolved film
 grain lives), with peak-hold.
+
+## Best scan quality (MV-CS240-90UM)
+
+v1.01 adds a preset dropdown on the Mono trichrome page. Selecting
+**Best scan quality (MV-CS240-90UM)** fills the camera settings and, once
+applied, Capture meters each channel automatically (you do not set
+exposure by hand). Values and reasons:
+
+| Setting | Value | Why |
+| --- | --- | --- |
+| PixelFormat | Mono12 | Highest native bit depth the GMAX2424 offers (4096 codes), unpacked and left-justified to 16-bit linear. |
+| Gain | 0 dB | Base / lowest analog noise. Brightness comes from exposure time, not from amplifying readout noise. |
+| BlackLevel | 32 | A small pedestal (~0.8 % of 12-bit full scale) so the noise floor is not clipped at code 0. |
+| GammaEnable | Off | Linear radiometric response required for HDR merge and film-base arithmetic. |
+| Geometry | Full frame 6016 x 4096 | Use every photosite; no ROI crop. |
+| Trigger | Software | Grab after the RGB light has settled, not a free-running rolling frame. |
+| ExposureAuto / GainAuto | Off | The software meters each R, G and B channel so highlights (film base / rebate) do not clip. |
+| DigitalShift | 0 | Do not bit-shift the raw numbers inside the camera. |
+| Sharpness / denoise / LUT | Off | Do not process the raw numbers inside the camera. |
+| ADCBitDepth | 12 (when exposed) | Match the Mono12 readout. Nodes the firmware does not implement are ignored. |
+
+Starting ExposureTime is 10 ms. At capture time the software probes each
+lit channel, drives the film-base median (the user-drawn rectangle if one
+exists, otherwise the frame) toward 0.50, and keeps the full-frame P99.5
+at or below 0.88 so highlights do not clip.
+
+Light leveling still uses a *fixed* camera exposure (only the RGB Light
+Air changes). Capture metering is a separate safety/primary step so a
+scan does not clip if the light or the film changed after leveling. The
+saved 0.5 film-base metadata comes from the last accepted leveling run.
+
+## HDR (v1.01)
+
+Mono trichrome can capture an HDR bracket per channel, using the same
+bracket list (0 / +2 EV or 0 / +2 / +3 EV), merge method, alignment and
+LZW options as White light scan and Trichrome. For each of R, G and B
+the monochrome camera captures the bracket, the frames are written as
+16-bit RGB TIFFs (gray replicated) and merged with the existing
+`ProcessN` path, then chromatic-aberration focus-shift correction (green
+reference) and the trichrome merge run as before.
+
+## Light leveling with the monochrome camera (v1.01)
+
+The Light page has a **Leveling camera** selector:
+
+- Existing camera (Fujifilm) — previous X-T3 tethered path, including
+  the optional CameraCal matrix.
+- Hikrobot monochrome — the MV-CS240-90UM shared with Mono trichrome.
+- Simulated Hikrobot MV-CS240-90UM — no MVS SDK; used by tests and when
+  no body is connected. Simulated frames are scaled by the commanded
+  RGB light codes (same LED curve as the existing light simulator) so
+  the v0.92 solver (10 rounds, measured-slope secant, neighbour search)
+  can converge.
+
+Live view on the Light page shows the selected camera so the usual
+orange-rectangle film-base pick still works. Auto leveling measures
+each light channel through the mono camera (every pixel belongs to the
+lit channel; no Bayer extraction). **Apply camera profile** is disabled
+for a monochrome body: there is no CFA and no CameraCal matrix, so each
+raw film-base channel is leveled independently to the 0.5 target. The
+TIFF check merges the last R/G/B mono frames with the same
+`ProcessMonoTrichrome` pipeline used by capture. Accepted after-profile
+(here: raw, because the matrix is identity) base values are stored in
+the Light page leveling record and flow into Mono trichrome TIFF
+metadata the same way as existing trichrome (`nss.scan/1`,
+`WithLeveling`).

@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"basetool/camera"
@@ -56,7 +57,8 @@ type lightConfig struct {
 	AreaMode        int                `json:"area_mode,omitempty"`   // v0.87: 0 auto, 1 rectangle (same as Camera)
 	Stock           string             `json:"stock"`
 	AutoLoad        bool               `json:"apply_on_select"`
-	NoCam           bool               `json:"no_cam_profile,omitempty"` // v0.85 "Apply camera profile" unticked
+	NoCam           bool               `json:"no_cam_profile,omitempty"`  // v0.85 "Apply camera profile" unticked
+	CamSrc          int                `json:"leveling_camera,omitempty"` // 0 existing, 1 Hikrobot, 2 Hikrobot sim
 }
 
 func lightConfigFile() string { return filepath.Join(configDir(), "rgb_light.json") }
@@ -122,10 +124,13 @@ type LightUI struct {
 	lastExp camera.Exposure
 	lastTgt float64
 	// v0.85 camera-profile leveling
-	camCB    *walk.CheckBox
-	lastPlan camPlan
-	lastPost [3]float64 // final base after the matrix
-	lastTIFF bool       // lastPost measured in the trichrome TIFF (else predicted)
+	camCB      *walk.CheckBox
+	camSrcCB   *walk.ComboBox
+	camNoteLbl *walk.Label
+	hikPrevGen atomic.Int64
+	lastPlan   camPlan
+	lastPost   [3]float64 // final base after the matrix
+	lastTIFF   bool       // lastPost measured in the trichrome TIFF (else predicted)
 
 	// preview
 	view     *walk.CustomWidget
@@ -718,12 +723,16 @@ func (u *LightUI) params() (lightlevel.Params, error) {
 		ti = 0
 	}
 	u.cfg.Values, u.cfg.Tol, u.cfg.MaxIter, u.cfg.SettleMS, u.cfg.Target, u.cfg.ISO = v, tol, it, st, ti, u.isoCB.CurrentIndex()
-	if u.camCB != nil {
+	applyProfile := !u.cfg.NoCam
+	if u.usesMonoCam() {
+		applyProfile = false
+	} else if u.camCB != nil {
 		u.cfg.NoCam = !u.camCB.Checked()
+		applyProfile = !u.cfg.NoCam
 	}
 	u.saveCfg()
 	pr := lightlevel.Params{Target: targetVals[ti], Tol: tol / 100, MaxIter: it, Settle: time.Duration(st) * time.Millisecond, Area: u.cfg.Area, Start: v}
-	pl, err := camPlanFor(pr.Target, !u.cfg.NoCam)
+	pl, err := camPlanFor(pr.Target, applyProfile)
 	if err != nil {
 		return p, err
 	}
@@ -769,14 +778,38 @@ func (u *LightUI) startLevel() {
 	tmpDir := ""
 	iso := isoVals[clampIdx(u.isoCB.CurrentIndex(), len(isoVals))]
 	realCam := false
-	if u.sim != nil {
+	src := u.camSource()
+	if src == camSrcHik && u.sim != nil {
+		walk.MsgBox(u.win(), "Auto film-base leveling", "A real Hikrobot camera cannot see the simulated RGB light.\n\nPick Simulated Hikrobot MV-CS240-90UM as the leveling camera, or connect the real light.", walk.MsgBoxIconInformation)
+		return
+	}
+	if src == camSrcHik || src == camSrcHikSim {
+		if h.mono == nil {
+			walk.MsgBox(u.win(), "Auto film-base leveling", "The Mono trichrome page is not ready.", walk.MsgBoxIconWarning)
+			return
+		}
+		d, herr := h.mono.ensureHik(src == camSrcHikSim)
+		if herr != nil {
+			walk.MsgBox(u.win(), "Auto film-base leveling", "Cannot open the Hikrobot monochrome camera:\n\n"+herr.Error()+"\n\nConnect it on HDR Scan > Mono trichrome, or pick Simulated Hikrobot MV-CS240-90UM.", walk.MsgBoxIconWarning)
+			return
+		}
+		h.mono.stopPreview()
+		u.stopHikPreview()
+		td, terr := os.MkdirTemp("", "nss_leveling_*")
+		if terr != nil {
+			walk.MsgBox(u.win(), "Auto film-base leveling", "Cannot create a temp folder for the leveling frames:\n\n"+terr.Error(), walk.MsgBoxIconWarning)
+			return
+		}
+		tmpDir = td
+		cam = &hikLevelCamera{dev: d, lights: u.hikLights()}
+	} else if u.sim != nil {
 		sd := u.sim
 		syn := lightlevel.NewSynth(sd.Lights)
 		syn.Exp = camera.Exposure{ISO: iso, Shutter: h.fixedShutter()}.String()
 		cam = syn
 	} else {
 		if h.dev == nil || h.isSim || h.sess == nil {
-			walk.MsgBox(u.win(), "Auto film-base leveling", "Connect the X-T3 on Camera and Light > Camera first (USB tether, M mode).\n\nThe simulated HDR camera cannot see the light.", walk.MsgBoxIconInformation)
+			walk.MsgBox(u.win(), "Auto film-base leveling", "Connect the X-T3 on Camera and Light > Camera first (USB tether, M mode).\n\nThe simulated HDR camera cannot see the light.\n\nOr pick a Hikrobot monochrome camera (or its simulator) as the leveling camera.", walk.MsgBoxIconInformation)
 			return
 		}
 		if h.busy {
@@ -818,7 +851,9 @@ func (u *LightUI) startLevel() {
 		u.log("Film base: detect once from the initial RGB captures, then lock the same rectangle for control and TIFF check.")
 	}
 	pl := u.lastPlan
-	if pl.on {
+	if src == camSrcHik || src == camSrcHikSim {
+		u.log("Apply camera profile: disabled for the monochrome camera (no Bayer CFA, no CameraCal matrix). Each raw film-base channel is leveled to %.2f.", pl.want)
+	} else if pl.on {
 		u.log("Apply camera profile: %s - target is the base AFTER the matrix (%.2f/%.2f/%.2f), i.e. %s before it.", pl.label(), pl.want, pl.want, pl.want, f3(pl.pre))
 	} else {
 		u.log("Apply camera profile: off (or no profile enabled) - target %.2f in the plain trichrome TIFF.", pl.want)
@@ -843,6 +878,33 @@ func (u *LightUI) startLevel() {
 		post, inTIFF := pl.post(res.Readings), false
 		if !res.Area.Empty() {
 			baseNorm = toScanRect(res.Area)
+		}
+		if hk, ok := cam.(*hikLevelCamera); ok && err == nil && res.Converged() {
+			for pass := 0; pass < 2; pass++ {
+				u.log("TIFF check %d: merging the last R/G/B monochrome leveling frames with the mono trichrome pipeline ...", pass+1)
+				base, n, verr := hikTiffBase(ctx, hk, tmpDir, baseNorm)
+				if verr != nil {
+					err = fmt.Errorf("final TIFF verification unavailable: %w; no new base accepted", verr)
+					u.log("%v", err)
+					break
+				}
+				post, inTIFF = pl.post(base), true
+				u.log("TIFF check %d: film base in the mono trichrome TIFF %s (%d samples); after %s: %s; worst %.1f%% from %.2f.",
+					pass+1, f3(base), n, pl.label(), f3(post), 100*pl.worstDev(post), pl.want)
+				if pl.worstDev(post) <= p.Tol || pass == 1 {
+					break
+				}
+				p2 := p
+				p2.Start = res.Values
+				p2.Area, p2.SelectArea = res.Area, nil
+				u.log("Correcting: fresh measured-response pass after TIFF verification; same locked pixels, statistic and 0.5-per-channel target.")
+				r2, e2 := lightlevel.Run(ctx, busyOnceLight{c}, cam, p2, restore, func(s string) { u.log("%s", s) })
+				res, err = r2, e2
+				post, inTIFF = pl.post(res.Readings), false
+				if err != nil || !res.Converged() {
+					break
+				}
+			}
 		}
 		if x, ok := cam.(*xt3Camera); ok && err == nil && res.Converged() {
 			for pass := 0; pass < 2; pass++ {
@@ -895,7 +957,9 @@ func (u *LightUI) startLevel() {
 				source = "TIFF-checked"
 			}
 			if !realCam {
-				source = "Simulated measurement"
+				if _, hik := cam.(*hikLevelCamera); !hik {
+					source = "Simulated measurement"
+				}
 			}
 			record = &levelingRecord{Time: time.Now(), Version: appVersion, Mode: mode, Box: baseNorm,
 				Values: res.Values, Base: post, Profile: pl.label(), Source: source, Measured: inTIFF || !realCam}
@@ -948,8 +1012,8 @@ func (u *LightUI) startLevel() {
 			}
 			u.saveCfg()
 			u.showResult(res, err, exp)
-			if err == nil && res.Converged() {
-				// v0.82: hand the levelled light + exposure to the frame-0 lock
+			if err == nil && res.Converged() && realCam {
+				// v0.82: hand the levelled light + exposure to the frame-0 lock (X-T3 path only)
 				h.takeHandoff(baseHandoff{ISO: exp.ISO, Shutter: exp.Shutter, Values: res.Values, Source: "RGB light leveling " + time.Now().Format("15:04:05")})
 			} else if released {
 				h.say("Light changed on the Light page - no new base accepted; frame 0 lock released, meter the base again.")
@@ -1296,6 +1360,11 @@ func (u *LightUI) Page() TabPage {
 						Icon:   iconMeter,
 						Layout: Grid{Columns: 2, Spacing: 3, Margins: Margins{Left: 8, Top: 2, Right: 8, Bottom: 4}},
 						Children: []Widget{
+							Label{Text: "Leveling camera", MinSize: Size{Width: 96}},
+							ComboBox{AssignTo: &u.camSrcCB, Model: camSrcItems, CurrentIndex: clampIdx(u.cfg.CamSrc, len(camSrcItems)),
+								ToolTipText:           "Which camera measures the film base while the RGB Light Air is adjusted.\nExisting camera is the Fujifilm X-T3 on the Camera page.\nHikrobot monochrome uses the MV-CS240-90UM (shared with Mono trichrome).\nThe simulator needs no MVS SDK.",
+								OnCurrentIndexChanged: u.onCamSourceChanged},
+							Label{AssignTo: &u.camNoteLbl, ColumnSpan: 2, Text: camProfileMonoNote},
 							Label{Text: "ISO", MinSize: Size{Width: 96}},
 							Composite{Layout: HBox{MarginsZero: true, Spacing: 4}, Children: []Widget{
 								ComboBox{AssignTo: &u.isoCB, Model: isoItems, CurrentIndex: u.cfg.ISO, MaxSize: Size{Width: 80}, OnCurrentIndexChanged: u.isoChanged,
@@ -1362,6 +1431,7 @@ func (u *LightUI) Page() TabPage {
 
 // AfterCreate fills the port list and stocks and switches the light off on exit.
 func (u *LightUI) AfterCreate() {
+	u.onCamSourceChanged()
 	if box, ok := u.manualBase(); ok {
 		u.publishRect(box)
 	}

@@ -441,6 +441,7 @@ type HDRUI struct {
 	lockSrc                                      string   // what locked frame 0 ("" = Meter base)
 	lockLight                                    *[3]int  // light values when frame 0 was locked (nil = unknown)
 	light                                        *LightUI // RGB light page (trichrome)
+	liveRoute                                    func()   // main.go re-evaluates which preview should run
 	recBtn, saveDBBtn, saveF0Btn, manageBtn      *walk.PushButton
 	db                                           *filmdb.DB
 	sessFirst                                    time.Time // first capture of this session (empty roll name folder)
@@ -1025,7 +1026,9 @@ func (u *HDRUI) setImage(img image.Image, what string) {
 	}
 	u.bmp = bmp
 	u.viewWhat = what
-	u.viewLbl.SetText(what)
+	if u.viewLbl != nil {
+		u.viewLbl.SetText(what)
+	}
 	u.invalidateViews()
 }
 

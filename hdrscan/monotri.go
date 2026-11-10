@@ -23,6 +23,9 @@ type MonoTriOptions struct {
 	Model     string
 	Metadata  scanmeta.Metadata
 	Progress  func(string)
+	// MeasureLevelingBase is only for the Light-page calibration check.
+	MeasureLevelingBase bool
+	BaseNorm            Rect // empty = centre 50 %
 }
 
 // MonoTriResult is the written RGB TIFF and the CA report.
@@ -31,6 +34,9 @@ type MonoTriResult struct {
 	Report   FocusShiftReport
 	Elapsed  time.Duration
 	Software string
+	Base     [3]float64
+	BaseN    int
+	BaseErr  string
 }
 
 // ProcessMonoTrichrome combines three same-size monochrome frames into one
@@ -111,7 +117,11 @@ func ProcessMonoTrichrome(r, g, b MonoPlane, o MonoTriOptions) (*MonoTriResult, 
 	if err := writeScanTIFF(path, w, h, out, o.LZW, make_, model, sw, meta); err != nil {
 		return nil, err
 	}
-	return &MonoTriResult{Out: path, Report: report, Elapsed: time.Since(start), Software: sw}, nil
+	res := &MonoTriResult{Out: path, Report: report, Elapsed: time.Since(start), Software: sw}
+	if o.MeasureLevelingBase {
+		res.Base, res.BaseN, res.BaseErr = measurePackedBase(out, w, h, o.BaseNorm)
+	}
+	return res, nil
 }
 
 func checkMono(p MonoPlane, name string) error {

@@ -235,6 +235,36 @@ func (d *realDev) applyLocked(st Settings) error {
 			return err
 		}
 	}
+	if st.QualityPreset {
+		applyQualityNodes(d.h)
+	}
+	return nil
+}
+
+// applyQualityNodes tries optional noise-relevant GenICam features.
+// Every call is best-effort: firmware that lacks a node is left unchanged.
+func applyQualityNodes(h unsafe.Pointer) {
+	_ = callEnum(h, "ExposureAuto", "Off")
+	_ = callEnum(h, "GainAuto", "Off")
+	_ = callEnum(h, "BlackLevelAuto", "Off")
+	_ = setBoolNode(h, "LUTEnable", false)
+	_ = setBoolNode(h, "GammaEnable", false)
+	_ = callInt(h, "DigitalShift", 0)
+	_ = callFloat(h, "Sharpness", 0)
+	_ = callEnum(h, "SharpnessEnable", "Off")
+	_ = callEnum(h, "Sharpness", "Off")
+	_ = callEnum(h, "NoiseReduction", "Off")
+	_ = callEnum(h, "NR", "Off")
+	_ = callEnum(h, "ADCBitDepth", "Bits_12")
+	_ = callInt(h, "ADCBitDepth", 12)
+}
+
+func setBoolNode(h unsafe.Pointer, key string, v bool) error {
+	ck := C.CString(key)
+	defer C.free(unsafe.Pointer(ck))
+	if ret := int(C.hik_set_bool(h, ck, cBool(v))); ret != 0 {
+		return cErr(ret, key)
+	}
 	return nil
 }
 
