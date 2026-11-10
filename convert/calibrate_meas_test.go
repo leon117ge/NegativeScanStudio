@@ -6,113 +6,89 @@ import (
 	"testing"
 )
 
-func measPatch(t *testing.T, name string, meanD [3]float64, g GrainISO) {
+// Flat mid-density target from visually flat 192-256 px patches of the
+// 0212 500T scan (crop_mid peach wall / floor), not the whole 512 crop
+// which includes shoe and bar edges.
+var (
+	targetMidD   = [3]float64{0.167, 0.396, 0.554}
+	targetMidRMS = [3]float64{0.0154, 0.0222, 0.0546}
+	targetMidRG  = 0.194
+	targetMidGB  = 0.045
+	targetMidRB  = 0.055
+	targetMidAC  = [3]float64{2.1, 1.9, 1.8}
+
+	targetHighD   = [3]float64{0.400, 0.796, 1.047}
+	targetHighRMS = [3]float64{0.0133, 0.0238, 0.0520}
+
+	targetLowD   = [3]float64{0.109, 0.278, 0.388}
+	targetLowRMS = [3]float64{0.0194, 0.0321, 0.0706}
+)
+
+func TestGrainCalibrationISO400(t *testing.T) {
 	s, _ := StockByName("Vision3 500T 5219")
 	w, h := 512, 512
-	// Build flat transmittance from target D: T=0.5*10^(-D)
-	// ProcessPixels expects linear scene then makes density - easier to inject density via fake:
-	// Use ProcessPixelsFast on constant mid grey with EV so resulting mean D matches roughly.
-	// Simpler: manually set density, apply grain only.
-	d := make([]float64, w*h*3)
-	for i := 0; i < w*h; i++ {
-		for c := 0; c < 3; c++ {
-			d[i*3+c] = meanD[c]
+	_, st := SimulateFlatGrain(targetMidD, w, h, ScanFramePx, s.Name, GrainISO400, 42)
+	t.Logf("ISO400 mid  RMS=%.5f/%.5f/%.5f corr=%.3f/%.3f/%.3f ac50=%.1f/%.1f/%.1f meanD=%.3f/%.3f/%.3f",
+		st.RMS[0], st.RMS[1], st.RMS[2], st.CorrRG, st.CorrGB, st.CorrRB,
+		st.AC50[0], st.AC50[1], st.AC50[2], st.MeanD[0], st.MeanD[1], st.MeanD[2])
+	fmt.Printf("[ISO400 mid] RMS=%.5f/%.5f/%.5f corr=%.3f/%.3f/%.3f ac50=%.1f/%.1f/%.1f\n",
+		st.RMS[0], st.RMS[1], st.RMS[2], st.CorrRG, st.CorrGB, st.CorrRB,
+		st.AC50[0], st.AC50[1], st.AC50[2])
+
+	const tol = 0.18 // 18 % — a shade looser than 15 % so seeds can vary
+	for c, name := range []string{"R", "G", "B"} {
+		rel := math.Abs(st.RMS[c]-targetMidRMS[c]) / targetMidRMS[c]
+		if rel > tol {
+			t.Errorf("RMS %s: got %.5f want %.5f (rel %.1f%%)", name, st.RMS[c], targetMidRMS[c], rel*100)
 		}
 	}
-	applyGrainPoisson(d, w, h, s.Name, g, 42, 1, 1)
-	// high-pass
-	plane := func(c int) []float64 {
-		p := make([]float64, w*h)
-		for i := 0; i < w*h; i++ {
-			p[i] = d[i*3+c]
+	checkCorr := func(got, want float64, name string) {
+		// Absolute tolerance 0.08 or 18% relative, whichever is larger.
+		lim := math.Max(0.08, math.Abs(want)*tol)
+		if math.Abs(got-want) > lim {
+			t.Errorf("corr %s: got %.3f want %.3f", name, got, want)
 		}
-		return p
 	}
-	blur := func(p []float64, rad int) []float64 {
-		tmp := make([]float64, len(p))
-		out := make([]float64, len(p))
-		for y := 0; y < h; y++ {
-			for x := 0; x < w; x++ {
-				var s float64
-				var n float64
-				for k := -rad; k <= rad; k++ {
-					xx := x + k
-					if xx < 0 {
-						xx = 0
-					}
-					if xx >= w {
-						xx = w - 1
-					}
-					s += p[y*w+xx]
-					n++
-				}
-				tmp[y*w+x] = s / n
-			}
+	checkCorr(st.CorrRG, targetMidRG, "RG")
+	checkCorr(st.CorrGB, targetMidGB, "GB")
+	checkCorr(st.CorrRB, targetMidRB, "RB")
+	for c, name := range []string{"R", "G", "B"} {
+		if math.Abs(st.AC50[c]-targetMidAC[c]) > 1.2 {
+			t.Errorf("ac50 %s: got %.1f want %.1f", name, st.AC50[c], targetMidAC[c])
 		}
-		for x := 0; x < w; x++ {
-			for y := 0; y < h; y++ {
-				var s float64
-				var n float64
-				for k := -rad; k <= rad; k++ {
-					yy := y + k
-					if yy < 0 {
-						yy = 0
-					}
-					if yy >= h {
-						yy = h - 1
-					}
-					s += tmp[yy*w+x]
-					n++
-				}
-				out[y*w+x] = s / n
-			}
-		}
-		return out
 	}
-	HF := [3][]float64{}
-	for c := 0; c < 3; c++ {
-		p := plane(c)
-		lf := blur(p, 15)
-		hf := make([]float64, w*h)
-		for i := range hf {
-			hf[i] = p[i] - lf[i]
-		}
-		HF[c] = hf
-	}
-	rms := func(a []float64) float64 {
-		var s float64
-		for _, v := range a {
-			s += v * v
-		}
-		return math.Sqrt(s / float64(len(a)))
-	}
-	corr := func(a, b []float64) float64 {
-		n := float64(len(a))
-		var sa, sb float64
-		for i := range a {
-			sa += a[i]
-			sb += b[i]
-		}
-		sa /= n
-		sb /= n
-		var sab, a2, b2 float64
-		for i := range a {
-			da, db := a[i]-sa, b[i]-sb
-			sab += da * db
-			a2 += da * da
-			b2 += db * db
-		}
-		return sab / math.Sqrt(a2*b2)
-	}
-	t.Logf("[%s] RMS=%.5f/%.5f/%.5f corr=%.3f/%.3f/%.3f", name,
-		rms(HF[0]), rms(HF[1]), rms(HF[2]),
-		corr(HF[0], HF[1]), corr(HF[1], HF[2]), corr(HF[0], HF[2]))
-	fmt.Printf("[%s] RMS=%.5f/%.5f/%.5f corr=%.3f/%.3f/%.3f\n", name,
-		rms(HF[0]), rms(HF[1]), rms(HF[2]),
-		corr(HF[0], HF[1]), corr(HF[1], HF[2]), corr(HF[0], HF[2]))
+
+	_, hi := SimulateFlatGrain(targetHighD, w, h, ScanFramePx, s.Name, GrainISO400, 42)
+	t.Logf("ISO400 high RMS=%.5f/%.5f/%.5f corr=%.3f/%.3f/%.3f ac50=%.1f/%.1f/%.1f",
+		hi.RMS[0], hi.RMS[1], hi.RMS[2], hi.CorrRG, hi.CorrGB, hi.CorrRB,
+		hi.AC50[0], hi.AC50[1], hi.AC50[2])
+	fmt.Printf("[ISO400 high] RMS=%.5f/%.5f/%.5f corr=%.3f/%.3f/%.3f ac50=%.1f/%.1f/%.1f\n",
+		hi.RMS[0], hi.RMS[1], hi.RMS[2], hi.CorrRG, hi.CorrGB, hi.CorrRB,
+		hi.AC50[0], hi.AC50[1], hi.AC50[2])
+
+	_, lo := SimulateFlatGrain(targetLowD, w, h, ScanFramePx, s.Name, GrainISO400, 42)
+	t.Logf("ISO400 low  RMS=%.5f/%.5f/%.5f corr=%.3f/%.3f/%.3f ac50=%.1f/%.1f/%.1f",
+		lo.RMS[0], lo.RMS[1], lo.RMS[2], lo.CorrRG, lo.CorrGB, lo.CorrRB,
+		lo.AC50[0], lo.AC50[1], lo.AC50[2])
+	fmt.Printf("[ISO400 low] RMS=%.5f/%.5f/%.5f corr=%.3f/%.3f/%.3f ac50=%.1f/%.1f/%.1f\n",
+		lo.RMS[0], lo.RMS[1], lo.RMS[2], lo.CorrRG, lo.CorrGB, lo.CorrRB,
+		lo.AC50[0], lo.AC50[1], lo.AC50[2])
 }
 
-func TestMeasOldSim(t *testing.T) {
-	measPatch(t, "old_mid", [3]float64{0.19, 0.38, 0.44}, GrainISO400)
-	measPatch(t, "old_dense", [3]float64{0.51, 0.85, 0.96}, GrainISO400)
+func TestGrainISO100Ratio(t *testing.T) {
+	s, _ := StockByName("Vision3 500T 5219")
+	w, h := 512, 512
+	_, a := SimulateFlatGrain(targetMidD, w, h, ScanFramePx, s.Name, GrainISO400, 42)
+	_, b := SimulateFlatGrain(targetMidD, w, h, ScanFramePx, s.Name, GrainISO100, 42)
+	t.Logf("ISO400 RMS=%.5f/%.5f/%.5f ac50=%.1f/%.1f/%.1f", a.RMS[0], a.RMS[1], a.RMS[2], a.AC50[0], a.AC50[1], a.AC50[2])
+	t.Logf("ISO100 RMS=%.5f/%.5f/%.5f ac50=%.1f/%.1f/%.1f", b.RMS[0], b.RMS[1], b.RMS[2], b.AC50[0], b.AC50[1], b.AC50[2])
+	// PGI-derived RMS ratio is 0.74; finer clouds leak a bit more HF, so
+	// allow 0.55–0.90 around G.
+	ratio := b.RMS[1] / a.RMS[1]
+	if ratio < 0.55 || ratio > 0.90 {
+		t.Errorf("ISO100/ISO400 G RMS ratio %.2f, expected ~0.74", ratio)
+	}
+	if b.AC50[1] >= a.AC50[1]*0.95 {
+		t.Errorf("ISO100 should be finer: ac50 G %.1f vs ISO400 %.1f", b.AC50[1], a.AC50[1])
+	}
 }
