@@ -31,7 +31,7 @@ import (
 )
 
 const appName = "NegativeScan Studio"
-const appVersion = appName + " v1.03"
+const appVersion = appName + " v1.04-preview1"
 
 // legacyAppName: the program was called Film Base Meter up to v0.67; its
 // settings folder is still read (copied once, never changed) by migrateLegacyConfig.
@@ -61,6 +61,7 @@ type HDRConfig struct {
 	ISO        int    // index into isoVals (fixed frame 0 only)
 	Stock      string // film stock from the base database ("" = none)
 	StockTol   int    // index into stockTolVals
+	CenterMark bool   // live-view optical-centre / flatness overlay (default on)
 }
 
 // Bracket presets (display order). Config: BRACKET_EV=0,2 (v0.62+);
@@ -165,7 +166,7 @@ func defaultOutDir() string {
 }
 
 func loadHDRConfig() HDRConfig {
-	c := HDRConfig{Target: targetDefault, OutDir: defaultOutDir(), LZW: true, StockTol: stockTolDefault, Bracket: bracketDefault, Merge: mergeDefault}
+	c := HDRConfig{Target: targetDefault, OutDir: defaultOutDir(), LZW: true, StockTol: stockTolDefault, Bracket: bracketDefault, Merge: mergeDefault, CenterMark: true}
 	haveFS, haveEV, haveMM := false, false, false
 	b, err := os.ReadFile(hdrConfigFile())
 	if err != nil {
@@ -275,6 +276,8 @@ func loadHDRConfig() HDRConfig {
 			if n > 0 {
 				c.Counter = n
 			}
+		case "CENTER_MARK":
+			c.CenterMark = v != "0"
 		}
 	}
 	return c
@@ -320,10 +323,10 @@ func saveHDRConfig(c HDRConfig) {
 	if tol < 0 || tol >= len(stockTolVals) {
 		tol = stockTolDefault
 	}
-	s := fmt.Sprintf("TARGETFS=%.2f\r\nAREA=%d\r\nOUTDIR=%s\r\nKEEP_TIFF=%s\r\nDELETE_RAW=%s\r\nALIGN=%d\r\nLZW=%s\r\nSIM_SCENE=%s\r\nSLOWEST=%d\r\nBRACKET=%d\r\nBRACKET_EV=%s\r\nROLL=%s\r\nSHOT_COUNTER=%d\r\nDUST=%s\r\nFRAME0=%s\r\nISO=%d\r\nSTOCK=%s\r\nSTOCK_TOL=%.2f\r\nMERGE=%d\r\nMERGE_METHOD=%s\r\nFIXED_SHUTTER=%s\r\nTRI_MODE=%s\r\nTRI_BRACKET=%s\r\n",
+	s := fmt.Sprintf("TARGETFS=%.2f\r\nAREA=%d\r\nOUTDIR=%s\r\nKEEP_TIFF=%s\r\nDELETE_RAW=%s\r\nALIGN=%d\r\nLZW=%s\r\nSIM_SCENE=%s\r\nSLOWEST=%d\r\nBRACKET=%d\r\nBRACKET_EV=%s\r\nROLL=%s\r\nSHOT_COUNTER=%d\r\nDUST=%s\r\nFRAME0=%s\r\nISO=%d\r\nSTOCK=%s\r\nSTOCK_TOL=%.2f\r\nMERGE=%d\r\nMERGE_METHOD=%s\r\nFIXED_SHUTTER=%s\r\nTRI_MODE=%s\r\nTRI_BRACKET=%s\r\nCENTER_MARK=%s\r\n",
 		targetVals[ti], c.AreaMode, c.OutDir, b(c.KeepTIFF), b(c.DeleteRAW), c.Align, b(c.LZW), c.SimScene, c.Slowest, legacy, evKey(bracketEVs[bi]), hdrscan.SanitizeRoll(c.Roll), c.Counter,
 		dustKeys[clamp(c.Dust, len(dustKeys))], frame0Keys[clamp(c.Frame0, len(frame0Keys))], isoVals[clamp(c.ISO, len(isoVals))], c.Stock, stockTolVals[tol],
-		mi, mergeKeys[mi], fixedShutterKeys[clamp(c.Shutter, len(fixedShutterKeys))], triModeKeys[clamp(c.ScanMode, len(triModeKeys))], []string{"0_2", "0_2_3"}[clamp(c.TriBracket, 2)])
+		mi, mergeKeys[mi], fixedShutterKeys[clamp(c.Shutter, len(fixedShutterKeys))], triModeKeys[clamp(c.ScanMode, len(triModeKeys))], []string{"0_2", "0_2_3"}[clamp(c.TriBracket, 2)], b(c.CenterMark))
 	os.MkdirAll(configDir(), 0o755)
 	os.WriteFile(hdrConfigFile(), []byte(s), 0o644)
 }
@@ -570,6 +573,34 @@ func (u *HDRUI) say(s string) {
 	} else {
 		u.ui(func() { u.appendLog(s) })
 	}
+}
+
+// setCenterMark stores the live-view optical-centre overlay and keeps the
+// Mono trichrome and Focus check checkboxes in sync. Display only.
+func (u *HDRUI) setCenterMark(on bool) {
+	u.cfg.CenterMark = on
+	saveHDRConfig(u.cfg)
+	sync := func(cb *walk.CheckBox, view *walk.CustomWidget) {
+		if cb != nil && cb.Checked() != on {
+			cb.SetChecked(on)
+		}
+		if view != nil {
+			view.Invalidate()
+		}
+	}
+	if u.mono != nil {
+		sync(u.mono.markCB, u.mono.view)
+	}
+	if u.focus != nil {
+		sync(u.focus.markCB, u.focus.view)
+	}
+}
+
+func centerMarkOn(hdr *HDRUI) bool {
+	if hdr == nil {
+		return true
+	}
+	return hdr.cfg.CenterMark
 }
 
 func (u *HDRUI) save() {

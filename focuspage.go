@@ -38,6 +38,7 @@ type FocusUI struct {
 	bmp                                         *walk.Bitmap
 	srcW, srcH                                  int
 	zoomCB                                      *walk.ComboBox
+	markCB                                      *walk.CheckBox
 	greenBtn, whiteBtn, liveBtn, resetPeakBtn   *walk.PushButton
 	srcLbl, expLbl, lightLbl, sharpLbl, peakLbl *walk.Label
 	logTE                                       *walk.TextEdit
@@ -495,6 +496,12 @@ func (u *FocusUI) paint(c *walk.Canvas, _ walk.Rectangle) error {
 		}
 		c.DrawImageStretchedPixels(u.bmp, full)
 	}
+	// Optical-centre / flatness overlay, mapped through zoom and pan.
+	// Drawn before the green meter mark so the short solid plus stays
+	// visible when the two coincide (fit, pan at the sensor centre).
+	if centerMarkOn(u.hdr) {
+		paintCenterMarks(c, src, dst, sz.Width, sz.Height)
+	}
 	// Crosshair at the centre to mark the focus sample.
 	penB, _ := walk.NewSolidColorBrush(walk.RGB(80, 220, 120))
 	if penB != nil {
@@ -622,7 +629,17 @@ func (u *FocusUI) Page() TabPage {
 					OnMouseMove:         u.move,
 					OnMouseUp:           u.up,
 				},
-				Label{Text: "Click to zoom on a region (jumps to 200 %). Drag to pan when zoomed. Green crosshair: the area used for exposure and the sharpness meter.", TextColor: grey},
+				Composite{Layout: HBox{MarginsZero: true, Spacing: 8}, Children: []Widget{
+					CheckBox{AssignTo: &u.markCB, Text: "Center mark", Checked: centerMarkOn(u.hdr),
+						ToolTipText: "High-contrast crosshair at the sensor centre, plus corner and edge marks at a 10% inset, to help level the film plane. Stays on the true image centre when you zoom or pan; hidden if that point is off-screen. Display only.",
+						OnCheckedChanged: func() {
+							if u.hdr != nil && u.markCB != nil {
+								u.hdr.setCenterMark(u.markCB.Checked())
+							}
+						}},
+					HSpacer{},
+				}},
+				Label{Text: "Click to zoom on a region (jumps to 200 %). Drag to pan when zoomed. White centre and corner marks: the sensor centre and 10% inset points (field flatness). Green crosshair: the area used for exposure and the sharpness meter.", TextColor: grey},
 			}},
 			Composite{StretchFactor: 2, MinSize: Size{Width: 340}, MaxSize: Size{Width: 420}, Layout: VBox{MarginsZero: true, Spacing: 3}, Children: []Widget{
 				Card{

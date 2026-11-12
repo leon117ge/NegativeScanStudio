@@ -35,7 +35,7 @@ type MonoUI struct {
 	devCB, fmtCB, trigCB, presetCB, capModeCB, brCB  *walk.ComboBox
 	expNE, gainNE, blackNE                           *walk.NumberEdit
 	wNE, hNE, xNE, yNE                               *walk.NumberEdit
-	fullCB, gammaCB, caCB                            *walk.CheckBox
+	fullCB, gammaCB, caCB, markCB                    *walk.CheckBox
 	connBtn, applyBtn, capBtn, stopBtn, refreshBtn   *walk.PushButton
 	camLbl, sdkLbl, lightLbl, valLbl, whyLbl, outLbl *walk.Label
 	presetTip                                        *walk.Label
@@ -457,6 +457,10 @@ func (u *MonoUI) paint(c *walk.Canvas, _ walk.Rectangle) error {
 	sz := u.bmp.Size()
 	ir := letterbox(cb, sz.Width, sz.Height)
 	c.DrawImageStretchedPixels(u.bmp, ir)
+	if centerMarkOn(u.hdr) {
+		sz := u.bmp.Size()
+		paintCenterMarks(c, walk.Rectangle{Width: sz.Width, Height: sz.Height}, ir, sz.Width, sz.Height)
+	}
 	if u.viewWhat != "" {
 		if f, _ := walk.NewFont("Segoe UI", 8, 0); f != nil {
 			c.DrawTextPixels(u.viewWhat, f, walk.RGB(180, 180, 186), walk.Rectangle{X: ir.X + 6, Y: ir.Y + 4, Width: ir.Width - 12, Height: 16}, walk.TextLeft)
@@ -721,6 +725,16 @@ func (u *MonoUI) Page() TabPage {
 					MinSize:             Size{Width: 360, Height: 240},
 					StretchFactor:       3,
 				},
+				Composite{Layout: HBox{MarginsZero: true, Spacing: 8}, Children: []Widget{
+					CheckBox{AssignTo: &u.markCB, Text: "Center mark", Checked: centerMarkOn(u.hdr),
+						ToolTipText: "High-contrast crosshair at the sensor centre, plus corner and edge marks at a 10% inset, to help level the film plane. Display only: never written into captured TIFFs.",
+						OnCheckedChanged: func() {
+							if u.hdr != nil && u.markCB != nil {
+								u.hdr.setCenterMark(u.markCB.Checked())
+							}
+						}},
+					HSpacer{},
+				}},
 				Label{Text: "Hikrobot monochrome live view. Capture shoots R, then G, then B with the RGB light and merges them into one linear 16-bit RGB TIFF.", TextColor: grey},
 				TextEdit{AssignTo: &u.logTE, ReadOnly: true, VScroll: true, StretchFactor: 1, MinSize: Size{Height: 110}},
 			}},

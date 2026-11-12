@@ -106,3 +106,34 @@ func TestMergeDefault(t *testing.T) {
 		}
 	}
 }
+
+func TestCenterMarkConfig(t *testing.T) {
+	t.Setenv("APPDATA", t.TempDir())
+	os.MkdirAll(configDir(), 0o755)
+	if c := loadHDRConfig(); !c.CenterMark {
+		t.Fatal("missing file: Center mark should default on")
+	}
+	os.WriteFile(hdrConfigFile(), []byte("TARGETFS=0.80\r\n"), 0o644)
+	if c := loadHDRConfig(); !c.CenterMark {
+		t.Fatal("legacy file without key: Center mark should default on")
+	}
+	os.WriteFile(hdrConfigFile(), []byte("CENTER_MARK=0\r\n"), 0o644)
+	if c := loadHDRConfig(); c.CenterMark {
+		t.Fatal("CENTER_MARK=0 should load off")
+	}
+	saveHDRConfig(loadHDRConfig())
+	b, _ := os.ReadFile(hdrConfigFile())
+	if !strings.Contains(string(b), "CENTER_MARK=0") {
+		t.Fatalf("off state not saved: %s", b)
+	}
+	os.WriteFile(hdrConfigFile(), []byte("CENTER_MARK=1\r\n"), 0o644)
+	c := loadHDRConfig()
+	if !c.CenterMark {
+		t.Fatal("CENTER_MARK=1 should load on")
+	}
+	saveHDRConfig(c)
+	b, _ = os.ReadFile(hdrConfigFile())
+	if !strings.Contains(string(b), "CENTER_MARK=1") {
+		t.Fatalf("on state not saved: %s", b)
+	}
+}
