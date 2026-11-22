@@ -66,6 +66,7 @@ func (u *HDRUI) setSharedHikExposure(us float64, source string) {
 	}
 	if u.mono != nil {
 		u.mono.updateBaseExposureLabel()
+		u.mono.updateCaptureLabel()
 	}
 }
 

@@ -181,9 +181,9 @@ func BestScanExplain() string {
 		"black level 32 (a ~0.8% 12-bit pedestal so readout noise is not clipped at 0); " +
 		"gamma off (linear radiometric response for HDR merge and film-base math); " +
 		"full frame 6016x4096 (every photosite); software trigger (grab after the RGB light has settled); " +
-		"ExposureAuto and GainAuto off (the software meters each R, G and B channel so highlights do not clip); " +
+		"ExposureAuto and GainAuto off (uses the shared leveled exposure across R, G and B, or meters automatically per channel when that option is checked); " +
 		"DigitalShift 0, sharpness / denoise / LUT off, ADC 12-bit when the camera exposes those nodes. " +
-		"After this preset is applied, press Capture — exposure is set automatically per channel."
+		"After this preset is applied, press Capture — exposure comes from the shared leveled value (or automatically per channel if enabled)."
 }
 
 func (s Settings) Clamp() Settings {

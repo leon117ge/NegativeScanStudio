@@ -153,7 +153,8 @@ type LightUI struct {
 	valEd                                                 [3]*walk.LineEdit
 	tolEd, iterEd, settleEd                               *walk.LineEdit
 	autoCB                                                *walk.CheckBox
-	infoLbl, telLbl, stateLbl, resLbl, viewLbl, presetLbl *walk.Label
+	infoLbl, telLbl, stateLbl, viewLbl, presetLbl *walk.Label
+	resTE                                           *walk.TextEdit
 	nameEd, stockEd, notesEd                              *walk.LineEdit // v0.83 config / preset
 	fileSaveBtn, fileLoadBtn, delBtn                      *walk.PushButton
 	presets                                               *scanconfig.Store
@@ -843,7 +844,7 @@ func (u *LightUI) startLevel() {
 	u.busy, u.level = true, true
 	u.lastTgt = p.Target
 	u.updateButtons()
-	setLightStatusN(3, u.resLbl, "Leveling ...")
+	setLightResultText(u.resTE, "Leveling ...")
 	u.log("==== Auto film-base leveling: target %.2f FS, tolerance ±%.1f%%, max %d rounds, settle %v, start R %d G %d B %d ====",
 		p.Target, p.Tol*100, p.MaxIter, p.Settle, p.Start[0], p.Start[1], p.Start[2])
 	u.log("Camera: %s", cam.Name())
@@ -1070,10 +1071,10 @@ func (u *LightUI) showResult(res lightlevel.Result, err error, expDesc string, h
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			u.log("Leveling stopped.")
-			setLightStatusN(3, u.resLbl, fmt.Sprintf("Stopped. Light left at R %d G %d B %d.", res.Values[0], res.Values[1], res.Values[2]))
+			setLightResultText(u.resTE, fmt.Sprintf("Stopped. Light left at R %d G %d B %d.", res.Values[0], res.Values[1], res.Values[2]))
 		} else {
 			u.log("Leveling FAILED: %v", err)
-			setLightStatusN(3, u.resLbl, "Failed: "+err.Error())
+			setLightResultText(u.resTE, "Failed: "+err.Error())
 			if errors.Is(err, camera.ErrNotManual) {
 				u.hdr.notManualMsg(err)
 			} else {
@@ -1108,7 +1109,7 @@ func (u *LightUI) showResult(res lightlevel.Result, err error, expDesc string, h
 	} else {
 		t = "NOT LEVELLED: " + t + "\n" + strings.Join(pr, "\n")
 	}
-	setLightStatusN(3, u.resLbl, t)
+	setLightResultText(u.resTE, t)
 	u.log("Result: %s (%s)", t, pl.label())
 
 	u.updateButtons()
@@ -1120,14 +1121,18 @@ func (u *LightUI) showResult(res lightlevel.Result, err error, expDesc string, h
 	msg := strings.Join(pr, "\n") + "\n\n"
 	if hik {
 		if res.Fit.Changed {
-			msg += fmt.Sprintf("The Hikrobot exposure was changed from %.0f us to %.0f us (gain 0 dB) and written to Mono Trichrome scan settings.", res.Fit.StartedUS, res.Fit.FinalUS)
+			msg += fmt.Sprintf("The Hikrobot exposure was changed from %.0f us to %.0f us (gain 0 dB) and saved as the shared exposure for leveling and Mono Trichrome.", res.Fit.StartedUS, res.Fit.FinalUS)
 		} else {
 			msg += "The Hikrobot exposure was NOT changed (it stays at " + expDesc + ")."
 		}
+		captureNote := "Mono Trichrome capture uses this same shared exposure for R, G and B (HDR brackets are EV offsets from it)."
+		if u.hdr != nil && u.hdr.hikMeterEach() {
+			captureNote = "Auto-meter each channel is enabled in Mono Trichrome, so capture starts from this exposure and meters each channel separately."
+		}
 		if limited {
-			msg += "\n\nTo reach the target: increase the Hikrobot exposure (us) in the leveling settings, or open the aperture. Keep gain at 0 dB. The same exposure is the starting point for Mono Trichrome capture (each channel is then metered from there)."
+			msg += "\n\nTo reach the target: increase the Hikrobot exposure (us) in the leveling settings, or open the aperture. Keep gain at 0 dB. " + captureNote
 		} else {
-			msg += "\n\nThe light is too strong for this exposure even at brightness 1: reduce the Hikrobot exposure (us), stop the lens down, or choose a higher base level. Keep gain at 0 dB."
+			msg += "\n\nThe light is too strong for this exposure even at brightness 1: reduce the Hikrobot exposure (us), stop the lens down, or choose a higher base level. Keep gain at 0 dB. " + captureNote
 		}
 	} else {
 		msg += "The camera exposure was NOT changed (it stays at " + expDesc + ")."
@@ -1440,7 +1445,7 @@ func (u *LightUI) Page() TabPage {
 							Composite{AssignTo: &u.hikExpRow, Visible: false, Layout: HBox{MarginsZero: true, Spacing: 4}, Children: []Widget{
 								NumberEdit{AssignTo: &u.hikExpNE, Value: 10000, MinValue: 0, MaxValue: 10000000, Decimals: 0, Increment: 100,
 									Suffix: " us", SpinButtonsVisible: true, MinSize: Size{Width: 160},
-									ToolTipText: "Shared Hikrobot ExposureTime in microseconds (gain 0 dB). This is the same value as Mono Trichrome. Leveling uses it for R, G and B (Mono12, full frame), raises or lowers it so every light code lands in a well-resolved window, and writes the result back to both fields.",
+									ToolTipText: "Shared Hikrobot ExposureTime in microseconds (gain 0 dB). This is the same value as Mono Trichrome. Leveling uses it for R, G and B (Mono12, full frame), places the coarsest channel on target at an integer light code inside the feasible window while keeping the other channels within headroom, and saves the result back to both fields.",
 									OnValueChanged: func() {
 										if u.hdr != nil && u.hikExpNE != nil {
 											u.hdr.setSharedHikExposure(u.hikExpNE.Value(), "user")
@@ -1480,7 +1485,7 @@ func (u *LightUI) Page() TabPage {
 								}},
 								HSpacer{},
 							}},
-							Label{AssignTo: &u.resLbl, ColumnSpan: 2, Text: "Clear film base on the light; exposure fixed, only the light changes.", MinSize: Size{Width: 440, Height: 76}},
+							TextEdit{AssignTo: &u.resTE, ColumnSpan: 2, ReadOnly: true, VScroll: true, Text: "Clear film base on the light; exposure fixed, only the light changes.", MinSize: Size{Width: 440, Height: 90}, MaxSize: Size{Height: 110}},
 							Composite{ColumnSpan: 2, Layout: HBox{MarginsZero: true, Spacing: 4}, Children: []Widget{
 								PushButton{AssignTo: &u.copyBtn, Text: "Copy", Enabled: false, OnClicked: u.copyLeveling},
 								HSpacer{},
@@ -1515,7 +1520,7 @@ func (u *LightUI) AfterCreate() {
 		u.enCB[c].SetChecked(true)
 	}
 	setLightStatusN(2, u.stateLbl, "Light reports: -")
-	setLightStatusN(3, u.resLbl, "Clear film base on the light; exposure fixed, only the light changes.")
+	setLightResultText(u.resTE, "Clear film base on the light; exposure fixed, only the light changes.")
 	u.updateButtons()
 	if mw := u.win(); mw != nil {
 		mw.Closing().Attach(func(canceled *bool, reason walk.CloseReason) { u.shutdown() })
@@ -1526,6 +1531,17 @@ func (u *LightUI) AfterCreate() {
 // setLightStatusN is setStatus with a narrower wrap for the Light panel. The
 // text is padded to at least n lines so the panel keeps its layout when the
 // message changes (no re-layout, no half-painted group titles).
+func setLightResultText(te *walk.TextEdit, s string) {
+	if te == nil {
+		return
+	}
+	w := strings.ReplaceAll(s, "\r\n", "\n")
+	w = strings.ReplaceAll(w, "\n", "\r\n")
+	te.SetText(w)
+	te.SetToolTipText(s)
+	redrawLightRight()
+}
+
 func setLightStatusN(n int, l *walk.Label, s string) {
 	if l == nil {
 		return

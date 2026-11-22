@@ -262,3 +262,203 @@ func TestChooseCoarsePlanHardwareRatio(t *testing.T) {
 		}
 	}
 }
+
+// nonLinearExpoCam wraps expoCam with an optional per-channel brightness curve
+// override so tests can simulate real LED droop / low-code boost where the
+// physical driver differs from ledDrive(code).
+type nonLinearExpoCam struct {
+	*expoCam
+	curve func(ch, code int) float64
+}
+
+func (c *nonLinearExpoCam) Shoot(ctx context.Context, ch int, phase string) (*Image, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	on, v := c.Synth.Lights()
+	lv := 0.0
+	if on[ch] {
+		lv = c.baseGain[ch] * c.curve(ch, v[ch]) * (c.us / c.ref)
+	}
+	im := &Image{W: 20, H: 20, V: make([]float32, 400), Clip: make([]bool, 400)}
+	for i := range im.V {
+		val := lv
+		if val >= 1 {
+			val = 1
+			im.Clip[i] = true
+		}
+		im.V[i] = float32(val)
+	}
+	return im, nil
+}
+
+func runHardwareScenario(t *testing.T, name string, startUS float64, gain [3]float64, tol float64, curve func(ch, code int) float64) Result {
+	t.Helper()
+	d, c := setup(t)
+	syn := NewSynth(d.Lights)
+	syn.Gain = gain
+	baseCam := &expoCam{Synth: syn, us: startUS, ref: startUS, baseGain: syn.Gain}
+	var cam VariableExposure = baseCam
+	if curve != nil {
+		cam = &nonLinearExpoCam{expoCam: baseCam, curve: curve}
+	}
+	res, err := Run(context.Background(), simLight{c}, cam, Params{
+		Target:  0.50,
+		Tol:     tol,
+		MaxIter: 10,
+		Settle:  time.Millisecond,
+		Start:   [3]int{50, 50, 50},
+	}, [3]bool{true, true, true}, func(s string) { t.Logf("[%s tol=%.0f%%] %s", name, tol*100, s) })
+	if err != nil {
+		t.Fatalf("%s (tol %.1f%%): %v", name, tol*100, err)
+	}
+	if !res.Converged() {
+		t.Fatalf("%s (tol %.1f%%) did not converge: %v (exposure %.0f -> %.0f us, values %v, post %v, fit %s)",
+			name, tol*100, res.Problems(), res.Fit.StartedUS, res.Fit.FinalUS, res.Values, res.Post, res.Fit.Reason)
+	}
+	for ch, code := range res.Values {
+		if code < 1 || code > 100 {
+			t.Fatalf("%s: channel %c code %d out of 1..100", name, "RGB"[ch], code)
+		}
+	}
+	worst := 0.0
+	for ch, v := range res.Post {
+		e := math.Abs(v/0.50 - 1)
+		if e > worst {
+			worst = e
+		}
+		if e > tol {
+			t.Fatalf("%s: %c reading %.5f exceeds %.1f%% tol (values %v, %.0f us)",
+				name, "RGB"[ch], v, tol*100, res.Values, res.Fit.FinalUS)
+		}
+	}
+	t.Logf("SCENARIO_SUMMARY name=%q tol=%.1f%% start_us=%.0f final_us=%.0f values=R%d/G%d/B%d post=%.5f/%.5f/%.5f worst=%.3f%% rounds=%d",
+		name, tol*100, startUS, res.Fit.FinalUS, res.Values[0], res.Values[1], res.Values[2],
+		res.Post[0], res.Post[1], res.Post[2], worst*100, res.Rounds)
+	return res
+}
+
+func TestRegression_V107DimGBAt10000us(t *testing.T) {
+	// Exact v1.07 real-hardware numbers back-calculated to startUS = 10000 us:
+	// at 9269 us, G@100 = 0.44215 FS, B@100 = 0.43360 FS, R@13 ~= 0.500 FS.
+	// So at 10000 us: G@100 = 0.47702 FS, B@100 = 0.46780 FS, R@13 ~= 0.5394 FS.
+	// Exposure MUST go UP (never down below 10000 us) so G and B stay <= 100.
+	const startUS = 10000.0
+	gain := [3]float64{
+		0.50 * (10000.0 / 9269.0) / ledDrive(13),
+		0.44215 * (10000.0 / 9269.0) / ledDrive(100),
+		0.43360 * (10000.0 / 9269.0) / ledDrive(100),
+	}
+	for _, tol := range []float64{0.01, 0.02} {
+		res := runHardwareScenario(t, "v1.07_dimGB_10000us", startUS, gain, tol, nil)
+		if res.Fit.FinalUS <= startUS {
+			t.Fatalf("tol %.0f%%: exposure must increase above %.0f us when G/B are below target at 100, got %.0f us",
+				tol*100, startUS, res.Fit.FinalUS)
+		}
+	}
+}
+
+func TestRegression_V107DimGBHotLowRedNonLinear(t *testing.T) {
+	// Same setup at 10000 us, but R at low codes (<= 20) runs 12% hotter than
+	// ledDrive predicts (realistic LED PWM nonlinearity near low codes).
+	// v1.07 dropped exposure to ~9269 us during confirm-trim to put R on target,
+	// leaving G and B stranded below 0.50 at code 100. v1.08 must step R down
+	// instead and raise exposure above 10000 us.
+	const startUS = 10000.0
+	gain := [3]float64{
+		0.50 / ledDrive(13),
+		0.44215 * (10000.0 / 9269.0) / ledDrive(100),
+		0.43360 * (10000.0 / 9269.0) / ledDrive(100),
+	}
+	curve := func(ch, code int) float64 {
+		base := ledDrive(code)
+		if ch == 0 && code <= 20 {
+			// Extra +12% around code 10-15 fading to 0 by code 25.
+			return base * 1.12
+		}
+		return base
+	}
+	for _, tol := range []float64{0.01, 0.02} {
+		res := runHardwareScenario(t, "v1.07_hotLowRed_10000us", startUS, gain, tol, curve)
+		if res.Fit.FinalUS <= startUS {
+			t.Fatalf("tol %.0f%%: exposure must go UP above %.0f us even with hot low-code R, got %.0f us",
+				tol*100, startUS, res.Fit.FinalUS)
+		}
+	}
+}
+
+func TestRegression_R7G85B86_11567us(t *testing.T) {
+	// Earlier hardware scenario: R~7, G~85, B~86 at 11567 us (v1.06 2.489% miss).
+	const startUS = 11567.0
+	gain := [3]float64{
+		0.48756 / ledDrive(7),
+		0.49805 / ledDrive(85),
+		0.50172 / ledDrive(86),
+	}
+	for _, tol := range []float64{0.01, 0.02} {
+		runHardwareScenario(t, "R7G85B86_11567us", startUS, gain, tol, nil)
+	}
+}
+
+func TestRegression_R5G68B67_14289us(t *testing.T) {
+	// Earlier hardware scenario: R~5, G~68, B~67 at 14289 us.
+	const startUS = 14289.0
+	gain := [3]float64{
+		0.50 / ledDrive(5),
+		0.50 / ledDrive(68),
+		0.50 / ledDrive(67),
+	}
+	for _, tol := range []float64{0.01, 0.02} {
+		runHardwareScenario(t, "R5G68B67_14289us", startUS, gain, tol, nil)
+	}
+}
+
+func TestChooseCoarsePlanNeverDropsBelowDimFloor(t *testing.T) {
+	cur := 10000.0
+	pts := [3][]probePt{
+		{{code: 13, level: 0.54}, {code: 25, level: 0.92}},
+		{{code: 100, level: 0.477}},
+		{{code: 100, level: 0.468}},
+	}
+	plan, ok := chooseCoarsePlan(cur, pts, 0.50)
+	if !ok {
+		t.Fatal("expected coarse plan")
+	}
+	usDim100, _, _, _, _, okB := exposureBounds(cur, pts, 0.50)
+	if !okB {
+		t.Fatal("expected bounds")
+	}
+	if plan.us < usDim100*0.999 {
+		t.Fatalf("plan exposure %.0f us dropped below dim-channel floor %.0f us", plan.us, usDim100)
+	}
+	if plan.floorUS < usDim100*0.999 {
+		t.Fatalf("plan floorUS %.0f us below dim-channel floor %.0f us", plan.floorUS, usDim100)
+	}
+}
+
+func TestSolverRecoveryRaisesExposureWhenGBLimitedMidSolve(t *testing.T) {
+	// Simulate a non-linear G/B channel that is slightly dimmer near code 100
+	// than expected from mid-codes, so the solver initially picks an exposure
+	// where G/B hit code 100 Limited during solving and must raise exposure.
+	const startUS = 10000.0
+	gain := [3]float64{
+		0.50 / ledDrive(13),
+		0.50 / ledDrive(92),
+		0.50 / ledDrive(92),
+	}
+	curve := func(ch, code int) float64 {
+		base := ledDrive(code)
+		if ch > 0 && code >= 80 {
+			// Thermal droop near high duty cycle: 14% dimmer at 80..100.
+			return base * 0.86
+		}
+		return base
+	}
+	for _, tol := range []float64{0.01, 0.02} {
+		res := runHardwareScenario(t, "solver_droop_GB_10000us", startUS, gain, tol, curve)
+		if res.Fit.FinalUS <= startUS {
+			t.Fatalf("tol %.0f%%: expected exposure > %.0f us after mid-solve recovery, got %.0f us",
+				tol*100, startUS, res.Fit.FinalUS)
+		}
+	}
+}

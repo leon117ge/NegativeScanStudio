@@ -118,3 +118,54 @@ func TestEVScale(t *testing.T) {
 		t.Fatalf("EVScale 0/2/3 = %v %v %v", EVScale(0), EVScale(2), EVScale(3))
 	}
 }
+
+func TestMergeMonoBracketThreeEVSteps(t *testing.T) {
+	if EVScale(0) != 1 || EVScale(2) != 4 || EVScale(3) != 8 {
+		t.Fatalf("unexpected EVScale: 0=%v 2=%v 3=%v", EVScale(0), EVScale(2), EVScale(3))
+	}
+	const w, h = 64, 48
+	mkFrame := func(scale float64) MonoPlane {
+		p := make([]uint16, w*h)
+		for y := 0; y < h; y++ {
+			for x := 0; x < w; x++ {
+				// Half clear base (~8000 at +0EV), half dense negative (~1500 at +0EV)
+				base := 8000.0
+				if x >= w/2 {
+					base = 1500.0
+				}
+				v := base * scale
+				if v > 65535 {
+					v = 65535
+				}
+				p[y*w+x] = uint16(v + 0.5)
+			}
+		}
+		return MonoPlane{W: w, H: h, Pix: p}
+	}
+	f0 := mkFrame(EVScale(0))
+	f2 := mkFrame(EVScale(2))
+	f3 := mkFrame(EVScale(3))
+	o := ProcessOptions{
+		Merge:    DefaultOptions(),
+		Software: "NegativeScan Studio test",
+		Metadata: scanmeta.Metadata{Mode: "test", Encoding: "linear"},
+	}
+	o.Merge.Align = AlignOff
+	o.Merge.MinSamples = 100
+	got, err := MergeMonoBracket([]MonoPlane{f0, f2, f3}, []int{0, 2, 3}, o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.W != w || got.H != h || len(got.Pix) != w*h {
+		t.Fatalf("merged size %dx%d n=%d", got.W, got.H, len(got.Pix))
+	}
+	// Clear base side (left) must stay near frame 0's 8000, dense side (right) near 1500.
+	left := float64(got.Pix[(h/2)*w+(w/4)])
+	right := float64(got.Pix[(h/2)*w+(3*w/4)])
+	if math.Abs(left-8000) > 400 {
+		t.Fatalf("merged clear-base sample %.0f, want ~8000", left)
+	}
+	if math.Abs(right-1500) > 200 {
+		t.Fatalf("merged dense sample %.0f, want ~1500", right)
+	}
+}

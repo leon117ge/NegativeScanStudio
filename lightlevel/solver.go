@@ -288,6 +288,11 @@ func Run(ctx context.Context, l Light, cam Camera, p Params, restore [3]bool, pr
 	selectArea := p.SelectArea
 	current := p.Start
 	if res.Fit.HasCoarse && res.Fit.CoarseCode >= 1 && res.Fit.CoarseCh >= 0 && res.Fit.CoarseCh < 3 {
+		for c := 0; c < 3; c++ {
+			if res.Fit.StartCodes[c] >= 1 && res.Fit.StartCodes[c] <= 100 {
+				current[c] = res.Fit.StartCodes[c]
+			}
+		}
 		current[res.Fit.CoarseCh] = res.Fit.CoarseCode
 	}
 	reason := "round limit reached"
@@ -373,6 +378,89 @@ func Run(ctx context.Context, l Light, cam Camera, p Params, restore [3]bool, pr
 			next[c] = n
 			say("%c %d -> %d: %s", "RGB"[c], code, n, note)
 		}
+		anyLimited := res.Limited[0] || res.Limited[1] || res.Limited[2]
+		anyTooBright := res.TooBright[0] || res.TooBright[1] || res.TooBright[2]
+		if anyLimited && anyTooBright {
+			break
+		}
+		resetForExposure := func(newUS float64, coarseCh, coarseCode int, startCodes [3]int, fitReason string) {
+			startUS := res.Fit.StartedUS
+			if startUS <= 0 {
+				startUS = newUS
+			}
+			res.Fit.StartedUS = startUS
+			res.Fit.FinalUS, res.Fit.FinalGain = newUS, 0
+			res.Fit.Changed = math.Abs(newUS-startUS) > 0.5
+			res.Fit.HasCoarse = coarseCh >= 0 && coarseCh < 3 && coarseCode >= 1
+			res.Fit.CoarseCh, res.Fit.CoarseCode = coarseCh, coarseCode
+			res.Fit.StartCodes = startCodes
+			res.Fit.Reason = fitReason
+			for c := 0; c < 3; c++ {
+				if startCodes[c] >= 1 && startCodes[c] <= 100 {
+					current[c] = startCodes[c]
+				}
+			}
+			if res.Fit.HasCoarse {
+				current[coarseCh] = coarseCode
+			}
+			for c := range history {
+				history[c] = make(response)
+			}
+			res.Limited, res.TooBright, res.Needed, res.Boundary = [3]bool{}, [3]bool{}, [3]float64{}, [3]float64{}
+			refits++
+			reason = "round limit reached"
+		}
+		if vc != nil && (anyLimited || anyTooBright) && round < p.MaxIter && refits < 4 {
+			curUS, _ := vc.GetExposure()
+			fit, ferr := fitCommonExposureSeeded(ctx, l, vc, p, say, historyPoints(history))
+			if ferr != nil {
+				return res, ferr
+			}
+			newUS, _ := vc.GetExposure()
+			if anyLimited && newUS <= curUS*1.005 {
+				needUS := curUS
+				for c := 0; c < 3; c++ {
+					if res.Limited[c] && res.Boundary[c] > 1e-9 {
+						cand := clampExposureUS(curUS * target[c] / res.Boundary[c] * (ledDrive(100) / ledDrive(FitHeadroomMax)))
+						if cand > needUS {
+							needUS = cand
+						}
+					}
+				}
+				if needUS > curUS*1.005 {
+					if serr := vc.SetExposure(needUS, 0); serr != nil {
+						return res, serr
+					}
+					newUS, _ = vc.GetExposure()
+					fit.FinalUS = newUS
+					fit.Reason = fmt.Sprintf("raised common exposure to %.0f us because channel(s) were too dark at code 100 (gain 0 dB)", newUS)
+				}
+			} else if anyTooBright && newUS >= curUS*0.995 {
+				needUS := curUS
+				for c := 0; c < 3; c++ {
+					if res.TooBright[c] && res.Boundary[c] > 1e-9 {
+						cand := clampExposureUS(curUS * target[c] / res.Boundary[c] * (ledDrive(1) / ledDrive(10)))
+						if cand < needUS {
+							needUS = cand
+						}
+					}
+				}
+				if needUS < curUS*0.995 {
+					if serr := vc.SetExposure(needUS, 0); serr != nil {
+						return res, serr
+					}
+					newUS, _ = vc.GetExposure()
+					fit.FinalUS = newUS
+					fit.Reason = fmt.Sprintf("lowered common exposure to %.0f us because channel(s) were too bright at code 1 (gain 0 dB)", newUS)
+				}
+			}
+			if math.Abs(newUS-curUS) > 0.5 {
+				say("Bound hit at %.0f us; re-fit common exposure to %.0f us and re-leveling.", curUS, newUS)
+				resetForExposure(newUS, fit.CoarseCh, fit.CoarseCode, fit.StartCodes, fit.Reason)
+				continue
+			}
+			break
+		}
 		if frozen == 3 {
 			break
 		}
@@ -383,29 +471,95 @@ func Run(ctx context.Context, l Light, cam Camera, p Params, restore [3]bool, pr
 			if vc != nil && frozen == 0 && round < p.MaxIter && refits < 4 {
 				ch, ok := coarsestOffTarget(current, history, res.Post, p.Target, p.Tol)
 				if ok {
+					curUS, _ := vc.GetExposure()
+					pts := historyPoints(history)
+					usDim100, _, usBright1, _, _, hasBounds := exposureBounds(curUS, pts, p.Target)
+					minUS := usDim100
+					for o := 0; o < 3; o++ {
+						if o == ch {
+							continue
+						}
+						if sO, hasO := history[o][current[o]]; hasO && sO.reading.Level > 1e-9 {
+							oMin := clampExposureUS(curUS * target[o] / (sO.reading.Level * ledDrive(100) / ledDrive(current[o])))
+							if oMin > minUS {
+								minUS = oMin
+								hasBounds = true
+							}
+						}
+					}
+					maxUS := usBright1
+					if !hasBounds || maxUS <= 0 {
+						maxUS = MaxExposureUS
+					}
 					s := history[ch][current[ch]]
-					newUS, changed, ferr := trimExposureToReading(vc, s.reading.Level, target[ch])
+					wantUS := clampExposureUS(curUS * target[ch] / math.Max(s.reading.Level, 1e-9))
+					if hasBounds && wantUS < minUS*0.999 && current[ch] > 1 {
+						targetCode := current[ch] - 1
+						newUS := clampExposureUS(minUS)
+						if est, okEst := estimateLevel(pts[ch], targetCode); okEst && est > 1e-9 {
+							cand := clampExposureUS(curUS * target[ch] / est)
+							if cand > newUS {
+								newUS = cand
+							}
+						}
+						if maxUS >= minUS && newUS > maxUS {
+							newUS = clampExposureUS(maxUS)
+						}
+						if math.Abs(newUS-curUS) > 0.5 {
+							if serr := vc.SetExposure(newUS, 0); serr != nil {
+								return res, serr
+							}
+							gotUS, _ := vc.GetExposure()
+							var startCodes [3]int
+							for c := 0; c < 3; c++ {
+								if c == ch {
+									startCodes[c] = targetCode
+								} else if n, okN := neededCodeAt(pts[c], curUS, gotUS, target[c]); okN {
+									k := int(math.Round(n))
+									if k < 1 {
+										k = 1
+									}
+									if k > 100 {
+										k = 100
+									}
+									startCodes[c] = k
+								} else {
+									startCodes[c] = current[c]
+								}
+							}
+							say("Stepping %c from %d to %d and raising exposure from %.0f to %.0f us to keep dim channels inside code 100.",
+								"RGB"[ch], current[ch], targetCode, curUS, gotUS)
+							resetForExposure(gotUS, ch, targetCode, startCodes,
+								fmt.Sprintf("stepped %c to code %d and set common exposure to %.0f us so all channels stay reachable (gain 0 dB)", "RGB"[ch], targetCode, gotUS))
+							continue
+						}
+					}
+					newUS, changed, ferr := trimExposureToReading(vc, s.reading.Level, target[ch], minUS, maxUS)
 					if ferr != nil {
 						return res, ferr
 					}
 					if changed {
-						startUS := res.Fit.StartedUS
-						if startUS <= 0 {
-							startUS, _ = vc.GetExposure()
+						var startCodes [3]int
+						for c := 0; c < 3; c++ {
+							if c == ch {
+								startCodes[c] = current[ch]
+							} else if n, okN := neededCodeAt(pts[c], curUS, newUS, target[c]); okN {
+								k := int(math.Round(n))
+								if k < 1 {
+									k = 1
+								}
+								if k > 100 {
+									k = 100
+								}
+								startCodes[c] = k
+							} else {
+								startCodes[c] = current[c]
+							}
 						}
-						res.Fit.StartedUS = startUS
-						res.Fit.FinalUS, res.Fit.FinalGain, res.Fit.Changed = newUS, 0, true
-						res.Fit.HasCoarse, res.Fit.CoarseCh, res.Fit.CoarseCode = true, ch, current[ch]
-						res.Fit.Reason = fmt.Sprintf("fine-tuned common exposure to %.0f us so %c lands on target at light code %d; the other channels are then re-leveled (gain 0 dB)",
-							newUS, "RGB"[ch], current[ch])
-						refits++
 						say("Integer step is too coarse on %c at code %d (%.5f FS); fine-tuned exposure to %.0f us so %c is on target, then re-leveling the other channels.",
 							"RGB"[ch], current[ch], s.reading.Level, newUS, "RGB"[ch])
-						for c := range history {
-							history[c] = make(response)
-						}
-						res.Limited, res.TooBright, res.Needed, res.Boundary = [3]bool{}, [3]bool{}, [3]float64{}, [3]float64{}
-						reason = "round limit reached"
+						resetForExposure(newUS, ch, current[ch], startCodes,
+							fmt.Sprintf("fine-tuned common exposure to %.0f us so %c lands on target at light code %d; the other channels are then re-leveled (gain 0 dB)", newUS, "RGB"[ch], current[ch]))
 						continue
 					}
 				}

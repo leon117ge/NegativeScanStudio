@@ -164,9 +164,12 @@ func (u *MonoUI) updateButtons() {
 		}
 		u.why = why
 	}
+	if u.brCB != nil {
+		u.brCB.SetEnabled(!u.running && u.capModeCB != nil && u.capModeCB.CurrentIndex() == 1)
+	}
 	if u.whyLbl != nil {
 		if why == "" {
-			setStatusWide(u.whyLbl, "READY - press Capture for R, then G, then B. Exposure is metered automatically per channel.")
+			setStatusWide(u.whyLbl, u.readyStatusText())
 		} else {
 			setStatusWide(u.whyLbl, "Capture disabled: "+why)
 		}
@@ -394,9 +397,9 @@ func (u *MonoUI) onPresetChanged() {
 	}
 	if u.presetCB.CurrentIndex() == 1 {
 		u.fillBestScanUI()
-		u.say("Preset: Best scan quality (MV-CS240-90UM). Press Capture — exposure is metered automatically per R, G and B so highlights do not clip.")
+		u.say("Preset: Best scan quality (MV-CS240-90UM). R, G and B use the shared exposure (gain 0 dB) unless Auto-meter each channel is checked.")
 	} else if u.presetTip != nil {
-		u.presetTip.SetText("Custom camera settings. Capture still meters each channel so highlights do not clip; use Best scan quality for the recommended MV-CS240-90UM film-scan values.")
+		u.presetTip.SetText("Custom camera settings. R, G and B still use the shared exposure (or per-channel auto-metering if checked); use Best scan quality for the recommended MV-CS240-90UM film-scan values.")
 	}
 	u.updateCaptureLabel()
 }
@@ -412,21 +415,45 @@ func (u *MonoUI) captureEVs() []int {
 	return []int{0}
 }
 
-func (u *MonoUI) updateCaptureLabel() {
-	if u.capBtn == nil {
-		return
-	}
+func (u *MonoUI) readyStatusText() string {
 	evs := u.captureEVs()
-	text := "Capture mono trichrome  (R, G, B"
+	meterEach := u.hdr != nil && u.hdr.hikMeterEach()
 	if len(evs) > 1 {
-		text = "Capture mono trichrome HDR  (R, G, B x " + evText(evs)
+		if meterEach {
+			return fmt.Sprintf("READY - HDR (%s) for R, G, B. Auto-meter each channel is ON (each channel meters separately from %.0f us, then HDR brackets).", evText(evs), u.hdr.sharedHikExposure())
+		}
+		baseUS := hikbase.DefaultExposureUS
+		if u.hdr != nil {
+			baseUS = u.hdr.sharedHikExposure()
+		}
+		return fmt.Sprintf("READY - HDR (%s) for R, G, B. All channels use the shared exposure (%.0f us, 0 dB) plus HDR EV offsets.", evText(evs), baseUS)
 	}
-	if u.hdr != nil && u.hdr.hikMeterEach() {
-		text += "; auto-meter each channel)"
-	} else {
-		text += "; shared exposure)"
+	if meterEach {
+		return "READY - Single frame per channel (R, G, B). Auto-meter each channel is ON (each channel meters separately)."
 	}
-	u.capBtn.SetText(text)
+	return "READY - Single frame per channel (R, G, B). All channels use the shared exposure (gain 0 dB)."
+}
+
+func (u *MonoUI) updateCaptureLabel() {
+	evs := u.captureEVs()
+	if u.brCB != nil {
+		u.brCB.SetEnabled(!u.running && u.capModeCB != nil && u.capModeCB.CurrentIndex() == 1)
+	}
+	if u.capBtn != nil {
+		text := "Capture mono trichrome  (R, G, B"
+		if len(evs) > 1 {
+			text = "Capture mono trichrome HDR  (R, G, B x " + evText(evs)
+		}
+		if u.hdr != nil && u.hdr.hikMeterEach() {
+			text += "; auto-meter each channel)"
+		} else {
+			text += "; shared exposure)"
+		}
+		u.capBtn.SetText(text)
+	}
+	if u.whyLbl != nil && u.reason() == "" {
+		setStatusWide(u.whyLbl, u.readyStatusText())
+	}
 }
 
 func (u *MonoUI) startPreview() {
@@ -623,7 +650,11 @@ func (u *MonoUI) capture() {
 		vals[0], vals[1], vals[2], src, settle, correct, evs))
 	u.say(hikbase.CaptureLog(meterEach, baseUS, snap, vals))
 	if u.repTE != nil {
-		u.repTE.SetText("Capturing R, G, B ...")
+		if len(evs) > 1 {
+			u.repTE.SetText(fmt.Sprintf("Capturing R, G, B HDR (%s) ...", evText(evs)))
+		} else {
+			u.repTE.SetText("Capturing R, G, B (single frame per channel) ...")
+		}
 	}
 	if u.pb != nil {
 		u.pb.SetMarqueeMode(true)
@@ -636,6 +667,7 @@ func (u *MonoUI) capture() {
 	}
 	done := make(chan result, 1)
 	go func() {
+		captureStart := time.Now()
 		var res result
 		defer func() { done <- res }()
 		var before rgblight.State
@@ -724,7 +756,7 @@ func (u *MonoUI) capture() {
 					res.err = fmt.Errorf("%s +%d EV apply: %w", hdrscan.TriTags[ch], ev, err)
 					return
 				}
-				fr, err := cam.Grab(8 * time.Second)
+				fr, err := cam.Grab(hikcam.GrabTimeout(evSt.ExposureUS))
 				if err != nil {
 					res.err = fmt.Errorf("%s +%d EV grab: %w", hdrscan.TriTags[ch], ev, err)
 					return
@@ -733,12 +765,20 @@ func (u *MonoUI) capture() {
 				gotEVs = append(gotEVs, ev)
 				u.ui(func() {
 					u.say(fmt.Sprintf("Captured %s +%d EV: %dx%d %s (%.0f us)", hdrscan.TriTags[ch], ev, fr.W, fr.H, fr.PixelFormat, fr.ExposureUS))
+					if u.repTE != nil {
+						u.repTE.SetText(fmt.Sprintf("Captured %s +%d EV (%.0f us) ...", hdrscan.TriTags[ch], ev, fr.ExposureUS))
+					}
 				})
 			}
 			_ = cam.Apply(st)
 			if len(frames) == 1 {
 				planes[ch] = frames[0]
 			} else {
+				u.ui(func() {
+					if u.repTE != nil {
+						u.repTE.SetText(fmt.Sprintf("Merging %s HDR (%s) ...", hdrscan.TriTags[ch], evText(gotEVs)))
+					}
+				})
 				merged, err := hdrscan.MergeMonoBracket(frames, gotEVs, po)
 				if err != nil {
 					res.err = fmt.Errorf("%s HDR merge: %w", hdrscan.TriTags[ch], err)
@@ -784,7 +824,8 @@ func (u *MonoUI) capture() {
 		}
 		res.path = r.Out
 		res.report = r.Report
-		res.ms = time.Since(t0).Seconds()
+		res.ms = time.Since(captureStart).Seconds()
+		_ = t0
 	}()
 	go func() {
 		res := <-done
@@ -801,7 +842,11 @@ func (u *MonoUI) capture() {
 					u.repTE.SetText(msg)
 				}
 			} else {
-				msg := fmt.Sprintf("Saved %s  (%.1f s)\r\n%s", res.path, res.ms, res.report.String())
+				modeTag := "Single"
+				if len(evs) > 1 {
+					modeTag = "HDR " + evText(evs)
+				}
+				msg := fmt.Sprintf("Saved %s  (%s, %.1f s)\r\n%s", res.path, modeTag, res.ms, res.report.String())
 				u.say(strings.ReplaceAll(msg, "\r\n", " | "))
 				if u.repTE != nil {
 					u.repTE.SetText(msg)
@@ -943,12 +988,12 @@ func (u *MonoUI) Page() TabPage {
 								ToolTipText:           "HDR reuses the White light / Trichrome bracket list (0/+2 or 0/+2/+3), merge method, alignment and LZW options. Each R, G and B channel captures the bracket on the mono camera, merges to linear, then CA correction and the trichrome merge run as usual.",
 								OnCurrentIndexChanged: u.updateCaptureLabel},
 							Label{Text: "HDR bracket"},
-							ComboBox{AssignTo: &u.brCB, Model: bracketItems, CurrentIndex: 0,
-								ToolTipText:           "Same presets as White light scan and Trichrome: 0 / +2 EV or 0 / +2 / +3 EV. Used only when Mode is HDR.",
+							ComboBox{AssignTo: &u.brCB, Model: bracketItems, CurrentIndex: 0, Enabled: false,
+								ToolTipText:           "Same presets as White light scan and Trichrome: 0 / +2 EV or 0 / +2 / +3 EV. Active only when Mode is HDR.",
 								OnCurrentIndexChanged: u.updateCaptureLabel},
 						}},
 						Composite{Layout: HBox{MarginsZero: true, Spacing: 6}, Children: []Widget{
-							PushButton{AssignTo: &u.capBtn, Text: "Capture mono trichrome  (R, G, B; auto exposure)", Enabled: false,
+							PushButton{AssignTo: &u.capBtn, Text: "Capture mono trichrome  (R, G, B; shared exposure)", Enabled: false,
 								MinSize: Size{Height: 34}, StretchFactor: 3,
 								Font: Font{Family: "Segoe UI", PointSize: 10, Bold: true}, OnClicked: u.capture},
 							PushButton{AssignTo: &u.stopBtn, Text: "Stop", Enabled: false, MinSize: Size{Height: 34}, StretchFactor: 1,
