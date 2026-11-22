@@ -117,9 +117,16 @@ func (u *FocusUI) enter() {
 		u.savedHik = u.mono.readSettings()
 		u.haveSavedHik = true
 		u.aeState = hdrscan.ExposureState{ExposureUS: u.savedHik.ExposureUS, GainDB: u.savedHik.GainDB}
+		// Clamp to the live shutter/gain cap so a leftover multi-second
+		// still exposure cannot be applied to the stream.
+		u.aeState, _ = hdrscan.AdjustExposure(nil, u.aeState, hdrscan.LiveAutoExp())
+		u.aeWhy = ""
 		u.mono.stopPreview()
 		if err := u.mono.applyLive(true); err != nil {
 			u.say("Live settings: " + err.Error())
+		} else if u.mono.cam != nil {
+			_ = u.mono.cam.SetExposureGain(u.aeState.ExposureUS, u.aeState.GainDB)
+			u.say("Live view: " + u.mono.cam.Settings().LiveSummary())
 		}
 	} else {
 		u.haveSavedHik = false
@@ -287,21 +294,39 @@ func (u *FocusUI) startLoop() {
 
 func (u *FocusUI) stopLoop() {
 	u.loopOn.Store(false)
-	for i := 0; i < 40 && u.loopRun.Load(); i++ {
+	for i := 0; i < 80 && u.loopRun.Load(); i++ {
 		time.Sleep(50 * time.Millisecond)
 	}
 }
 
 func (u *FocusUI) loop() {
 	defer u.loopRun.Store(false)
-	cfg := hdrscan.DefaultAutoExp()
+	cfg := hdrscan.LiveAutoExp()
+	misses := 0
 	for u.loopOn.Load() && u.active {
 		pix, w, h, err := u.grabFrame()
-		if err != nil {
-			u.ui(func() { u.say("Live: " + err.Error()) })
-			time.Sleep(200 * time.Millisecond)
+		if err != nil || pix == nil || w <= 0 || h <= 0 || len(pix) < w*h {
+			if err == nil {
+				err = fmt.Errorf("empty frame")
+			}
+			misses++
+			msg, log := liveGrabMessage(err, misses)
+			u.mu.Lock()
+			u.aeWhy = "waiting for a frame"
+			u.mu.Unlock()
+			if log {
+				m := msg
+				u.ui(func() {
+					u.say(m)
+					u.updateLabels()
+				})
+			} else {
+				u.ui(func() { u.updateLabels() })
+			}
+			time.Sleep(50 * time.Millisecond)
 			continue
 		}
+		misses = 0
 		u.mu.Lock()
 		u.lastPix, u.lastW, u.lastH = pix, w, h
 		u.mu.Unlock()
@@ -317,14 +342,19 @@ func (u *FocusUI) loop() {
 		crop, cw, ch := hdrscan.CropGray16ToFloat64(pix, w, h, x0, y0, x1, y1)
 		score := hdrscan.MeasureFocus(crop, cw, ch)
 		state, why := hdrscan.AdjustExposure(samples, u.aeState, cfg)
-		u.applyAE(state)
+		if err := u.applyAE(state); err != nil {
+			u.ui(func() { u.say("Live exposure: " + err.Error()) })
+		} else {
+			u.mu.Lock()
+			u.aeWhy = why
+			u.aeState = state
+			u.mu.Unlock()
+		}
 		u.mu.Lock()
 		u.samples = samples
 		u.visW, u.visH = cw, ch
 		u.score = score
 		u.peak.Update(score.Combined)
-		u.aeWhy = why
-		u.aeState = state
 		u.mu.Unlock()
 		u.ui(func() { u.updateLabels() })
 		if u.mono != nil && u.mono.cam != nil && u.mono.cam.Info().Simulated {
@@ -335,11 +365,26 @@ func (u *FocusUI) loop() {
 	}
 }
 
+func liveGrabMessage(err error, misses int) (string, bool) {
+	if hikcam.IsNoData(err) {
+		if misses == 1 || misses%20 == 0 {
+			return fmt.Sprintf("Live: waiting for a frame (GetImageBuffer timeout, x%d)", misses), true
+		}
+		return "", false
+	}
+	if misses == 1 || misses%10 == 0 {
+		return "Live: " + err.Error(), true
+	}
+	return "", false
+}
+
 func (u *FocusUI) grabFrame() ([]uint16, int, int, error) {
 	if u.mono != nil && u.mono.cam != nil {
 		cam := u.mono.cam
-		_ = cam.StartGrab()
-		fr, err := cam.Grab(300 * time.Millisecond)
+		if err := cam.StartGrab(); err != nil {
+			return nil, 0, 0, err
+		}
+		fr, err := cam.Grab(hikcam.GrabTimeout(cam.Settings().ExposureUS))
 		if err != nil {
 			return nil, 0, 0, err
 		}
@@ -394,19 +439,16 @@ func (u *FocusUI) meterRect(w, h int) (x0, y0, x1, y1 int) {
 	return u.visibleRectAt(w, h, 640, 400, z)
 }
 
-func (u *FocusUI) applyAE(st hdrscan.ExposureState) {
+func (u *FocusUI) applyAE(st hdrscan.ExposureState) error {
 	if u.mono != nil && u.mono.cam != nil {
 		cur := u.mono.cam.Settings()
 		if math.Abs(cur.ExposureUS-st.ExposureUS)/math.Max(cur.ExposureUS, 1) < 0.04 && math.Abs(cur.GainDB-st.GainDB) < 0.15 {
-			return
+			return nil
 		}
-		cur.ExposureUS = st.ExposureUS
-		cur.GainDB = st.GainDB
-		_ = u.mono.cam.Apply(cur)
-		return
+		return u.mono.cam.SetExposureGain(st.ExposureUS, st.GainDB)
 	}
 	if u.hdr == nil || u.hdr.dev == nil {
-		return
+		return nil
 	}
 	// Map the suggested microseconds onto the nearest Fujifilm shutter step.
 	us := uint32(math.Max(1, st.ExposureUS))
@@ -417,9 +459,10 @@ func (u *FocusUI) applyAE(st hdrscan.ExposureState) {
 	}
 	cur, err := u.hdr.dev.Exposure()
 	if err == nil && cur.Shutter == next.Shutter && cur.ISO == next.ISO {
-		return
+		return nil
 	}
-	_, _ = u.hdr.dev.SetExposure(next)
+	_, err = u.hdr.dev.SetExposure(next)
+	return err
 }
 
 func (u *FocusUI) ui(f func()) {

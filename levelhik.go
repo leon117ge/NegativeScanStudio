@@ -232,21 +232,29 @@ func (u *LightUI) startHikPreview() {
 		}
 		if err := d.Apply(hikcam.LiveViewSettings(d.Settings(), 2)); err != nil {
 			u.log("Hikrobot live settings: %v", err)
+		} else {
+			u.log("Live view: %s", d.Settings().LiveSummary())
 		}
 		if err := d.StartGrab(); err != nil {
 			u.log("Hikrobot preview grab: %v", err)
 			return
 		}
 		var posting atomic.Bool
+		misses := 0
 		for u.hikPrevGen.Load() == gen {
-			fr, err := d.Grab(300 * time.Millisecond)
+			fr, err := d.Grab(hikcam.GrabTimeout(d.Settings().ExposureUS))
 			if err != nil {
 				if u.hikPrevGen.Load() != gen {
 					return
 				}
+				misses++
+				if msg, log := liveGrabMessage(err, misses); log {
+					u.log("%s", msg)
+				}
 				time.Sleep(50 * time.Millisecond)
 				continue
 			}
+			misses = 0
 			img := hikcam.PreviewGray(fr.Pix, fr.W, fr.H, hikcam.LivePreviewMaxEdge)
 			what := fmt.Sprintf("Hikrobot live  %dx%d  %s  %.0f us", fr.W, fr.H, fr.PixelFormat, fr.ExposureUS)
 			if posting.CompareAndSwap(false, true) {

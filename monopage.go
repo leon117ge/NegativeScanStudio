@@ -310,14 +310,11 @@ func (u *MonoUI) applyLive(fullRes bool) error {
 		return err
 	}
 	got := u.cam.Settings()
-	mode := "free-run Mono8"
+	extra := ""
 	if fullRes {
-		mode += ", full resolution"
-	} else if got.Binning >= 2 && got.Width > 0 && got.Width <= hikcam.CS240Width/2+32 {
-		mode += fmt.Sprintf(", %dx binning", got.Binning)
+		extra = ", full resolution"
 	}
-	u.say(fmt.Sprintf("Live view: %s, %.0f us, %.2f dB, %dx%d",
-		mode, got.ExposureUS, got.GainDB, got.Width, got.Height))
+	u.say("Live view: " + got.LiveSummary() + extra)
 	return nil
 }
 
@@ -418,15 +415,22 @@ func (u *MonoUI) startPreview() {
 	cam := u.cam
 	go func() {
 		defer u.previewRun.Store(false)
+		misses := 0
 		for u.previewOn.Load() && u.cam == cam {
-			fr, err := cam.Grab(300 * time.Millisecond)
+			fr, err := cam.Grab(hikcam.GrabTimeout(cam.Settings().ExposureUS))
 			if err != nil {
 				if !u.previewOn.Load() {
 					break
 				}
+				misses++
+				if msg, log := liveGrabMessage(err, misses); log {
+					m := msg
+					u.ui(func() { u.say(m) })
+				}
 				time.Sleep(50 * time.Millisecond)
 				continue
 			}
+			misses = 0
 			img := hikcam.PreviewGray(fr.Pix, fr.W, fr.H, hikcam.LivePreviewMaxEdge)
 			what := fmt.Sprintf("Live  %dx%d  %s  %.0f us", fr.W, fr.H, fr.PixelFormat, fr.ExposureUS)
 			if u.previewUI.CompareAndSwap(false, true) {
@@ -459,7 +463,7 @@ func (u *MonoUI) startPreview() {
 
 func (u *MonoUI) stopPreview() {
 	u.previewOn.Store(false)
-	for i := 0; i < 40 && u.previewRun.Load(); i++ {
+	for i := 0; i < 80 && u.previewRun.Load(); i++ {
 		time.Sleep(50 * time.Millisecond)
 	}
 }

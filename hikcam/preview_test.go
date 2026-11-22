@@ -1,6 +1,8 @@
 package hikcam
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -168,3 +170,71 @@ func timeAvg(t *testing.T, n int, fn func()) time.Duration {
 }
 
 func millis(d time.Duration) float64 { return float64(d) / float64(time.Millisecond) }
+
+func TestGrabTimeout(t *testing.T) {
+	short := GrabTimeout(10_000)
+	if short < time.Second {
+		t.Fatalf("10 ms exposure must wait at least 1 s, got %v", short)
+	}
+	mid := GrabTimeout(200_000)
+	if mid < 1200*time.Millisecond {
+		t.Fatalf("200 ms exposure timeout too tight: %v", mid)
+	}
+	if mid <= short {
+		t.Fatalf("timeout should grow with exposure: short %v mid %v", short, mid)
+	}
+	long := GrabTimeout(3_000_000)
+	if long < 6*time.Second {
+		t.Fatalf("3 s exposure timeout too tight: %v", long)
+	}
+	if GrabTimeout(-1) < time.Second {
+		t.Fatal("negative exposure")
+	}
+}
+
+func TestIsNoData(t *testing.T) {
+	if IsNoData(nil) {
+		t.Fatal("nil")
+	}
+	err := &Error{Code: MV_E_NODATA, Detail: "GetImageBuffer"}
+	if !IsNoData(err) {
+		t.Fatalf("typed: %v", err)
+	}
+	if !IsNoData(fmt.Errorf("MVS error 0x80000007: GetImageBuffer")) {
+		t.Fatal("string")
+	}
+	if IsNoData(fmt.Errorf("MVS error 0x8000000A: other")) {
+		t.Fatal("other")
+	}
+}
+
+func TestLiveSummary(t *testing.T) {
+	st := LiveViewSettings(BestScanQuality(), 1)
+	s := st.LiveSummary()
+	for _, w := range []string{"Mono8", "free-run", "10000 us", "6016x4096"} {
+		if !strings.Contains(s, w) {
+			t.Fatalf("missing %q in %s", w, s)
+		}
+	}
+	if strings.Contains(s, "software trigger") {
+		t.Fatalf("live summary should be free-run: %s", s)
+	}
+}
+
+func TestSimSetExposureGain(t *testing.T) {
+	s := OpenSim()
+	defer s.Close()
+	if err := s.Apply(LiveViewSettings(BestScanQuality(), 1)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetExposureGain(50_000, 3); err != nil {
+		t.Fatal(err)
+	}
+	got := s.Settings()
+	if got.ExposureUS != 50_000 || got.GainDB != 3 {
+		t.Fatalf("%+v", got)
+	}
+	if got.SoftwareTrigger || got.PixelFormat != PixelMono8 {
+		t.Fatalf("set exposure must not change live flags: %+v", got)
+	}
+}

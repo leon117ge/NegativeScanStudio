@@ -94,6 +94,18 @@ func (s *Sim) Close() error {
 	return nil
 }
 
+func (s *Sim) SetExposureGain(exposureUS, gainDB float64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return ErrNotOpen
+	}
+	s.set.ExposureUS = exposureUS
+	s.set.GainDB = gainDB
+	s.set = s.set.Clamp()
+	return nil
+}
+
 func (s *Sim) Grab(timeout time.Duration) (*Frame, error) {
 	_ = timeout
 	s.mu.Lock()

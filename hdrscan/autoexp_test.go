@@ -92,3 +92,39 @@ func TestRegionSamples(t *testing.T) {
 		t.Fatalf("got %v", s)
 	}
 }
+
+func TestLiveAutoExpCapsShutterThenRaisesGain(t *testing.T) {
+	cfg := LiveAutoExp()
+	if cfg.MaxExposureUS != LiveMaxExposureUS || cfg.MaxGainDB != LiveMaxGainDB {
+		t.Fatalf("live caps %+v", cfg)
+	}
+	// Scan metering must keep the long shutter; only Focus Check uses LiveAutoExp.
+	if DefaultAutoExp().MaxExposureUS != 10_000_000 {
+		t.Fatalf("DefaultAutoExp shutter cap changed")
+	}
+	cfg.Damping = 1
+	cfg.MaxStep = 8
+	cur := ExposureState{ExposureUS: LiveMaxExposureUS, GainDB: 0}
+	samples := make([]float64, 50)
+	for i := range samples {
+		samples[i] = 0.02
+	}
+	next, why := AdjustExposure(samples, cur, cfg)
+	if next.ExposureUS != LiveMaxExposureUS {
+		t.Fatalf("live shutter should stay at cap, got %v (%s)", next.ExposureUS, why)
+	}
+	if next.GainDB <= 0 {
+		t.Fatalf("gain should rise once live shutter is maxed, got %+v (%s)", next, why)
+	}
+	if next.GainDB > LiveMaxGainDB {
+		t.Fatalf("gain above cap: %v", next.GainDB)
+	}
+}
+
+func TestLiveAutoExpDoesNotRunAwayOnEmptySamples(t *testing.T) {
+	cur := ExposureState{ExposureUS: 10_000, GainDB: 0}
+	next, why := AdjustExposure(nil, cur, LiveAutoExp())
+	if next != cur || why != "no samples" {
+		t.Fatalf("got %+v %q", next, why)
+	}
+}

@@ -244,6 +244,73 @@ func LiveViewSettings(scan Settings, binning int) Settings {
 	return st.Clamp()
 }
 
+// LiveSummary is a one-line description of the settings applied for a
+// live view (pixel format, trigger, exposure, size).
+func (s Settings) LiveSummary() string {
+	trig := "free-run"
+	if s.SoftwareTrigger {
+		trig = "software trigger"
+	}
+	bin := ""
+	if s.Binning >= 2 {
+		bin = fmt.Sprintf(", %dx binning", s.Binning)
+	}
+	return fmt.Sprintf("%s, %s, %.0f us, %.2f dB, %dx%d%s",
+		s.PixelFormat, trig, s.ExposureUS, s.GainDB, s.Width, s.Height, bin)
+}
+
+// GrabTimeout is how long a live GetImageBuffer wait should last for
+// the current exposure: at least one frame period plus margin, never
+// under 1 s, so a 10–200 ms exposure cannot time out as 0x80000007.
+func GrabTimeout(exposureUS float64) time.Duration {
+	const minUS = 1_000_000.0
+	const capUS = 8_000_000.0
+	const marginUS = 800_000.0
+	if exposureUS < 0 {
+		exposureUS = 0
+	}
+	us := exposureUS*2 + marginUS
+	if us < minUS {
+		us = minUS
+	}
+	if us > capUS {
+		us = capUS
+	}
+	return time.Duration(us) * time.Microsecond
+}
+
+// MV_E_NODATA is the MVS GetImageBuffer timeout / empty-queue code.
+const MV_E_NODATA = 0x80000007
+
+// Error is an MVS SDK error with its numeric code.
+type Error struct {
+	Code   uint32
+	Detail string
+}
+
+func (e *Error) Error() string {
+	if e == nil {
+		return "MVS error"
+	}
+	if e.Detail != "" {
+		return fmt.Sprintf("MVS error 0x%08X: %s", e.Code, e.Detail)
+	}
+	return fmt.Sprintf("MVS error 0x%08X", e.Code)
+}
+
+// IsNoData reports a GetImageBuffer timeout (no frame in the wait).
+func IsNoData(err error) bool {
+	if err == nil {
+		return false
+	}
+	var e *Error
+	if errors.As(err, &e) && e.Code == MV_E_NODATA {
+		return true
+	}
+	s := err.Error()
+	return strings.Contains(s, "0x80000007")
+}
+
 // Frame is one grabbed monochrome image, linearized to 16-bit (the native
 // 8/10/12-bit values are left-shifted into the 16-bit range).
 type Frame struct {
@@ -262,6 +329,9 @@ type Device interface {
 	StartGrab() error
 	StopGrab() error
 	Grab(timeout time.Duration) (*Frame, error)
+	// SetExposureGain changes exposure and gain without stopping the
+	// stream. Used by the Focus Check live auto-exposure loop.
+	SetExposureGain(exposureUS, gainDB float64) error
 	Close() error
 }
 

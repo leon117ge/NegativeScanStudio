@@ -37,6 +37,23 @@ func DefaultAutoExp() AutoExpConfig {
 	}
 }
 
+// Live auto-exposure limits for Focus Check. A still-scan meter may
+// use a multi-second shutter; a live view cannot, or GetImageBuffer
+// times out and the loop looks frozen. Once the shutter is at this
+// cap, further brightness comes from analog gain.
+const (
+	LiveMaxExposureUS = 200_000 // 200 ms
+	LiveMaxGainDB     = 18
+)
+
+// LiveAutoExp is DefaultAutoExp with a live-view shutter cap.
+func LiveAutoExp() AutoExpConfig {
+	c := DefaultAutoExp()
+	c.MaxExposureUS = LiveMaxExposureUS
+	c.MaxGainDB = LiveMaxGainDB
+	return c
+}
+
 // ExposureState is the camera's current (or proposed) exposure pair.
 type ExposureState struct {
 	ExposureUS float64

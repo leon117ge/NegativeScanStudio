@@ -19,10 +19,7 @@ import (
 const mvsLayer = 0x00000001 | 0x00000004 // GigE | USB3
 
 func cErr(code int, detail string) error {
-	if detail != "" {
-		return fmt.Errorf("MVS error 0x%08X: %s", uint32(code), detail)
-	}
-	return fmt.Errorf("MVS error 0x%08X", uint32(code))
+	return &Error{Code: uint32(code), Detail: detail}
 }
 
 // SDKAvailable reports whether MvCameraControl.dll is loaded.
@@ -197,8 +194,11 @@ func (d *realDev) applyLocked(st *Settings) error {
 			return err
 		}
 	} else {
-		_ = callEnum(d.h, "TriggerMode", "Off")
+		if err := callEnum(d.h, "TriggerMode", "Off"); err != nil {
+			return fmt.Errorf("TriggerMode=Off: %w", err)
+		}
 	}
+	applyStreamNodes(d.h)
 	applyBinning(d.h, st.Binning)
 	if st.FullFrame {
 		// Restore the sensor's maximum image. Offset must go to 0 first
@@ -239,6 +239,67 @@ func (d *realDev) applyLocked(st *Settings) error {
 	if st.QualityPreset {
 		applyQualityNodes(d.h)
 	}
+	readBackSettings(d.h, st)
+	return nil
+}
+
+// applyStreamNodes asks for a continuous free-running stream. Missing
+// nodes are ignored. AcquisitionFrameRateEnable is turned off so a
+// leftover frame-rate cap cannot stall live view.
+func applyStreamNodes(h unsafe.Pointer) {
+	_ = callEnum(h, "AcquisitionMode", "Continuous")
+	_ = setBoolNode(h, "AcquisitionFrameRateEnable", false)
+	_ = callEnum(h, "AcquisitionFrameRateEnable", "Off")
+}
+
+func readBackSettings(h unsafe.Pointer, st *Settings) {
+	if w, _, _, err := getInt(h, "Width"); err == nil && w > 0 {
+		st.Width = int(w)
+	}
+	if hgt, _, _, err := getInt(h, "Height"); err == nil && hgt > 0 {
+		st.Height = int(hgt)
+	}
+	if exp, _, _, err := getFloat(h, "ExposureTime"); err == nil && exp > 0 {
+		st.ExposureUS = float64(exp)
+	}
+	if g, _, _, err := getFloat(h, "Gain"); err == nil {
+		st.GainDB = float64(g)
+	}
+}
+
+func getFloat(h unsafe.Pointer, key string) (cur, min, max float32, err error) {
+	ck := C.CString(key)
+	defer C.free(unsafe.Pointer(ck))
+	var c, mn, mx C.float
+	if ret := int(C.hik_get_float(h, ck, &c, &mn, &mx)); ret != 0 {
+		return 0, 0, 0, cErr(ret, key)
+	}
+	return float32(c), float32(mn), float32(mx), nil
+}
+
+func (d *realDev) SetExposureGain(exposureUS, gainDB float64) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.closed || d.h == nil {
+		return ErrNotOpen
+	}
+	st := d.set
+	st.ExposureUS = exposureUS
+	st.GainDB = gainDB
+	st = st.Clamp()
+	if err := callFloat(d.h, "ExposureTime", float32(st.ExposureUS)); err != nil {
+		return err
+	}
+	if err := callFloat(d.h, "Gain", float32(st.GainDB)); err != nil {
+		return err
+	}
+	if exp, _, _, err := getFloat(d.h, "ExposureTime"); err == nil && exp > 0 {
+		st.ExposureUS = float64(exp)
+	}
+	if g, _, _, err := getFloat(d.h, "Gain"); err == nil {
+		st.GainDB = float64(g)
+	}
+	d.set = st
 	return nil
 }
 
