@@ -2,8 +2,8 @@ package main
 
 // Mono trichrome page (v0.97): capture R, G and B with a Hikrobot monochrome
 // camera while switching the RGB light, then merge to a linear 16-bit RGB
-// TIFF. Chromatic-aberration focus shift is estimated against green and
-// optionally corrected at merge time.
+// TIFF. Lateral chromatic aberration of R and B is measured against green
+// and optionally corrected at merge time.
 
 import (
 	"fmt"
@@ -971,8 +971,8 @@ func (u *MonoUI) Page() TabPage {
 						Label{AssignTo: &u.lightLbl, Text: "Light: -"},
 						Label{AssignTo: &u.valLbl, Text: "Scan values: -"},
 						Label{AssignTo: &u.outLbl, Text: "Output: -"},
-						CheckBox{AssignTo: &u.caCB, Text: "Correct chromatic-aberration focus shift (green reference)", Checked: true,
-							ToolTipText: "Estimate R and B translation, magnification and blur against green, warp them onto green, and match sharpness only when a channel is measurably softer. Green is never sharpened."},
+						CheckBox{AssignTo: &u.caCB, Text: "Correct lateral chromatic aberration (green reference)", Checked: true,
+							ToolTipText: "Measure where R and B sit against green across the frame, fit a radial lateral-CA model and move R and B onto green with a windowed-sinc resampler. Areas with less than about 0.12 px of CA (the frame centre) are left untouched. No sharpening is applied; a channel whose corners or centre would get worse is left as captured."},
 						CheckBox{AssignTo: &u.meterEachCB, Text: "Auto-meter each channel (overrides the shared exposure)", Checked: false,
 							ToolTipText: "Off (default): R, G and B all use the shared exposure from film-base leveling (gain 0 dB). HDR bracket frames are EV offsets from that base. On: each channel auto-meters separately, as in earlier versions.",
 							OnCheckedChanged: func() {

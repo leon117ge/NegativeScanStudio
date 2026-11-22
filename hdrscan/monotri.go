@@ -41,8 +41,8 @@ type MonoTriResult struct {
 
 // ProcessMonoTrichrome combines three same-size monochrome frames into one
 // linear 16-bit RGB TIFF (R from the red-lit frame, G from green, B from
-// blue) and optionally corrects chromatic-aberration focus shift, with
-// green as the geometric and sharpness reference.
+// blue) and optionally corrects lateral chromatic aberration of R and B,
+// with green as the geometric reference.
 func ProcessMonoTrichrome(r, g, b MonoPlane, o MonoTriOptions) (*MonoTriResult, error) {
 	start := time.Now()
 	if err := checkMono(r, "R"); err != nil {
@@ -64,7 +64,7 @@ func ProcessMonoTrichrome(r, g, b MonoPlane, o MonoTriOptions) (*MonoTriResult, 
 	report := FocusShiftReport{Enabled: o.CorrectCA}
 	if o.CorrectCA {
 		if o.Progress != nil {
-			o.Progress("Measuring focus shift against green ...")
+			o.Progress("Measuring lateral CA against green ...")
 		}
 		var corr FocusShiftReport
 		rf, gf, bf, corr = CorrectMonoCA(rf, gf, bf, w, h)
@@ -86,7 +86,7 @@ func ProcessMonoTrichrome(r, g, b MonoPlane, o MonoTriOptions) (*MonoTriResult, 
 	}
 	sw += " mono trichrome R/G/B (one light channel per monochrome capture"
 	if o.CorrectCA {
-		sw += ", CA focus-shift correction, green reference"
+		sw += ", lateral CA correction (radial model, green reference)"
 	}
 	sw += ")"
 	meta := o.Metadata.ForCapture()
