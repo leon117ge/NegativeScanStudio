@@ -29,6 +29,11 @@ type Metadata struct {
 	CameraApplied  bool        `json:"camera_applied"`
 	CameraProfile  string      `json:"camera_profile,omitempty"`
 	Processing     string      `json:"processing,omitempty"`
+	ExposureUS     float64     `json:"exposure_us,omitempty"`
+	GainDB         float64     `json:"gain_db,omitempty"`
+	ExposureMode   string      `json:"exposure_mode,omitempty"` // "shared" or "metered"
+	BaseLeveled    *bool       `json:"base_leveled,omitempty"`
+	BaseLeveledAt  string      `json:"base_leveled_at,omitempty"`
 }
 
 func (m Metadata) JSON(software string) (string, error) {

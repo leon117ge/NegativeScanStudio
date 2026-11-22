@@ -1012,6 +1012,9 @@ func (u *LightUI) startLevel() {
 			}
 			u.saveCfg()
 			expDesc, hikMode, exp := u.finishLevelExposure(cam, iso, fixedSh, res)
+			if hikMode && err == nil && res.Converged() && u.hdr != nil {
+				u.hdr.recordLeveledBase(u.hikExposureUS(), res.Values, time.Now())
+			}
 			u.showResult(res, err, expDesc, hikMode)
 			if err == nil && res.Converged() && realCam {
 				// v0.82: hand the levelled light + exposure to the frame-0 lock (X-T3 path only)
@@ -1044,14 +1047,16 @@ func (u *LightUI) finishLevelExposure(cam lightlevel.Camera, iso int, fixedSh ui
 	if hk, ok := cam.(*hikLevelCamera); ok {
 		us, gain := hk.GetExposure()
 		desc = fmt.Sprintf("%.0f us, %.2f dB", us, gain)
+		if u.hdr != nil {
+			u.hdr.setSharedHikExposure(us, "leveling")
+			if u.hdr.mono != nil && u.hdr.mono.gainNE != nil {
+				u.hdr.mono.gainNE.SetValue(0)
+			}
+		} else if u.hikExpNE != nil {
+			u.hikExpNE.SetValue(us)
+		}
 		if res.Fit.Changed {
-			if u.hdr != nil && u.hdr.mono != nil {
-				u.hdr.mono.applyScanExposure(us, 0)
-			}
-			if u.hikExpNE != nil {
-				u.hikExpNE.SetValue(us)
-			}
-			u.log("Hikrobot exposure saved to Mono Trichrome scan settings: %.0f us, 0.00 dB (was %.0f us).", us, res.Fit.StartedUS)
+			u.log("Hikrobot exposure saved as the shared exposure: %.0f us, 0.00 dB (was %.0f us).", us, res.Fit.StartedUS)
 		}
 		return desc, true, exp
 	}
@@ -1095,7 +1100,7 @@ func (u *LightUI) showResult(res lightlevel.Result, err error, expDesc string, h
 		res.Values[0], res.Values[1], res.Values[2], u.lastPost[0], u.lastPost[1], u.lastPost[2], prof, src,
 		res.Readings[0], res.Readings[1], res.Readings[2], res.Rounds, expDesc)
 	if hik && res.Fit.Changed {
-		t += fmt.Sprintf("; exposure changed from %.0f us to %.0f us (gain 0 dB) and saved to Mono Trichrome scan settings", res.Fit.StartedUS, res.Fit.FinalUS)
+		t += fmt.Sprintf("; exposure changed from %.0f us to %.0f us (gain 0 dB) and saved as the shared Hikrobot exposure", res.Fit.StartedUS, res.Fit.FinalUS)
 	}
 	pr := res.Problems()
 	if len(pr) == 0 {
@@ -1340,7 +1345,12 @@ func (u *LightUI) Page() TabPage {
 		chWidgets = append(chWidgets,
 			CheckBox{AssignTo: &u.enCB[c], Text: rgblight.ChannelNames[c] + " on", Font: bold},
 			LineEdit{AssignTo: &u.valEd[c], Text: strconv.Itoa(u.cfg.Values[c]), Font: big, TextColor: chCol[c], MaxLength: 3, MinSize: Size{Width: 56}, MaxSize: Size{Width: 56},
-				ToolTipText: "Brightness 1..100. Switch a channel off with its checkbox (brightness 0 is not allowed)."},
+				ToolTipText: "Brightness 1..100. Switch a channel off with its checkbox (brightness 0 is not allowed).",
+				OnTextChanged: func() {
+					if u.hdr != nil && u.hdr.mono != nil {
+						u.hdr.mono.updateBaseExposureLabel()
+					}
+				}},
 		)
 	}
 	pct := func(f float64) string { return strconv.FormatFloat(f, 'f', -1, 64) }
@@ -1430,7 +1440,12 @@ func (u *LightUI) Page() TabPage {
 							Composite{AssignTo: &u.hikExpRow, Visible: false, Layout: HBox{MarginsZero: true, Spacing: 4}, Children: []Widget{
 								NumberEdit{AssignTo: &u.hikExpNE, Value: 10000, MinValue: 0, MaxValue: 10000000, Decimals: 0, Increment: 100,
 									Suffix: " us", SpinButtonsVisible: true, MinSize: Size{Width: 160},
-									ToolTipText: "Hikrobot ExposureTime in microseconds, taken from Mono Trichrome scan settings. Leveling uses this one common exposure (gain 0 dB, Mono12, full frame) for R, G and B. The exposure is raised or lowered automatically so every light code lands in a well-resolved window, then written back to Mono Trichrome."},
+									ToolTipText: "Shared Hikrobot ExposureTime in microseconds (gain 0 dB). This is the same value as Mono Trichrome. Leveling uses it for R, G and B (Mono12, full frame), raises or lowers it so every light code lands in a well-resolved window, and writes the result back to both fields.",
+									OnValueChanged: func() {
+										if u.hdr != nil && u.hikExpNE != nil {
+											u.hdr.setSharedHikExposure(u.hikExpNE.Value(), "user")
+										}
+									}},
 								Label{Text: "Gain 0 dB (fixed)"},
 								HSpacer{},
 							}},

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"basetool/hdrscan"
+	"basetool/hikbase"
 	"basetool/hikcam"
 	"basetool/lightlevel"
 	"basetool/scanmeta"
@@ -78,7 +79,11 @@ func (u *LightUI) onCamSourceChanged() {
 		u.hikExpRow.SetVisible(hik)
 	}
 	if hik && u.hikExpNE != nil {
-		u.hikExpNE.SetValue(u.monoScanExposureUS())
+		if u.hdr != nil {
+			u.hikExpNE.SetValue(u.hdr.sharedHikExposure())
+		} else {
+			u.hikExpNE.SetValue(u.monoScanExposureUS())
+		}
 	}
 	if u.isoCB != nil {
 		u.isoCB.SetEnabled(!hik)
@@ -102,6 +107,9 @@ func (u *LightUI) monoScanExposureUS() float64 {
 }
 
 func (u *LightUI) hikExposureUS() float64 {
+	if u.hdr != nil && u.hdr.cfg.HikExposureUS >= hikcam.CS240ExpMinUS {
+		return hikbase.ClampExposureUS(u.hdr.cfg.HikExposureUS)
+	}
 	if u.hikExpNE != nil {
 		v := u.hikExpNE.Value()
 		if v >= hikcam.CS240ExpMinUS {

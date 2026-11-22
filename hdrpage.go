@@ -23,6 +23,7 @@ import (
 	"basetool/camera"
 	"basetool/filmdb"
 	"basetool/hdrscan"
+	"basetool/hikbase"
 	"basetool/rawconv"
 	"basetool/scanmeta"
 
@@ -31,7 +32,7 @@ import (
 )
 
 const appName = "NegativeScan Studio"
-const appVersion = appName + " v1.05"
+const appVersion = appName + " v1.06"
 
 // legacyAppName: the program was called Film Base Meter up to v0.67; its
 // settings folder is still read (copied once, never changed) by migrateLegacyConfig.
@@ -62,6 +63,12 @@ type HDRConfig struct {
 	Stock      string // film stock from the base database ("" = none)
 	StockTol   int    // index into stockTolVals
 	CenterMark bool   // live-view optical-centre / flatness overlay (default on)
+	// Shared Hikrobot exposure (us, gain 0 dB) for leveling and Mono Trichrome.
+	HikExposureUS float64
+	HikMeterEach  bool    // per-channel auto-meter; default off
+	HikLeveledUS  float64 // exposure recorded at the last successful hik leveling
+	HikLeveledRGB [3]int
+	HikLeveledAt  string // RFC3339; empty if never leveled
 }
 
 // Bracket presets (display order). Config: BRACKET_EV=0,2 (v0.62+);
@@ -166,7 +173,7 @@ func defaultOutDir() string {
 }
 
 func loadHDRConfig() HDRConfig {
-	c := HDRConfig{Target: targetDefault, OutDir: defaultOutDir(), LZW: true, StockTol: stockTolDefault, Bracket: bracketDefault, Merge: mergeDefault, CenterMark: true}
+	c := HDRConfig{Target: targetDefault, OutDir: defaultOutDir(), LZW: true, StockTol: stockTolDefault, Bracket: bracketDefault, Merge: mergeDefault, CenterMark: true, HikExposureUS: hikbase.DefaultExposureUS}
 	haveFS, haveEV, haveMM := false, false, false
 	b, err := os.ReadFile(hdrConfigFile())
 	if err != nil {
@@ -278,6 +285,24 @@ func loadHDRConfig() HDRConfig {
 			}
 		case "CENTER_MARK":
 			c.CenterMark = v != "0"
+		case "HIK_EXPOSURE":
+			if f, err := strconv.ParseFloat(v, 64); err == nil && f >= hikbase.ExpMinUS {
+				c.HikExposureUS = hikbase.ClampExposureUS(f)
+			}
+		case "HIK_METER_EACH":
+			c.HikMeterEach = v != "0"
+		case "HIK_LEVELED_US":
+			if f, err := strconv.ParseFloat(v, 64); err == nil && f >= hikbase.ExpMinUS {
+				c.HikLeveledUS = hikbase.ClampExposureUS(f)
+			}
+		case "HIK_LEVELED_RGB":
+			if rgb, ok := hikbase.ParseRGB(v); ok {
+				c.HikLeveledRGB = rgb
+			}
+		case "HIK_LEVELED_AT":
+			if hikbase.ParseLeveledAt(v).IsZero() == false {
+				c.HikLeveledAt = v
+			}
 		}
 	}
 	return c
@@ -327,6 +352,14 @@ func saveHDRConfig(c HDRConfig) {
 		targetVals[ti], c.AreaMode, c.OutDir, b(c.KeepTIFF), b(c.DeleteRAW), c.Align, b(c.LZW), c.SimScene, c.Slowest, legacy, evKey(bracketEVs[bi]), hdrscan.SanitizeRoll(c.Roll), c.Counter,
 		dustKeys[clamp(c.Dust, len(dustKeys))], frame0Keys[clamp(c.Frame0, len(frame0Keys))], isoVals[clamp(c.ISO, len(isoVals))], c.Stock, stockTolVals[tol],
 		mi, mergeKeys[mi], fixedShutterKeys[clamp(c.Shutter, len(fixedShutterKeys))], triModeKeys[clamp(c.ScanMode, len(triModeKeys))], []string{"0_2", "0_2_3"}[clamp(c.TriBracket, 2)], b(c.CenterMark))
+	hikUS := c.HikExposureUS
+	if hikUS < hikbase.ExpMinUS {
+		hikUS = hikbase.DefaultExposureUS
+	}
+	s += fmt.Sprintf("HIK_EXPOSURE=%.0f\r\nHIK_METER_EACH=%s\r\n", hikbase.ClampExposureUS(hikUS), b(c.HikMeterEach))
+	if c.HikLeveledAt != "" {
+		s += fmt.Sprintf("HIK_LEVELED_US=%.0f\r\nHIK_LEVELED_RGB=%s\r\nHIK_LEVELED_AT=%s\r\n", hikbase.ClampExposureUS(c.HikLeveledUS), hikbase.FormatRGB(c.HikLeveledRGB), c.HikLeveledAt)
+	}
 	os.MkdirAll(configDir(), 0o755)
 	os.WriteFile(hdrConfigFile(), []byte(s), 0o644)
 }
@@ -444,6 +477,8 @@ type HDRUI struct {
 	lockSrc                                      string   // what locked frame 0 ("" = Meter base)
 	lockLight                                    *[3]int  // light values when frame 0 was locked (nil = unknown)
 	light                                        *LightUI // RGB light page (trichrome)
+	syncingHikExp                                bool     // guards two-way shared exposure SetValue
+	hikExpReady                                  bool     // ignore NumberEdit writes until AfterCreate
 	liveRoute                                    func()   // main.go re-evaluates which preview should run
 	recBtn, saveDBBtn, saveF0Btn, manageBtn      *walk.PushButton
 	db                                           *filmdb.DB
@@ -661,6 +696,9 @@ func (u *HDRUI) save() {
 	}
 	if u.tolCB != nil {
 		u.cfg.StockTol = max(0, u.tolCB.CurrentIndex())
+	}
+	if u.mono != nil && u.mono.meterEachCB != nil {
+		u.cfg.HikMeterEach = u.mono.meterEachCB.Checked()
 	}
 	saveHDRConfig(u.cfg)
 }

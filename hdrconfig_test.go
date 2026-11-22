@@ -137,3 +137,46 @@ func TestCenterMarkConfig(t *testing.T) {
 		t.Fatalf("on state not saved: %s", b)
 	}
 }
+
+func TestHikExposureConfig(t *testing.T) {
+	t.Setenv("APPDATA", t.TempDir())
+	os.MkdirAll(configDir(), 0o755)
+	if c := loadHDRConfig(); c.HikExposureUS != 10000 || c.HikMeterEach {
+		t.Fatalf("defaults: us=%v meter=%v", c.HikExposureUS, c.HikMeterEach)
+	}
+	os.WriteFile(hdrConfigFile(), []byte("TARGETFS=0.80\r\n"), 0o644)
+	if c := loadHDRConfig(); c.HikExposureUS != 10000 || c.HikMeterEach || c.HikLeveledAt != "" {
+		t.Fatalf("legacy file should default shared exposure: %+v", c)
+	}
+	c := loadHDRConfig()
+	c.HikExposureUS = 14289
+	c.HikMeterEach = false
+	c.HikLeveledUS = 14289
+	c.HikLeveledRGB = [3]int{21, 81, 32}
+	c.HikLeveledAt = "2026-11-22T18:05:00+09:00"
+	saveHDRConfig(c)
+	b, _ := os.ReadFile(hdrConfigFile())
+	s := string(b)
+	for _, want := range []string{"HIK_EXPOSURE=14289", "HIK_METER_EACH=0", "HIK_LEVELED_US=14289", "HIK_LEVELED_RGB=21,81,32", "HIK_LEVELED_AT=2026-11-22T18:05:00+09:00"} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("missing %s in %s", want, s)
+		}
+	}
+	got := loadHDRConfig()
+	if got.HikExposureUS != 14289 || got.HikMeterEach || got.HikLeveledUS != 14289 || got.HikLeveledRGB != [3]int{21, 81, 32} || got.HikLeveledAt != c.HikLeveledAt {
+		t.Fatalf("round trip: %+v", got)
+	}
+	os.WriteFile(hdrConfigFile(), []byte("HIK_EXPOSURE=4000\r\nHIK_METER_EACH=1\r\n"), 0o644)
+	got = loadHDRConfig()
+	if got.HikExposureUS != 4000 || !got.HikMeterEach {
+		t.Fatalf("manual + meter: %+v", got)
+	}
+	if got.HikLeveledAt != "" {
+		t.Fatalf("unleveled record should stay empty: %q", got.HikLeveledAt)
+	}
+	// Below the camera minimum is ignored; keep the default.
+	os.WriteFile(hdrConfigFile(), []byte("HIK_EXPOSURE=10\r\n"), 0o644)
+	if c := loadHDRConfig(); c.HikExposureUS != 10000 {
+		t.Fatalf("invalid exposure should stay default: %v", c.HikExposureUS)
+	}
+}

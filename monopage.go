@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"basetool/hdrscan"
+	"basetool/hikbase"
 	"basetool/hikcam"
 	"basetool/rgblight"
 
@@ -35,9 +36,10 @@ type MonoUI struct {
 	devCB, fmtCB, trigCB, presetCB, capModeCB, brCB  *walk.ComboBox
 	expNE, gainNE, blackNE                           *walk.NumberEdit
 	wNE, hNE, xNE, yNE                               *walk.NumberEdit
-	fullCB, gammaCB, caCB, markCB                    *walk.CheckBox
+	fullCB, gammaCB, caCB, markCB, meterEachCB       *walk.CheckBox
 	connBtn, applyBtn, capBtn, stopBtn, refreshBtn   *walk.PushButton
 	camLbl, sdkLbl, lightLbl, valLbl, whyLbl, outLbl *walk.Label
+	baseExpLbl                                       *walk.Label
 	presetTip                                        *walk.Label
 	levelSim                                         hikcam.Device
 	repTE, logTE                                     *walk.TextEdit
@@ -280,13 +282,14 @@ func (u *MonoUI) readSettings() hikcam.Settings {
 }
 
 // applyScanExposure writes a common film-base-leveling exposure into the
-// Mono Trichrome scan fields. Gain stays at 0 dB. Capture still meters
-// each R/G/B channel from this starting exposure.
+// shared Hikrobot exposure (Mono Trichrome and Camera and Light). Gain stays at 0 dB.
 func (u *MonoUI) applyScanExposure(us, gain float64) {
 	if u == nil {
 		return
 	}
-	if u.expNE != nil {
+	if u.hdr != nil {
+		u.hdr.setSharedHikExposure(us, "leveling")
+	} else if u.expNE != nil {
 		u.expNE.SetValue(us)
 	}
 	if u.gainNE != nil {
@@ -347,7 +350,11 @@ func (u *MonoUI) fillBestScanUI() {
 		u.fmtCB.SetCurrentIndex(hikcam.PixelFormatIndex(st.PixelFormat))
 	}
 	if u.expNE != nil {
-		u.expNE.SetValue(st.ExposureUS)
+		us := st.ExposureUS
+		if u.hdr != nil && u.hdr.cfg.HikExposureUS >= hikcam.CS240ExpMinUS {
+			us = hikbase.ClampExposureUS(u.hdr.cfg.HikExposureUS)
+		}
+		u.expNE.SetValue(us)
 	}
 	if u.gainNE != nil {
 		u.gainNE.SetValue(st.GainDB)
@@ -414,7 +421,11 @@ func (u *MonoUI) updateCaptureLabel() {
 	if len(evs) > 1 {
 		text = "Capture mono trichrome HDR  (R, G, B x " + evText(evs)
 	}
-	text += "; auto exposure)"
+	if u.hdr != nil && u.hdr.hikMeterEach() {
+		text += "; auto-meter each channel)"
+	} else {
+		text += "; shared exposure)"
+	}
 	u.capBtn.SetText(text)
 }
 
@@ -568,6 +579,23 @@ func (u *MonoUI) capture() {
 	if u.usingBestScan() {
 		u.fillBestScanUI()
 	}
+	meterEach := u.hdr != nil && u.hdr.hikMeterEach()
+	baseUS := hikbase.DefaultExposureUS
+	var snap hikbase.Snapshot
+	if u.hdr != nil {
+		baseUS = u.hdr.sharedHikExposure()
+		snap = u.hdr.hikSnapshot()
+	} else if u.expNE != nil {
+		baseUS = hikbase.ClampExposureUS(u.expNE.Value())
+	}
+	if !meterEach {
+		if u.expNE != nil {
+			u.expNE.SetValue(baseUS)
+		}
+		if u.gainNE != nil {
+			u.gainNE.SetValue(0)
+		}
+	}
 	evs := u.captureEVs()
 	po := u.hdr.processOptions(dir)
 	u.stopPreview()
@@ -593,6 +621,7 @@ func (u *MonoUI) capture() {
 	}
 	u.say(fmt.Sprintf("==== Mono trichrome: light R %d G %d B %d (%s), settle %v, CA correction %v, bracket %v ====",
 		vals[0], vals[1], vals[2], src, settle, correct, evs))
+	u.say(hikbase.CaptureLog(meterEach, baseUS, snap, vals))
 	if u.repTE != nil {
 		u.repTE.SetText("Capturing R, G, B ...")
 	}
@@ -630,7 +659,6 @@ func (u *MonoUI) capture() {
 		if u.hdr != nil {
 			box = u.hdr.roi
 		}
-		cfg := hdrscan.ScanMeterConfig()
 		for ch := 0; ch < 3; ch++ {
 			chVar = ch
 			if sw != nil {
@@ -642,27 +670,46 @@ func (u *MonoUI) capture() {
 			time.Sleep(settle)
 			st := cam.Settings()
 			var last *hikcam.Frame
-			for attempt := 0; attempt < 4; attempt++ {
-				fr, err := cam.Grab(5 * time.Second)
+			if !meterEach {
+				st.ExposureUS = baseUS
+				st.GainDB = 0
+				if err := cam.Apply(st); err != nil {
+					res.err = fmt.Errorf("%s apply shared exposure: %w", hdrscan.TriTags[ch], err)
+					return
+				}
+				fr, err := cam.Grab(hikcam.GrabTimeout(st.ExposureUS))
 				if err != nil {
-					res.err = fmt.Errorf("%s meter grab: %w", hdrscan.TriTags[ch], err)
+					res.err = fmt.Errorf("%s grab: %w", hdrscan.TriTags[ch], err)
 					return
 				}
 				last = fr
-				full := hdrscan.FrameSamples(fr.Pix, fr.W, fr.H, hdrscan.Rect{})
-				base := hdrscan.FrameSamples(fr.Pix, fr.W, fr.H, box)
-				cur := hdrscan.ExposureState{ExposureUS: st.ExposureUS, GainDB: st.GainDB}
-				next, why := hdrscan.MeterScanExposure(full, base, cur, cfg)
 				u.ui(func() {
-					u.say(fmt.Sprintf("%s meter %d: %s (%.0f us, %.2f dB)", hdrscan.TriTags[ch], attempt+1, why, next.ExposureUS, next.GainDB))
+					u.say(fmt.Sprintf("Captured %s +0 EV: %dx%d %s (%.0f us)", hdrscan.TriTags[ch], fr.W, fr.H, fr.PixelFormat, fr.ExposureUS))
 				})
-				if why == "on target" || (math.Abs(next.ExposureUS-st.ExposureUS) < 1 && math.Abs(next.GainDB-st.GainDB) < 0.05) {
-					break
-				}
-				st.ExposureUS, st.GainDB = next.ExposureUS, next.GainDB
-				if err := cam.Apply(st); err != nil {
-					res.err = fmt.Errorf("%s apply metered exposure: %w", hdrscan.TriTags[ch], err)
-					return
+			} else {
+				cfg := hdrscan.ScanMeterConfig()
+				for attempt := 0; attempt < 4; attempt++ {
+					fr, err := cam.Grab(5 * time.Second)
+					if err != nil {
+						res.err = fmt.Errorf("%s meter grab: %w", hdrscan.TriTags[ch], err)
+						return
+					}
+					last = fr
+					full := hdrscan.FrameSamples(fr.Pix, fr.W, fr.H, hdrscan.Rect{})
+					base := hdrscan.FrameSamples(fr.Pix, fr.W, fr.H, box)
+					cur := hdrscan.ExposureState{ExposureUS: st.ExposureUS, GainDB: st.GainDB}
+					next, why := hdrscan.MeterScanExposure(full, base, cur, cfg)
+					u.ui(func() {
+						u.say(fmt.Sprintf("%s meter %d: %s (%.0f us, %.2f dB)", hdrscan.TriTags[ch], attempt+1, why, next.ExposureUS, next.GainDB))
+					})
+					if why == "on target" || (math.Abs(next.ExposureUS-st.ExposureUS) < 1 && math.Abs(next.GainDB-st.GainDB) < 0.05) {
+						break
+					}
+					st.ExposureUS, st.GainDB = next.ExposureUS, next.GainDB
+					if err := cam.Apply(st); err != nil {
+						res.err = fmt.Errorf("%s apply metered exposure: %w", hdrscan.TriTags[ch], err)
+						return
+					}
 				}
 			}
 			frames := []hdrscan.MonoPlane{{W: last.W, H: last.H, Pix: append([]uint16(nil), last.Pix...)}}
@@ -718,6 +765,7 @@ func (u *MonoUI) capture() {
 		meta = meta.WithLeveling(u.hdr.metadataLeveling(), vals)
 		meta.CameraProfile = cam.Info().Model
 		meta.CameraMatrix = nil
+		meta = u.hdr.withHikExposureMeta(meta, baseUS, meterEach)
 		info := cam.Info()
 		t0 := time.Now()
 		r, err := hdrscan.ProcessMonoTrichrome(planes[0], planes[1], planes[2], hdrscan.MonoTriOptions{
@@ -821,7 +869,14 @@ func (u *MonoUI) Page() TabPage {
 								ToolTipText: "Auto prefers Mono12, then Mono10, then Mono8 (native bit depth, unpacked to 16-bit linear). Best scan quality selects Mono12."},
 							Label{Text: "Exposure"},
 							NumberEdit{AssignTo: &u.expNE, Value: 10000, MinValue: 0, MaxValue: 10000000, Decimals: 0, Increment: 100,
-								Suffix: " us", SpinButtonsVisible: true, ToolTipText: "ExposureTime in microseconds (MV-CS240-90UM: 32 us to 10 s)."},
+								Suffix: " us", SpinButtonsVisible: true, MinSize: Size{Width: 160},
+								ToolTipText: "Shared Hikrobot ExposureTime in microseconds (MV-CS240-90UM: 32 us to 10 s, gain 0 dB). This is the same value as Camera and Light leveling. R, G and B capture all use this exposure unless Auto-meter each channel is checked.",
+								OnValueChanged: func() {
+									if u.hdr != nil && u.expNE != nil {
+										u.hdr.setSharedHikExposure(u.expNE.Value(), "user")
+									}
+								}},
+							Label{AssignTo: &u.baseExpLbl, Text: hikbase.StatusUnleveled, ColumnSpan: 2},
 							Label{Text: "Gain"},
 							NumberEdit{AssignTo: &u.gainNE, Value: 0, MinValue: 0, MaxValue: 24, Decimals: 2, Increment: 0.1,
 								Suffix: " dB", SpinButtonsVisible: true, ToolTipText: "Analog gain in dB (MV-CS240-90UM: 0 to 24)."},
@@ -873,6 +928,15 @@ func (u *MonoUI) Page() TabPage {
 						Label{AssignTo: &u.outLbl, Text: "Output: -"},
 						CheckBox{AssignTo: &u.caCB, Text: "Correct chromatic-aberration focus shift (green reference)", Checked: true,
 							ToolTipText: "Estimate R and B translation, magnification and blur against green, warp them onto green, and match sharpness only when a channel is measurably softer. Green is never sharpened."},
+						CheckBox{AssignTo: &u.meterEachCB, Text: "Auto-meter each channel (overrides the shared exposure)", Checked: false,
+							ToolTipText: "Off (default): R, G and B all use the shared exposure from film-base leveling (gain 0 dB). HDR bracket frames are EV offsets from that base. On: each channel auto-meters separately, as in earlier versions.",
+							OnCheckedChanged: func() {
+								if u.hdr != nil && u.meterEachCB != nil {
+									u.hdr.cfg.HikMeterEach = u.meterEachCB.Checked()
+									u.hdr.save()
+								}
+								u.updateCaptureLabel()
+							}},
 						Composite{Layout: Grid{Columns: 2, MarginsZero: true, Spacing: 4}, Children: []Widget{
 							Label{Text: "Mode"},
 							ComboBox{AssignTo: &u.capModeCB, Model: []string{"Single frame per channel", "HDR bracket per channel (same options as HDR Scan)"}, CurrentIndex: 0,
@@ -904,12 +968,39 @@ func (u *MonoUI) Page() TabPage {
 	}
 }
 
+func (u *MonoUI) updateBaseExposureLabel() {
+	if u == nil || u.baseExpLbl == nil {
+		return
+	}
+	us := hikbase.DefaultExposureUS
+	var snap hikbase.Snapshot
+	rgb := [3]int{}
+	if u.hdr != nil {
+		us = u.hdr.sharedHikExposure()
+		snap = u.hdr.hikSnapshot()
+		rgb = u.hdr.currentLightRGB()
+	} else if u.expNE != nil {
+		us = u.expNE.Value()
+	}
+	text := hikbase.Status(snap, us, rgb)
+	u.baseExpLbl.SetText(text)
+	if hikbase.IsLeveled(snap, us, rgb) {
+		u.baseExpLbl.SetTextColor(walk.RGB(70, 140, 80))
+	} else {
+		u.baseExpLbl.SetTextColor(walk.RGB(190, 70, 50))
+	}
+}
+
 func (u *MonoUI) AfterCreate() {
 	u.sdkMsg = hikcam.SDKStatus()
 	u.refreshDevices()
 	u.fillBestScanUI()
+	if u.hdr != nil {
+		u.hdr.applySharedHikFromConfig()
+	}
 	u.updateCaptureLabel()
-	u.say(appVersion + " Mono trichrome page ready. The monochrome camera is not required to open the app; Connect uses the MVS SDK when it is installed. Best scan quality is selected; Capture meters each channel automatically.")
+	u.updateBaseExposureLabel()
+	u.say(appVersion + " Mono trichrome page ready. The monochrome camera is not required to open the app; Connect uses the MVS SDK when it is installed. Best scan quality is selected; Capture uses the shared exposure for R, G and B unless Auto-meter each channel is checked.")
 	u.updateButtons()
 }
 
