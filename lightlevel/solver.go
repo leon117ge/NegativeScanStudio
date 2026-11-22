@@ -200,7 +200,10 @@ func Run(ctx context.Context, l Light, cam Camera, p Params, restore [3]bool, pr
 	if e != nil {
 		return res, fmt.Errorf("camera: %w", e)
 	}
-	if vc, ok := cam.(VariableExposure); ok {
+	var vc VariableExposure
+	refits := 0
+	if v, ok := cam.(VariableExposure); ok {
+		vc = v
 		fit, ferr := fitCommonExposure(ctx, l, vc, p, say)
 		if ferr != nil {
 			return res, ferr
@@ -373,6 +376,30 @@ func Run(ctx context.Context, l Light, cam Camera, p Params, restore [3]bool, pr
 		if next == current {
 			if frozen == 0 {
 				reason = "integer resolution limit"
+			}
+			if vc != nil && frozen < 3 && round < p.MaxIter && refits < 2 {
+				fit2, ferr := fitCommonExposureSeeded(ctx, l, vc, p, say, historyPoints(history))
+				if ferr != nil {
+					return res, ferr
+				}
+				if fit2.Changed && math.Abs(fit2.FinalUS-res.Fit.FinalUS) > 1 && (res.Fit.FinalUS == 0 || math.Abs(fit2.FinalUS-res.Fit.FinalUS)/math.Max(res.Fit.FinalUS, 1) > 0.01) {
+					startUS := res.Fit.StartedUS
+					if startUS <= 0 {
+						startUS = fit2.StartedUS
+					}
+					res.Fit = fit2
+					res.Fit.StartedUS = startUS
+					res.Fit.Changed = true
+					refits++
+					say("Integer step is too coarse at the current light codes; retrying at %.0f us (gain 0 dB) with the remaining rounds.", fit2.FinalUS)
+					for c := range history {
+						history[c] = make(response)
+					}
+					res.Limited, res.TooBright, res.Needed, res.Boundary = [3]bool{}, [3]bool{}, [3]float64{}, [3]float64{}
+					current = [3]int{50, 50, 50}
+					reason = "round limit reached"
+					continue
+				}
 			}
 			break
 		}

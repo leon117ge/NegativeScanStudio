@@ -1095,7 +1095,7 @@ func (u *LightUI) showResult(res lightlevel.Result, err error, expDesc string, h
 		res.Values[0], res.Values[1], res.Values[2], u.lastPost[0], u.lastPost[1], u.lastPost[2], prof, src,
 		res.Readings[0], res.Readings[1], res.Readings[2], res.Rounds, expDesc)
 	if hik && res.Fit.Changed {
-		t += fmt.Sprintf("; exposure raised from %.0f us to %.0f us (gain 0 dB) and saved to Mono Trichrome scan settings", res.Fit.StartedUS, res.Fit.FinalUS)
+		t += fmt.Sprintf("; exposure changed from %.0f us to %.0f us (gain 0 dB) and saved to Mono Trichrome scan settings", res.Fit.StartedUS, res.Fit.FinalUS)
 	}
 	pr := res.Problems()
 	if len(pr) == 0 {
@@ -1115,7 +1115,7 @@ func (u *LightUI) showResult(res lightlevel.Result, err error, expDesc string, h
 	msg := strings.Join(pr, "\n") + "\n\n"
 	if hik {
 		if res.Fit.Changed {
-			msg += fmt.Sprintf("The Hikrobot exposure was raised from %.0f us to %.0f us (gain 0 dB) and written to Mono Trichrome scan settings.", res.Fit.StartedUS, res.Fit.FinalUS)
+			msg += fmt.Sprintf("The Hikrobot exposure was changed from %.0f us to %.0f us (gain 0 dB) and written to Mono Trichrome scan settings.", res.Fit.StartedUS, res.Fit.FinalUS)
 		} else {
 			msg += "The Hikrobot exposure was NOT changed (it stays at " + expDesc + ")."
 		}
@@ -1429,8 +1429,8 @@ func (u *LightUI) Page() TabPage {
 							Label{AssignTo: &u.hikExpLbl, Text: "Exposure", MinSize: Size{Width: 96}, Visible: false},
 							Composite{AssignTo: &u.hikExpRow, Visible: false, Layout: HBox{MarginsZero: true, Spacing: 4}, Children: []Widget{
 								NumberEdit{AssignTo: &u.hikExpNE, Value: 10000, MinValue: 0, MaxValue: 10000000, Decimals: 0, Increment: 100,
-									Suffix: " us", SpinButtonsVisible: true,
-									ToolTipText: "Hikrobot ExposureTime in microseconds, taken from Mono Trichrome scan settings. Leveling uses this one common exposure (gain 0 dB, Mono12, full frame) for R, G and B. If a channel cannot reach the target at brightness 100, the exposure is raised automatically and written back to Mono Trichrome."},
+									Suffix: " us", SpinButtonsVisible: true, MinSize: Size{Width: 160},
+									ToolTipText: "Hikrobot ExposureTime in microseconds, taken from Mono Trichrome scan settings. Leveling uses this one common exposure (gain 0 dB, Mono12, full frame) for R, G and B. The exposure is raised or lowered automatically so every light code lands in a well-resolved window, then written back to Mono Trichrome."},
 								Label{Text: "Gain 0 dB (fixed)"},
 								HSpacer{},
 							}},
