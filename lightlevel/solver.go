@@ -179,12 +179,13 @@ func bestCombination(h [3]response, p Params) ([3]int, float64, bool) {
 // before it can enter the cache, and final success always requires fresh R/G/B.
 func Run(ctx context.Context, l Light, cam Camera, p Params, restore [3]bool, progress func(string)) (res Result, err error) {
 	p.Defaults()
-	res = Result{Values: p.Start, Camera: cam.Name(), Area: p.Area}
+	res = Result{Values: p.Start, Camera: cam.Name(), Area: p.Area, Mono: cam.Mono()}
 	say := func(f string, a ...any) {
 		if progress != nil {
 			progress(fmt.Sprintf(f, a...))
 		}
 	}
+	space := profilePhrase(res.Mono)
 	inv, e := p.Matrix.Inverse()
 	if e != nil {
 		return res, fmt.Errorf("camera matrix: %w", e)
@@ -199,7 +200,20 @@ func Run(ctx context.Context, l Light, cam Camera, p Params, restore [3]bool, pr
 	if e != nil {
 		return res, fmt.Errorf("camera: %w", e)
 	}
-	say("Fixed camera exposure: %s (not changed during leveling)", exp)
+	if vc, ok := cam.(VariableExposure); ok {
+		fit, ferr := fitCommonExposure(ctx, l, vc, p, say)
+		if ferr != nil {
+			return res, ferr
+		}
+		res.Fit = fit
+		if fit.Changed {
+			say("Common camera exposure is now %.0f us at 0 dB (was %.0f us). This one exposure is held for R, G and B while the light codes are leveled.", fit.FinalUS, fit.StartedUS)
+		} else {
+			say("Fixed camera exposure: %s (not changed during leveling)", exp)
+		}
+	} else {
+		say("Fixed camera exposure: %s (not changed during leveling)", exp)
+	}
 	defer func() {
 		if e := l.SetAll(restore, res.Values); e != nil {
 			say("Could not restore measured light values: %v", e)
@@ -271,7 +285,6 @@ func Run(ctx context.Context, l Light, cam Camera, p Params, restore [3]bool, pr
 	selectArea := p.SelectArea
 	current := p.Start
 	reason := "round limit reached"
-	unreachable := false
 	for round := 1; round <= p.MaxIter; round++ {
 		res.Rounds = round
 		for c, code := range current {
@@ -318,49 +331,64 @@ func Run(ctx context.Context, l Light, cam Camera, p Params, restore [3]bool, pr
 			selectResult(v)
 		}
 		score := deviation(res.Post, p.Target)
-		say("round %d best measured R %d G %d B %d: after-profile %.5f/%.5f/%.5f FS; worst %.3f%%", round, res.Values[0], res.Values[1], res.Values[2], res.Post[0], res.Post[1], res.Post[2], 100*score)
+		say("round %d best measured R %d G %d B %d: %s %.5f/%.5f/%.5f FS; worst %.3f%%", round, res.Values[0], res.Values[1], res.Values[2], space, res.Post[0], res.Post[1], res.Post[2], 100*score)
 		if score <= p.Tol {
 			reason = "within tolerance"
 			break
 		}
 		next := current
 		rawError := inv.Apply([3]float64{p.Target - currentPost[0], p.Target - currentPost[1], p.Target - currentPost[2]})
+		frozen := 0
 		for c, code := range current {
 			rawTol := 0.0
 			for _, x := range inv[c] {
 				rawTol += math.Abs(x) * p.Target * p.Tol
 			}
+			capped := false
 			if bound, ok := history[c][1]; ok && (bound.reading.BaseClipped() || bound.reading.Level > target[c]+rawTol) {
 				res.TooBright[c], res.Boundary[c] = true, bound.reading.Level
-				unreachable = true
 				reason = fmt.Sprintf("unreachable: %c too bright at code 1; reduce camera exposure", "RGB"[c])
+				next[c] = 1
+				capped = true
 			}
 			if bound, ok := history[c][100]; ok && bound.reading.Level < target[c]-rawTol {
 				res.Limited[c], res.Boundary[c] = true, bound.reading.Level
 				res.Needed[c] = 100 * target[c] / math.Max(bound.reading.Level, 1e-9)
-				unreachable = true
 				reason = fmt.Sprintf("unreachable: %c too dark at code 100; increase camera exposure", "RGB"[c])
+				next[c] = 100
+				capped = true
+			}
+			if capped {
+				frozen++
+				say("%c %d frozen at bound: %s", "RGB"[c], next[c], reason)
+				continue
 			}
 			n, note := history[c].next(code, target[c], rawError[c])
 			next[c] = n
 			say("%c %d -> %d: %s", "RGB"[c], code, n, note)
 		}
-		if unreachable {
+		if frozen == 3 {
 			break
 		}
 		if next == current {
-			reason = "integer resolution limit"
+			if frozen == 0 {
+				reason = "integer resolution limit"
+			}
 			break
 		}
 		current = next
 	}
 	// An integer plateau is not convergence. Actually measure both neighbours,
 	// then evaluate their combinations in after-profile space using cached frames.
-	if !unreachable && deviation(res.Post, p.Target) < .20 {
+	// Channels frozen at a light-code bound stay there; the others are still refined.
+	if deviation(res.Post, p.Target) < .20 {
 		for refinement := 0; refinement < 3; refinement++ {
 			centre := res.Values
 			say("Integer neighbour search %d: measuring +/-1 code and evaluating cached RGB combinations through the camera matrix", refinement+1)
 			for c, code := range centre {
+				if res.Limited[c] || res.TooBright[c] {
+					continue
+				}
 				for _, n := range []int{code - 1, code + 1} {
 					if n < 1 || n > 100 {
 						continue
@@ -398,12 +426,12 @@ func Run(ctx context.Context, l Light, cam Camera, p Params, restore [3]bool, pr
 	}
 	if res.Converged() {
 		res.Reason = ""
-		say("Control verification passed: after-profile %.5f/%.5f/%.5f FS", res.Post[0], res.Post[1], res.Post[2])
+		say("Control verification passed: %s %.5f/%.5f/%.5f FS", space, res.Post[0], res.Post[1], res.Post[2])
 	} else {
 		if reason == "within tolerance" {
 			reason = "final verification outside tolerance (measurement changed)"
 		}
-		res.Reason = fmt.Sprintf("Closest reachable within search budget: %s; worst after-profile error %.3f%% (tolerance %.3f%%)", reason, 100*deviation(res.Post, p.Target), 100*p.Tol)
+		res.Reason = fmt.Sprintf("Closest reachable within search budget: %s; worst %s error %.3f%% (tolerance %.3f%%)", reason, space, 100*deviation(res.Post, p.Target), 100*p.Tol)
 		say("%s", res.Reason)
 	}
 	return res, nil

@@ -103,7 +103,7 @@ func TestNonlinearPWMAndNoise(t *testing.T) {
 		}
 	}
 }
-func TestUnreachableRangeStopsWithoutBurningRounds(t *testing.T) {
+func TestUnreachableRangeStillLevelsOtherChannels(t *testing.T) {
 	for _, tc := range []struct {
 		gain    float64
 		code    int
@@ -111,9 +111,20 @@ func TestUnreachableRangeStopsWithoutBurningRounds(t *testing.T) {
 	}{{.2, 100, "increase camera exposure"}, {200, 1, "reduce camera exposure"}, {0, 100, "increase camera exposure"}} {
 		r := &responseRig{gain: [3]float64{tc.gain, 1, 1}, power: 1}
 		res := runRig(t, r, Params{Start: [3]int{tc.code, 50, 50}, MaxIter: 10})
-		if res.Converged() || res.Rounds != 1 || !res.Verified || !strings.Contains(res.Reason, tc.message) {
-			t.Fatalf("range failure not clear/early: %+v", res)
+		if res.Converged() || !res.Verified || !strings.Contains(res.Reason, tc.message) {
+			t.Fatalf("range failure not clear: %+v", res)
 		}
+		if res.Done[0] || !res.Done[1] || !res.Done[2] {
+			t.Fatalf("G/B should still be leveled when R is at a bound: problems %v values %v post %v", res.Problems(), res.Values, res.Post)
+		}
+	}
+}
+
+func TestAllChannelsUnreachableStopsEarly(t *testing.T) {
+	r := &responseRig{gain: [3]float64{0.2, 0.2, 0.2}, power: 1}
+	res := runRig(t, r, Params{Start: [3]int{100, 100, 100}, MaxIter: 10})
+	if res.Converged() || res.Rounds != 1 || !res.Verified || !strings.Contains(res.Reason, "increase camera exposure") {
+		t.Fatalf("all-limited run should stop after the bound probe: %+v", res)
 	}
 }
 func TestMatrixCrosstalkAndIntegerNeighbourSelection(t *testing.T) {

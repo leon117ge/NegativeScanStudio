@@ -38,7 +38,8 @@ type Camera interface {
 	// channel); false = a colour sensor with the matching converted channel.
 	Mono() bool
 	// Prepare sets / checks the fixed exposure once before the sequence.
-	// It must never change the exposure later.
+	// After Prepare, only a VariableExposure camera may change the
+	// exposure, and only before the light-code search begins.
 	Prepare() (string, error)
 	// Shoot captures a frame with only channel ch lit and returns that
 	// channel on the scan converter's linear scale (all pixels on a mono camera).
@@ -184,10 +185,21 @@ type Result struct {
 	Captured  [3]bool
 	Reason    string
 	Area      Rect
+	Mono      bool
+	Fit       ExposureFit
 }
 
 // Converged reports all three channels within tolerance.
 func (r Result) Converged() bool { return r.Verified && r.Done[0] && r.Done[1] && r.Done[2] }
+
+// basePhrase is "raw base" for a monochrome camera and "after-profile base"
+// for a Bayer body that applies the CameraCal matrix.
+func (r Result) basePhrase() string {
+	if r.Mono {
+		return "raw base"
+	}
+	return "after-profile base"
+}
 
 // Problems lists what the user must act on.
 func (r Result) Problems() []string {
@@ -208,10 +220,17 @@ func (r Result) Problems() []string {
 		case !r.Captured[c]:
 			p = append(p, n+" has no measured frame")
 		case !r.Done[c]:
-			p = append(p, fmt.Sprintf("%s after-profile base %.5f FS at %d (not within tolerance)", n, r.Post[c], r.Values[c]))
+			p = append(p, fmt.Sprintf("%s %s %.5f FS at %d (not within tolerance)", n, r.basePhrase(), r.Post[c], r.Values[c]))
 		}
 	}
 	return p
+}
+
+func profilePhrase(mono bool) string {
+	if mono {
+		return "raw base"
+	}
+	return "after-profile"
 }
 
 func clampV(v int) int {

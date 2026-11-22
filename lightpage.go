@@ -144,6 +144,9 @@ type LightUI struct {
 
 	portCB, isoCB, targetCB, presetCB, areaCB             *walk.ComboBox
 	shutCB                                                *walk.ComboBox // v0.81 base shutter (shared with HDR scan)
+	isoLbl, hikExpLbl                                     *walk.Label
+	isoRow, hikExpRow                                     *walk.Composite
+	hikExpNE                                              *walk.NumberEdit
 	connBtn, applyBtn, readBtn, offBtn                    *walk.PushButton
 	startBtn, stopBtn, saveBtn, loadBtn                   *walk.PushButton
 	enCB                                                  [3]*walk.CheckBox
@@ -801,7 +804,7 @@ func (u *LightUI) startLevel() {
 			return
 		}
 		tmpDir = td
-		cam = &hikLevelCamera{dev: d, lights: u.hikLights()}
+		cam = &hikLevelCamera{dev: d, lights: u.hikLights(), wantUS: u.hikExposureUS()}
 	} else if u.sim != nil {
 		sd := u.sim
 		syn := lightlevel.NewSynth(sd.Lights)
@@ -844,6 +847,9 @@ func (u *LightUI) startLevel() {
 	u.log("==== Auto film-base leveling: target %.2f FS, tolerance ±%.1f%%, max %d rounds, settle %v, start R %d G %d B %d ====",
 		p.Target, p.Tol*100, p.MaxIter, p.Settle, p.Start[0], p.Start[1], p.Start[2])
 	u.log("Camera: %s", cam.Name())
+	if src == camSrcHik || src == camSrcHikSim {
+		u.log("Hikrobot leveling uses a single common exposure (gain 0 dB, Mono12, full frame) from the Exposure field / Mono Trichrome scan settings; ISO and shutter are not used.")
+	}
 	if !baseNorm.Empty() {
 		u.log("Film base: manual rectangle %.0f-%.0f%% x %.0f-%.0f%% (fixed samples and median for control and TIFF check).",
 			baseNorm.X0*100, baseNorm.X1*100, baseNorm.Y0*100, baseNorm.Y1*100)
@@ -982,12 +988,6 @@ func (u *LightUI) startLevel() {
 				u.log("Failed attempt recorded in leveling_failures.csv: %s", why)
 			}
 		}
-		var exp camera.Exposure
-		if x, ok := cam.(*xt3Camera); ok {
-			exp = x.exp
-		} else {
-			exp = camera.Exposure{ISO: iso, Shutter: fixedSh}
-		}
 		released := false
 		if sess != nil && sess.Locked != nil && (realCam || err == nil) {
 			sess.Locked, released = nil, true // the light changed: frame 0 is locked again (handoff) or metered by hand
@@ -1011,7 +1011,8 @@ func (u *LightUI) startLevel() {
 				u.cfg.Values = res.Values
 			}
 			u.saveCfg()
-			u.showResult(res, err, exp)
+			expDesc, hikMode, exp := u.finishLevelExposure(cam, iso, fixedSh, res)
+			u.showResult(res, err, expDesc, hikMode)
 			if err == nil && res.Converged() && realCam {
 				// v0.82: hand the levelled light + exposure to the frame-0 lock (X-T3 path only)
 				h.takeHandoff(baseHandoff{ISO: exp.ISO, Shutter: exp.Shutter, Values: res.Values, Source: "RGB light leveling " + time.Now().Format("15:04:05")})
@@ -1031,7 +1032,35 @@ func clampIdx(i, n int) int {
 	return i
 }
 
-func (u *LightUI) showResult(res lightlevel.Result, err error, exp camera.Exposure) {
+// finishLevelExposure applies a changed Hikrobot exposure to the Mono
+// Trichrome scan fields and builds the result-dialog exposure text.
+// Must run on the UI thread.
+func (u *LightUI) finishLevelExposure(cam lightlevel.Camera, iso int, fixedSh uint32, res lightlevel.Result) (desc string, hik bool, exp camera.Exposure) {
+	if x, ok := cam.(*xt3Camera); ok {
+		exp = x.exp
+		u.lastExp = exp
+		return exp.String(), false, exp
+	}
+	if hk, ok := cam.(*hikLevelCamera); ok {
+		us, gain := hk.GetExposure()
+		desc = fmt.Sprintf("%.0f us, %.2f dB", us, gain)
+		if res.Fit.Changed {
+			if u.hdr != nil && u.hdr.mono != nil {
+				u.hdr.mono.applyScanExposure(us, 0)
+			}
+			if u.hikExpNE != nil {
+				u.hikExpNE.SetValue(us)
+			}
+			u.log("Hikrobot exposure saved to Mono Trichrome scan settings: %.0f us, 0.00 dB (was %.0f us).", us, res.Fit.StartedUS)
+		}
+		return desc, true, exp
+	}
+	exp = camera.Exposure{ISO: iso, Shutter: fixedSh}
+	u.lastExp = exp
+	return exp.String(), false, exp
+}
+
+func (u *LightUI) showResult(res lightlevel.Result, err error, expDesc string, hik bool) {
 	u.setImages(res.Images, u.lastTgt, res)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
@@ -1049,7 +1078,7 @@ func (u *LightUI) showResult(res lightlevel.Result, err error, exp camera.Exposu
 		return
 	}
 	r := res
-	u.lastRes, u.lastExp = &r, exp
+	u.lastRes = &r
 	pl := u.lastPlan
 	src := "predicted"
 	if u.lastTIFF {
@@ -1059,9 +1088,15 @@ func (u *LightUI) showResult(res lightlevel.Result, err error, exp camera.Exposu
 	if pl.on {
 		prof = "after profile"
 	}
+	if hik {
+		prof = "raw (no profile)"
+	}
 	t := fmt.Sprintf("R %d G %d B %d -> base %.5f/%.5f/%.5f linear FS (%s, %s); box %.3f/%.3f/%.3f FS, %d rounds, %s",
 		res.Values[0], res.Values[1], res.Values[2], u.lastPost[0], u.lastPost[1], u.lastPost[2], prof, src,
-		res.Readings[0], res.Readings[1], res.Readings[2], res.Rounds, exp)
+		res.Readings[0], res.Readings[1], res.Readings[2], res.Rounds, expDesc)
+	if hik && res.Fit.Changed {
+		t += fmt.Sprintf("; exposure raised from %.0f us to %.0f us (gain 0 dB) and saved to Mono Trichrome scan settings", res.Fit.StartedUS, res.Fit.FinalUS)
+	}
 	pr := res.Problems()
 	if len(pr) == 0 {
 		t = "LEVELLED: " + t
@@ -1073,15 +1108,31 @@ func (u *LightUI) showResult(res lightlevel.Result, err error, exp camera.Exposu
 
 	u.updateButtons()
 	limited := res.Limited[0] || res.Limited[1] || res.Limited[2]
-	if limited || res.TooBright[0] || res.TooBright[1] || res.TooBright[2] {
-		msg := strings.Join(pr, "\n") + "\n\nThe camera exposure was NOT changed (it stays at " + exp.String() + ")."
+	tooBright := res.TooBright[0] || res.TooBright[1] || res.TooBright[2]
+	if !limited && !tooBright {
+		return
+	}
+	msg := strings.Join(pr, "\n") + "\n\n"
+	if hik {
+		if res.Fit.Changed {
+			msg += fmt.Sprintf("The Hikrobot exposure was raised from %.0f us to %.0f us (gain 0 dB) and written to Mono Trichrome scan settings.", res.Fit.StartedUS, res.Fit.FinalUS)
+		} else {
+			msg += "The Hikrobot exposure was NOT changed (it stays at " + expDesc + ")."
+		}
+		if limited {
+			msg += "\n\nTo reach the target: increase the Hikrobot exposure (us) in the leveling settings, or open the aperture. Keep gain at 0 dB. The same exposure is the starting point for Mono Trichrome capture (each channel is then metered from there)."
+		} else {
+			msg += "\n\nThe light is too strong for this exposure even at brightness 1: reduce the Hikrobot exposure (us), stop the lens down, or choose a higher base level. Keep gain at 0 dB."
+		}
+	} else {
+		msg += "The camera exposure was NOT changed (it stays at " + expDesc + ")."
 		if limited {
 			msg += "\n\nTo reach the target: choose a higher ISO in the leveling settings (then use the same ISO for HDR Fixed frame 0), open the aperture, or choose a lower base level. You can also keep this result and save it as it is."
 		} else {
 			msg += "\n\nThe light is too strong for this exposure even at brightness 1: choose a lower ISO, stop the lens down, or a higher base level."
 		}
-		walk.MsgBox(u.win(), "Auto film-base leveling", msg, walk.MsgBoxIconWarning)
 	}
+	walk.MsgBox(u.win(), "Auto film-base leveling", msg, walk.MsgBoxIconWarning)
 }
 
 // ---------- film-base DB ----------
@@ -1365,14 +1416,22 @@ func (u *LightUI) Page() TabPage {
 								ToolTipText:           "Which camera measures the film base while the RGB Light Air is adjusted.\nExisting camera is the Fujifilm X-T3 on the Camera page.\nHikrobot monochrome uses the MV-CS240-90UM (shared with Mono trichrome).\nThe simulator needs no MVS SDK.",
 								OnCurrentIndexChanged: u.onCamSourceChanged},
 							Label{AssignTo: &u.camNoteLbl, ColumnSpan: 2, Text: camProfileMonoNote},
-							Label{Text: "ISO", MinSize: Size{Width: 96}},
-							Composite{Layout: HBox{MarginsZero: true, Spacing: 4}, Children: []Widget{
+							Label{AssignTo: &u.isoLbl, Text: "ISO", MinSize: Size{Width: 96}},
+							Composite{AssignTo: &u.isoRow, Layout: HBox{MarginsZero: true, Spacing: 4}, Children: []Widget{
 								ComboBox{AssignTo: &u.isoCB, Model: isoItems, CurrentIndex: u.cfg.ISO, MaxSize: Size{Width: 80}, OnCurrentIndexChanged: u.isoChanged,
 									ToolTipText: "Leveling ISO - linked with the Camera page fixed frame-0 ISO (v0.82)."},
 								Label{Text: "Shutter", MinSize: Size{Width: 50}, TextAlignment: AlignFar},
 								ComboBox{AssignTo: &u.shutCB, Model: fixedShutterItems, CurrentIndex: u.hdr.cfg.Shutter, MinSize: Size{Width: 190},
 									ToolTipText:           fixedShutterTip + "\nThe same setting as HDR scan's Base shutter (fixed frame 0).",
 									OnCurrentIndexChanged: func() { u.hdr.setShutter(u.shutCB.CurrentIndex()) }},
+								HSpacer{},
+							}},
+							Label{AssignTo: &u.hikExpLbl, Text: "Exposure", MinSize: Size{Width: 96}, Visible: false},
+							Composite{AssignTo: &u.hikExpRow, Visible: false, Layout: HBox{MarginsZero: true, Spacing: 4}, Children: []Widget{
+								NumberEdit{AssignTo: &u.hikExpNE, Value: 10000, MinValue: 32, MaxValue: 10000000, Decimals: 0, Increment: 100,
+									Suffix: " us", SpinButtonsVisible: true,
+									ToolTipText: "Hikrobot ExposureTime in microseconds, taken from Mono Trichrome scan settings. Leveling uses this one common exposure (gain 0 dB, Mono12, full frame) for R, G and B. If a channel cannot reach the target at brightness 100, the exposure is raised automatically and written back to Mono Trichrome."},
+								Label{Text: "Gain 0 dB (fixed)"},
 								HSpacer{},
 							}},
 							Label{Text: "Base level", MinSize: Size{Width: 96}},

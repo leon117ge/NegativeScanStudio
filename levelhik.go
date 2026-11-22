@@ -48,64 +48,152 @@ func (u *LightUI) onCamSourceChanged() {
 	}
 	u.cfg.CamSrc = u.camSource()
 	u.saveCfg()
+	hik := u.usesMonoCam()
 	if u.camCB != nil {
-		u.camCB.SetEnabled(!u.usesMonoCam())
+		if hik {
+			u.camCB.SetChecked(false)
+			u.camCB.SetEnabled(false)
+		} else {
+			u.camCB.SetChecked(!u.cfg.NoCam)
+			u.camCB.SetEnabled(true)
+		}
 	}
 	if u.camNoteLbl != nil {
-		if u.usesMonoCam() {
+		if hik {
 			u.camNoteLbl.SetText("Monochrome camera: camera profile is disabled (no Bayer CFA, no CameraCal matrix). Each raw film-base channel is leveled to the 0.5 target.")
 		} else {
 			u.camNoteLbl.SetText(camProfileMonoNote)
 		}
 	}
+	if u.isoLbl != nil {
+		u.isoLbl.SetVisible(!hik)
+	}
+	if u.isoRow != nil {
+		u.isoRow.SetVisible(!hik)
+	}
+	if u.hikExpLbl != nil {
+		u.hikExpLbl.SetVisible(hik)
+	}
+	if u.hikExpRow != nil {
+		u.hikExpRow.SetVisible(hik)
+	}
+	if hik && u.hikExpNE != nil {
+		u.hikExpNE.SetValue(u.monoScanExposureUS())
+	}
 	if u.isoCB != nil {
-		u.isoCB.SetEnabled(!u.usesMonoCam())
+		u.isoCB.SetEnabled(!hik)
 	}
 	if u.shutCB != nil {
-		u.shutCB.SetEnabled(!u.usesMonoCam())
+		u.shutCB.SetEnabled(!hik)
 	}
 	if u.hdr != nil {
 		u.hdr.updateLiveRouting()
 	}
 }
 
+func (u *LightUI) monoScanExposureUS() float64 {
+	if u.hdr != nil && u.hdr.mono != nil {
+		st := u.hdr.mono.readSettings()
+		if st.ExposureUS >= hikcam.CS240ExpMinUS {
+			return st.ExposureUS
+		}
+	}
+	return hikcam.BestScanQuality().ExposureUS
+}
+
+func (u *LightUI) hikExposureUS() float64 {
+	if u.hikExpNE != nil {
+		v := u.hikExpNE.Value()
+		if v >= hikcam.CS240ExpMinUS {
+			return v
+		}
+	}
+	return u.monoScanExposureUS()
+}
+
 // hikLevelCamera captures leveling frames with a Hikrobot monochrome
 // body (or its simulator) at a fixed exposure. No Bayer matrix applies.
+// Leveling always uses BestScanQuality (Mono12, gain 0 dB, software
+// trigger, full frame) and a single common ExposureUS for R, G and B.
 type hikLevelCamera struct {
-	dev    hikcam.Device
-	lights func() (on [3]bool, v [3]int) // used only when the device is simulated
-	last   [3]hdrscan.MonoPlane
+	dev                    hikcam.Device
+	lights                 func() (on [3]bool, v [3]int) // used only when the device is simulated
+	last                   [3]hdrscan.MonoPlane
+	wantUS                 float64
+	appliedUS, appliedGain float64
+	simGain                *[3]float64 // tests only; nil uses the default orange-mask gains
+	simSize                int         // tests only; 0 = full frame
 }
 
 func (h *hikLevelCamera) Name() string {
 	info := h.dev.Info()
+	us, gain := h.GetExposure()
 	st := h.dev.Settings()
 	kind := "monochrome"
 	if info.Simulated {
 		kind = "simulated monochrome"
 	}
+	if us <= 0 {
+		us, gain = st.ExposureUS, st.GainDB
+	}
 	return fmt.Sprintf("%s (%s), %.0f us, %.2f dB, black %.0f, %s (fixed exposure)",
-		info.Label(), kind, st.ExposureUS, st.GainDB, st.BlackLevel, st.PixelFormat)
+		info.Label(), kind, us, gain, st.BlackLevel, st.PixelFormat)
 }
 
 func (h *hikLevelCamera) Mono() bool { return true }
 
-func (h *hikLevelCamera) Prepare() (string, error) {
-	st := h.dev.Settings()
-	if st.ExposureUS <= 0 {
-		st = hikcam.BestScanQuality()
-	} else {
-		// Keep the current exposure (leveling is fixed-exposure) but
-		// refresh the quality nodes so a scan-quality body stays linear.
-		q := hikcam.BestScanQuality()
-		q.ExposureUS = st.ExposureUS
-		q.GainDB = st.GainDB
-		st = q
+func (h *hikLevelCamera) GetExposure() (float64, float64) {
+	if h.appliedUS > 0 {
+		return h.appliedUS, h.appliedGain
 	}
+	if h.wantUS > 0 {
+		return h.wantUS, 0
+	}
+	st := h.dev.Settings()
+	return st.ExposureUS, st.GainDB
+}
+
+func (h *hikLevelCamera) scanSettings(us float64) hikcam.Settings {
+	st := hikcam.BestScanQuality()
+	if us > 0 {
+		st.ExposureUS = us
+	} else if h.wantUS > 0 {
+		st.ExposureUS = h.wantUS
+	}
+	st.GainDB = 0
+	if h.simSize > 0 {
+		st.FullFrame = false
+		st.Width, st.Height = h.simSize, h.simSize
+		st.OffsetX, st.OffsetY = 0, 0
+	}
+	return st.Clamp()
+}
+
+func (h *hikLevelCamera) applyScan(us float64) error {
+	if sim, ok := h.dev.(*hikcam.Sim); ok {
+		sim.FlatField = true
+	}
+	st := h.scanSettings(us)
 	if err := h.dev.Apply(st); err != nil {
-		return "", err
+		return err
 	}
 	if err := h.dev.StartGrab(); err != nil {
+		return err
+	}
+	got := h.dev.Settings()
+	h.appliedUS, h.appliedGain = got.ExposureUS, got.GainDB
+	h.wantUS = h.appliedUS
+	return nil
+}
+
+func (h *hikLevelCamera) SetExposure(us, _ float64) error {
+	return h.applyScan(us)
+}
+
+func (h *hikLevelCamera) Prepare() (string, error) {
+	// Always start from the intended scan exposure (the UI / Mono Trichrome
+	// field), never leftover live-view Mono8 settings.
+	if err := h.applyScan(h.wantUS); err != nil {
 		return "", err
 	}
 	got := h.dev.Settings()
@@ -116,14 +204,22 @@ func (h *hikLevelCamera) Shoot(ctx context.Context, ch int, prefix string) (*lig
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	fr, err := h.dev.Grab(5 * time.Second)
+	timeout := hikcam.GrabTimeout(h.appliedUS)
+	if timeout < 5*time.Second {
+		timeout = 5 * time.Second
+	}
+	fr, err := h.dev.Grab(timeout)
 	if err != nil {
 		return nil, err
 	}
 	pix := append([]uint16(nil), fr.Pix...)
 	if h.dev.Info().Simulated && h.lights != nil {
 		on, v := h.lights()
-		pix = hdrscan.ScaleMonoForSimLight(pix, ch, on, v)
+		if h.simGain != nil {
+			pix = hdrscan.ScaleMonoForSimLightGain(pix, ch, on, v, *h.simGain)
+		} else {
+			pix = hdrscan.ScaleMonoForSimLight(pix, ch, on, v)
+		}
 	}
 	plane := hdrscan.MonoPlane{W: fr.W, H: fr.H, Pix: pix}
 	h.last[ch] = plane
@@ -229,6 +325,9 @@ func (u *LightUI) startHikPreview() {
 		if err != nil {
 			u.log("Hikrobot preview: %v", err)
 			return
+		}
+		if sim, ok := d.(*hikcam.Sim); ok {
+			sim.FlatField = false
 		}
 		if err := d.Apply(hikcam.LiveViewSettings(d.Settings(), 2)); err != nil {
 			u.log("Hikrobot live settings: %v", err)

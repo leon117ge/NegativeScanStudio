@@ -35,10 +35,17 @@ func LevelingImageMono(pix []uint16, w, h int) *lightlevel.Image {
 // sensor values. The LED curve and per-channel gains match lightlevel.Synth
 // (an orange-mask film base: blue needs the most light).
 func ScaleMonoForSimLight(pix []uint16, ch int, on [3]bool, v [3]int) []uint16 {
+	return ScaleMonoForSimLightGain(pix, ch, on, v, [3]float64{1.35, 0.85, 0.55})
+}
+
+// ScaleMonoForSimLightGain is ScaleMonoForSimLight with explicit per-channel
+// gains (tests use a dim-green set; the default orange-mask gains stay in
+// ScaleMonoForSimLight).
+func ScaleMonoForSimLightGain(pix []uint16, ch int, on [3]bool, v [3]int, gain [3]float64) []uint16 {
 	if ch < 0 || ch > 2 {
 		ch = 0
 	}
-	gain := [3]float64{1.35, 0.85, 0.55}[ch]
+	g := gain[ch]
 	scale := 0.0
 	if on[ch] {
 		x := float64(v[ch]) / 100
@@ -48,7 +55,7 @@ func ScaleMonoForSimLight(pix []uint16, ch int, on [3]bool, v [3]int) []uint16 {
 		if x > 1 {
 			x = 1
 		}
-		scale = gain * (0.85*x + 0.15*x*x)
+		scale = g * (0.85*x + 0.15*x*x)
 	}
 	out := make([]uint16, len(pix))
 	for i, p := range pix {

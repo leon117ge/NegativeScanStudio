@@ -279,6 +279,22 @@ func (u *MonoUI) readSettings() hikcam.Settings {
 	return st.Clamp()
 }
 
+// applyScanExposure writes a common film-base-leveling exposure into the
+// Mono Trichrome scan fields. Gain stays at 0 dB. Capture still meters
+// each R/G/B channel from this starting exposure.
+func (u *MonoUI) applyScanExposure(us, gain float64) {
+	if u == nil {
+		return
+	}
+	if u.expNE != nil {
+		u.expNE.SetValue(us)
+	}
+	if u.gainNE != nil {
+		u.gainNE.SetValue(gain)
+	}
+	u.say(fmt.Sprintf("Scan exposure updated from film-base leveling: %.0f us, %.2f dB.", us, gain))
+}
+
 func (u *MonoUI) applySettings() error {
 	if u.cam == nil {
 		return hikcam.ErrNotOpen
@@ -304,6 +320,9 @@ func (u *MonoUI) applyLive(fullRes bool) error {
 	bin := 2
 	if fullRes {
 		bin = 1
+	}
+	if sim, ok := u.cam.(*hikcam.Sim); ok {
+		sim.FlatField = false
 	}
 	live := hikcam.LiveViewSettings(u.readSettings(), bin)
 	if err := u.cam.Apply(live); err != nil {

@@ -19,6 +19,10 @@ type Sim struct {
 	// LightChannel, if set, tints the simulated frame (0=R, 1=G, 2=B)
 	// so a trichrome capture of the simulator is not three identical planes.
 	LightChannel func() int
+	// FlatField renders a mostly even film-base instead of the focus grid.
+	// Film-base leveling uses this so the measure-area median is stable
+	// and stays linear as exposure changes.
+	FlatField bool
 }
 
 // OpenSim returns a simulated CS240. It never fails.
@@ -128,7 +132,7 @@ func (s *Sim) Grab(timeout time.Duration) (*Frame, error) {
 		ch = s.LightChannel()
 	}
 	s.frame++
-	pix := renderSimFrame(w, h, s.set, s.frame, ch)
+	pix := renderSimFrame(w, h, s.set, s.frame, ch, s.FlatField)
 	return &Frame{
 		W:           w,
 		H:           h,
@@ -142,17 +146,36 @@ func (s *Sim) Grab(timeout time.Duration) (*Frame, error) {
 // renderSimFrame draws a grid plus fine grain so a focus meter has edges
 // to score. Exposure and gain scale the mean level. LightChannel tints
 // the pattern so R/G/B captures differ slightly (wavelength stand-in).
-func renderSimFrame(w, h int, st Settings, n, ch int) []uint16 {
+func renderSimFrame(w, h int, st Settings, n, ch int, flat bool) []uint16 {
 	exp := st.ExposureUS / 10_000 // 1.0 at the default 10 ms
 	if exp < 0.05 {
 		exp = 0.05
 	}
-	if exp > 8 {
-		exp = 8
+	if exp > 32 {
+		exp = 32
 	}
 	gain := math.Pow(10, st.GainDB/20)
 	level := exp * gain
 	pix := make([]uint16, w*h)
+	if flat {
+		// Even film base at 0.20 FS for 10 ms, 0 dB, so exposure can
+		// still be raised several stops before the sensor clips.
+		seed := uint32(n*9973 + 17)
+		base := 0.20 * level
+		for i := range pix {
+			seed = seed*1664525 + 1013904223
+			gr := float64(seed>>24)/255*0.004 - 0.002
+			v := base + gr
+			if v < 0 {
+				v = 0
+			}
+			if v > 1 {
+				v = 1
+			}
+			pix[i] = uint16(v*65535 + 0.5)
+		}
+		return pix
+	}
 	cx, cy := float64(w)/2, float64(h)/2
 	// A slight per-channel scale/shift mimics CA so the merge report is non-zero
 	// when the simulator is captured under different lights.
