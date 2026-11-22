@@ -139,16 +139,22 @@ func main() {
 		k := -1
 		switch tabs.CurrentIndex() {
 		case 0:
+			if focusui.active {
+				focusui.leave()
+			}
 			if camTabs.CurrentIndex() == 1 {
 				if lightui.usesMonoCam() {
 					k = -1 // Hikrobot / sim preview is injected into the Light live view
+					monoui.stopPreview()
 					lightui.startHikPreview()
 				} else {
 					lightui.stopHikPreview()
+					monoui.stopPreview()
 					k = 3
 				}
 			} else {
 				lightui.stopHikPreview()
+				monoui.stopPreview()
 				k = 0
 			}
 		case 1:
@@ -163,14 +169,22 @@ func main() {
 			}
 			if scanTabs.CurrentIndex() == 3 {
 				focusui.enter()
-			} else if focusui.active {
-				focusui.leave()
+			} else {
+				if focusui.active {
+					focusui.leave()
+				}
+				if scanTabs.CurrentIndex() == 2 {
+					monoui.startPreview()
+				} else {
+					monoui.stopPreview()
+				}
 			}
 		default:
 			lightui.stopHikPreview()
-		}
-		if tabs.CurrentIndex() != 1 && focusui.active {
-			focusui.leave()
+			if focusui.active {
+				focusui.leave()
+			}
+			monoui.stopPreview()
 		}
 		hdrui.setLivePage(k)
 	}

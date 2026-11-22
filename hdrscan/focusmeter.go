@@ -142,3 +142,40 @@ func CropGray(pix []float64, w, h, x0, y0, x1, y1 int) (out []float64, cw, ch in
 	}
 	return out, cw, ch
 }
+
+// CropGray16ToFloat64 copies a rectangle of a 16-bit plane into 0..1
+// floats. Only the crop is converted, so a 24 MP frame can be metered
+// at the zoomed or centre region without allocating a full float plane.
+func CropGray16ToFloat64(pix []uint16, w, h, x0, y0, x1, y1 int) (out []float64, cw, ch int) {
+	if w <= 0 || h <= 0 || len(pix) < w*h {
+		return nil, 0, 0
+	}
+	if x1 <= x0 || y1 <= y0 {
+		x0, y0, x1, y1 = 0, 0, w, h
+	}
+	if x0 < 0 {
+		x0 = 0
+	}
+	if y0 < 0 {
+		y0 = 0
+	}
+	if x1 > w {
+		x1 = w
+	}
+	if y1 > h {
+		y1 = h
+	}
+	cw, ch = x1-x0, y1-y0
+	if cw <= 0 || ch <= 0 {
+		return nil, 0, 0
+	}
+	out = make([]float64, cw*ch)
+	for y := 0; y < ch; y++ {
+		src := (y0+y)*w + x0
+		dst := y * cw
+		for x := 0; x < cw; x++ {
+			out[dst+x] = float64(pix[src+x]) / 65535
+		}
+	}
+	return out, cw, ch
+}

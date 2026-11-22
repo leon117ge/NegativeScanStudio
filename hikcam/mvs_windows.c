@@ -125,6 +125,7 @@ typedef int (__stdcall *FN_SetIntValueEx)(void *, const char *, int64_t);
 typedef int (__stdcall *FN_GetIntValueEx)(void *, const char *, MVCC_INTVALUE_EX *);
 typedef int (__stdcall *FN_SetBoolValue)(void *, const char *, unsigned char);
 typedef int (__stdcall *FN_SetCommandValue)(void *, const char *);
+typedef int (__stdcall *FN_ClearImageBuffer)(void *);
 
 static HMODULE hMVS;
 static char loadErr[256];
@@ -150,6 +151,7 @@ static FN_SetIntValueEx pSetIntValueEx;
 static FN_GetIntValueEx pGetIntValueEx;
 static FN_SetBoolValue pSetBoolValue;
 static FN_SetCommandValue pSetCommandValue;
+static FN_ClearImageBuffer pClearImageBuffer;
 
 static int hik_bind(const char *name, void **fn) {
     *fn = (void *)GetProcAddress(hMVS, name);
@@ -221,6 +223,7 @@ int hik_load(void) {
     hik_bind("MV_CC_GetIntValue", (void **)&pGetIntValue);
     hik_bind("MV_CC_SetIntValueEx", (void **)&pSetIntValueEx);
     hik_bind("MV_CC_GetIntValueEx", (void **)&pGetIntValueEx);
+    hik_bind("MV_CC_ClearImageBuffer", (void **)&pClearImageBuffer);
     if (!pSetIntValue && !pSetIntValueEx) {
         FreeLibrary(hMVS);
         hMVS = NULL;
@@ -415,6 +418,13 @@ int hik_grab_free(void *handle) {
     return pFreeImageBuffer(handle, &gFrame);
 }
 
+int hik_clear(void *handle) {
+    if (!pClearImageBuffer) {
+        return 0;
+    }
+    return pClearImageBuffer(handle);
+}
+
 #else
 int hik_load(void) { return -1; }
 int hik_available(void) { return 0; }
@@ -459,4 +469,5 @@ int hik_grab(void *handle, unsigned int timeout_ms,
     return -1;
 }
 int hik_grab_free(void *handle) { (void)handle; return 0; }
+int hik_clear(void *handle) { (void)handle; return 0; }
 #endif

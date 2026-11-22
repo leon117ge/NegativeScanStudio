@@ -29,6 +29,7 @@ int hik_grab(void *handle, unsigned int timeout_ms,
              unsigned char **data, int *w, int *h,
              unsigned int *pixfmt, unsigned int *len);
 int hik_grab_free(void *handle);
+int hik_clear(void *handle);
 
 #ifdef __cplusplus
 }

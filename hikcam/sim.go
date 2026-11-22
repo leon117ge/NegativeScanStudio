@@ -58,6 +58,14 @@ func (s *Sim) Apply(st Settings) error {
 		s.set.Width, s.set.Height = 960, 654
 		s.set.OffsetX, s.set.OffsetY = 0, 0
 	}
+	if b := s.set.Binning; b >= 2 {
+		if s.set.Width >= b {
+			s.set.Width /= b
+		}
+		if s.set.Height >= b {
+			s.set.Height /= b
+		}
+	}
 	return nil
 }
 

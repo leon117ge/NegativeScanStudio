@@ -37,6 +37,9 @@ type FocusUI struct {
 	view                                        *walk.CustomWidget
 	bmp                                         *walk.Bitmap
 	srcW, srcH                                  int
+	bmpX, bmpY                                  int  // origin of bmp in source pixels when it is a 1:1 crop
+	bmpFit                                      bool // bmp is a downsampled full frame
+	dispUI                                      atomic.Bool
 	zoomCB                                      *walk.ComboBox
 	markCB                                      *walk.CheckBox
 	greenBtn, whiteBtn, liveBtn, resetPeakBtn   *walk.PushButton
@@ -52,13 +55,15 @@ type FocusUI struct {
 	loopOn  atomic.Bool
 	loopRun atomic.Bool
 
-	mu         sync.Mutex
-	samples    []float64
-	visW, visH int
-	score      hdrscan.FocusScore
-	peak       hdrscan.PeakHold
-	aeWhy      string
-	aeState    hdrscan.ExposureState
+	mu           sync.Mutex
+	samples      []float64
+	visW, visH   int
+	score        hdrscan.FocusScore
+	peak         hdrscan.PeakHold
+	aeWhy        string
+	aeState      hdrscan.ExposureState
+	lastPix      []uint16
+	lastW, lastH int
 
 	savedHik       hikcam.Settings
 	haveSavedHik   bool
@@ -106,9 +111,16 @@ func (u *FocusUI) enter() {
 	u.peak.Reset()
 	// Snapshot exposures we may overwrite, then drive the light to green.
 	if u.mono != nil && u.mono.cam != nil {
-		u.savedHik = u.mono.cam.Settings()
+		// Snapshot the scan (UI) settings, not whatever live-view mode
+		// the Mono page last applied, so leaving this page restores
+		// Mono12 / software trigger for capture.
+		u.savedHik = u.mono.readSettings()
 		u.haveSavedHik = true
 		u.aeState = hdrscan.ExposureState{ExposureUS: u.savedHik.ExposureUS, GainDB: u.savedHik.GainDB}
+		u.mono.stopPreview()
+		if err := u.mono.applyLive(true); err != nil {
+			u.say("Live settings: " + err.Error())
+		}
 	} else {
 		u.haveSavedHik = false
 	}
@@ -284,15 +296,25 @@ func (u *FocusUI) loop() {
 	defer u.loopRun.Store(false)
 	cfg := hdrscan.DefaultAutoExp()
 	for u.loopOn.Load() && u.active {
-		img, pix, w, h, err := u.grabFrame()
+		pix, w, h, err := u.grabFrame()
 		if err != nil {
 			u.ui(func() { u.say("Live: " + err.Error()) })
-			time.Sleep(400 * time.Millisecond)
+			time.Sleep(200 * time.Millisecond)
 			continue
 		}
-		x0, y0, x1, y1 := u.visibleRect(w, h, 640, 400)
+		u.mu.Lock()
+		u.lastPix, u.lastW, u.lastH = pix, w, h
+		u.mu.Unlock()
+		img, ox, oy, fit := u.makeDisplay(pix, w, h)
+		if u.dispUI.CompareAndSwap(false, true) {
+			u.ui(func() {
+				defer u.dispUI.Store(false)
+				u.showDisplay(img, w, h, ox, oy, fit)
+			})
+		}
+		x0, y0, x1, y1 := u.meterRect(w, h)
 		samples := hdrscan.RegionSamples(pix, w, h, x0, y0, x1, y1, 2)
-		crop, cw, ch := hdrscan.CropGray(hdrscan.Gray16ToFloat64(pix), w, h, x0, y0, x1, y1)
+		crop, cw, ch := hdrscan.CropGray16ToFloat64(pix, w, h, x0, y0, x1, y1)
 		score := hdrscan.MeasureFocus(crop, cw, ch)
 		state, why := hdrscan.AdjustExposure(samples, u.aeState, cfg)
 		u.applyAE(state)
@@ -304,38 +326,72 @@ func (u *FocusUI) loop() {
 		u.aeWhy = why
 		u.aeState = state
 		u.mu.Unlock()
-		u.ui(func() {
-			u.showImage(img)
-			u.updateLabels()
-		})
-		time.Sleep(80 * time.Millisecond)
+		u.ui(func() { u.updateLabels() })
+		if u.mono != nil && u.mono.cam != nil && u.mono.cam.Info().Simulated {
+			time.Sleep(40 * time.Millisecond)
+		} else if u.mono == nil || u.mono.cam == nil {
+			time.Sleep(40 * time.Millisecond)
+		}
 	}
 }
 
-func (u *FocusUI) grabFrame() (image.Image, []uint16, int, int, error) {
+func (u *FocusUI) grabFrame() ([]uint16, int, int, error) {
 	if u.mono != nil && u.mono.cam != nil {
 		cam := u.mono.cam
 		_ = cam.StartGrab()
-		fr, err := cam.Grab(1500 * time.Millisecond)
+		fr, err := cam.Grab(300 * time.Millisecond)
 		if err != nil {
-			return nil, nil, 0, 0, err
+			return nil, 0, 0, err
 		}
-		return grayImage(fr), fr.Pix, fr.W, fr.H, nil
+		return fr.Pix, fr.W, fr.H, nil
 	}
 	if u.hdr != nil && u.hdr.dev != nil {
 		jpg, err := u.hdr.dev.LiveView()
 		if err != nil {
-			return nil, nil, 0, 0, err
+			return nil, 0, 0, err
 		}
 		im, err := jpeg.Decode(bytes.NewReader(jpg))
 		if err != nil {
-			return nil, nil, 0, 0, err
+			return nil, 0, 0, err
 		}
 		g := imageToGray16(im)
 		b := g.Bounds()
-		return g, gray16Pix(g), b.Dx(), b.Dy(), nil
+		return gray16Pix(g), b.Dx(), b.Dy(), nil
 	}
-	return nil, nil, 0, 0, fmt.Errorf("no camera")
+	return nil, 0, 0, fmt.Errorf("no camera")
+}
+
+func (u *FocusUI) makeDisplay(pix []uint16, w, h int) (img *image.Gray, ox, oy int, fit bool) {
+	z := u.zoomFactor()
+	if z == 0 {
+		return hikcam.PreviewGray(pix, w, h, hikcam.LivePreviewMaxEdge), 0, 0, true
+	}
+	x0, y0, x1, y1 := u.visibleRect(w, h, 640, 400)
+	return hikcam.CropGray8(pix, w, h, x0, y0, x1, y1), x0, y0, false
+}
+
+func (u *FocusUI) refreshDisplay() {
+	u.mu.Lock()
+	pix, w, h := u.lastPix, u.lastW, u.lastH
+	u.mu.Unlock()
+	if pix == nil || w <= 0 || h <= 0 {
+		if u.view != nil {
+			u.view.Invalidate()
+		}
+		return
+	}
+	img, ox, oy, fit := u.makeDisplay(pix, w, h)
+	u.showDisplay(img, w, h, ox, oy, fit)
+}
+
+func (u *FocusUI) meterRect(w, h int) (x0, y0, x1, y1 int) {
+	// Even in Fit view, score the centre (pan) region at 100 % so the
+	// Laplacian stays on full-res data and does not scan all 24 MP.
+	z := u.zoomFactor()
+	if z < 1 {
+		z = 1
+	}
+	return u.visibleRectAt(w, h, 640, 400, z)
 }
 
 func (u *FocusUI) applyAE(st hdrscan.ExposureState) {
@@ -372,12 +428,13 @@ func (u *FocusUI) ui(f func()) {
 	}
 }
 
-func (u *FocusUI) showImage(img image.Image) {
+func (u *FocusUI) showDisplay(img image.Image, fullW, fullH, ox, oy int, fit bool) {
 	if img == nil || u.view == nil {
 		return
 	}
-	b := img.Bounds()
-	u.srcW, u.srcH = b.Dx(), b.Dy()
+	u.srcW, u.srcH = fullW, fullH
+	u.bmpX, u.bmpY = ox, oy
+	u.bmpFit = fit
 	bmp, err := walk.NewBitmapFromImage(img)
 	if err != nil {
 		return
@@ -401,10 +458,13 @@ func (u *FocusUI) zoomFactor() int {
 }
 
 func (u *FocusUI) visibleRect(imgW, imgH, widgetW, widgetH int) (x0, y0, x1, y1 int) {
+	return u.visibleRectAt(imgW, imgH, widgetW, widgetH, u.zoomFactor())
+}
+
+func (u *FocusUI) visibleRectAt(imgW, imgH, widgetW, widgetH, z int) (x0, y0, x1, y1 int) {
 	if imgW <= 0 || imgH <= 0 {
 		return 0, 0, 0, 0
 	}
-	z := u.zoomFactor()
 	if z == 0 {
 		return 0, 0, imgW, imgH
 	}
@@ -472,35 +532,29 @@ func (u *FocusUI) paint(c *walk.Canvas, _ walk.Rectangle) error {
 	sz := u.bmp.Size()
 	z := u.zoomFactor()
 	var src, dst walk.Rectangle
-	if z == 0 {
+	markW, markH := u.srcW, u.srcH
+	if markW <= 0 {
+		markW = sz.Width
+	}
+	if markH <= 0 {
+		markH = sz.Height
+	}
+	if z == 0 || u.bmpFit {
 		dst = letterbox(cb, sz.Width, sz.Height)
 		src = walk.Rectangle{Width: sz.Width, Height: sz.Height}
-	} else {
-		x0, y0, x1, y1 := u.visibleRect(sz.Width, sz.Height, cb.Width, cb.Height)
-		src = walk.Rectangle{X: x0, Y: y0, Width: x1 - x0, Height: y1 - y0}
-		dw, dh := src.Width*z, src.Height*z
-		dst = walk.Rectangle{X: cb.X + (cb.Width-dw)/2, Y: cb.Y + (cb.Height-dh)/2, Width: dw, Height: dh}
-	}
-	_ = src
-	// walk.DrawImageStretchedPixels draws the whole bitmap into dst; for a
-	// zoomed crop we stretch the full bitmap into a larger rectangle offset
-	// so the visible crop lands in the widget.
-	if z == 0 {
+		markW, markH = sz.Width, sz.Height
 		c.DrawImageStretchedPixels(u.bmp, dst)
 	} else {
-		full := walk.Rectangle{
-			X:      dst.X - src.X*z,
-			Y:      dst.Y - src.Y*z,
-			Width:  sz.Width * z,
-			Height: sz.Height * z,
-		}
-		c.DrawImageStretchedPixels(u.bmp, full)
+		src = walk.Rectangle{X: u.bmpX, Y: u.bmpY, Width: sz.Width, Height: sz.Height}
+		dw, dh := src.Width*z, src.Height*z
+		dst = walk.Rectangle{X: cb.X + (cb.Width-dw)/2, Y: cb.Y + (cb.Height-dh)/2, Width: dw, Height: dh}
+		c.DrawImageStretchedPixels(u.bmp, dst)
 	}
 	// Optical-centre / flatness overlay, mapped through zoom and pan.
 	// Drawn before the green meter mark so the short solid plus stays
 	// visible when the two coincide (fit, pan at the sensor centre).
 	if centerMarkOn(u.hdr) {
-		paintCenterMarks(c, src, dst, sz.Width, sz.Height)
+		paintCenterMarks(c, src, dst, markW, markH)
 	}
 	// Crosshair at the centre to mark the focus sample.
 	penB, _ := walk.NewSolidColorBrush(walk.RGB(80, 220, 120))
@@ -557,9 +611,7 @@ func (u *FocusUI) click(x, y int, b walk.MouseButton) {
 	u.cx, u.cy = ix, iy
 	u.drag = true
 	u.dragX, u.dragY = x, y
-	if u.view != nil {
-		u.view.Invalidate()
-	}
+	u.refreshDisplay()
 }
 
 func (u *FocusUI) move(x, y int, b walk.MouseButton) {
@@ -582,9 +634,7 @@ func (u *FocusUI) move(x, y int, b walk.MouseButton) {
 		u.cy = 1
 	}
 	u.dragX, u.dragY = x, y
-	if u.view != nil {
-		u.view.Invalidate()
-	}
+	u.refreshDisplay()
 }
 
 func (u *FocusUI) up(_ int, _ int, _ walk.MouseButton) { u.drag = false }
@@ -653,9 +703,7 @@ func (u *FocusUI) Page() TabPage {
 						Composite{Layout: Grid{Columns: 2, MarginsZero: true, Spacing: 4}, Children: []Widget{
 							Label{Text: "Zoom", MinSize: Size{Width: 80}},
 							ComboBox{AssignTo: &u.zoomCB, Model: zoomItems, CurrentIndex: 0, OnCurrentIndexChanged: func() {
-								if u.view != nil {
-									u.view.Invalidate()
-								}
+								u.refreshDisplay()
 							}},
 						}},
 						Composite{Layout: HBox{MarginsZero: true, Spacing: 6}, Children: []Widget{

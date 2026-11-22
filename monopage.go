@@ -48,6 +48,7 @@ type MonoUI struct {
 
 	previewOn  atomic.Bool
 	previewRun atomic.Bool
+	previewUI  atomic.Bool // true while a live bitmap is being posted to the UI
 	running    bool
 	cancel     func()
 	why        string
@@ -293,6 +294,33 @@ func (u *MonoUI) applySettings() error {
 	return nil
 }
 
+// applyLive switches the open camera to free-run Mono8 for a smooth
+// preview. fullRes disables 2x2 binning so Focus Check can zoom 1:1.
+// Capture still uses applySettings (Mono12, software trigger, full frame).
+func (u *MonoUI) applyLive(fullRes bool) error {
+	if u.cam == nil {
+		return hikcam.ErrNotOpen
+	}
+	bin := 2
+	if fullRes {
+		bin = 1
+	}
+	live := hikcam.LiveViewSettings(u.readSettings(), bin)
+	if err := u.cam.Apply(live); err != nil {
+		return err
+	}
+	got := u.cam.Settings()
+	mode := "free-run Mono8"
+	if fullRes {
+		mode += ", full resolution"
+	} else if got.Binning >= 2 && got.Width > 0 && got.Width <= hikcam.CS240Width/2+32 {
+		mode += fmt.Sprintf(", %dx binning", got.Binning)
+	}
+	u.say(fmt.Sprintf("Live view: %s, %.0f us, %.2f dB, %dx%d",
+		mode, got.ExposureUS, got.GainDB, got.Width, got.Height))
+	return nil
+}
+
 func (u *MonoUI) usingBestScan() bool {
 	return u.presetCB != nil && u.presetCB.CurrentIndex() == 1
 }
@@ -375,8 +403,11 @@ func (u *MonoUI) updateCaptureLabel() {
 }
 
 func (u *MonoUI) startPreview() {
-	if u.cam == nil || u.previewRun.Load() {
+	if u.cam == nil || u.previewRun.Load() || u.running {
 		return
+	}
+	if err := u.applyLive(false); err != nil {
+		u.say("Live settings: " + err.Error())
 	}
 	if err := u.cam.StartGrab(); err != nil {
 		u.say("Live grab: " + err.Error())
@@ -388,33 +419,39 @@ func (u *MonoUI) startPreview() {
 	go func() {
 		defer u.previewRun.Store(false)
 		for u.previewOn.Load() && u.cam == cam {
-			fr, err := cam.Grab(1500 * time.Millisecond)
+			fr, err := cam.Grab(300 * time.Millisecond)
 			if err != nil {
 				if !u.previewOn.Load() {
 					break
 				}
-				time.Sleep(200 * time.Millisecond)
+				time.Sleep(50 * time.Millisecond)
 				continue
 			}
-			img := grayImage(fr)
-			u.ui(func() {
-				if u.cam != cam || !u.previewOn.Load() {
-					return
-				}
-				bmp, e := walk.NewBitmapFromImage(img)
-				if e != nil {
-					return
-				}
-				if u.bmp != nil {
-					u.bmp.Dispose()
-				}
-				u.bmp = bmp
-				u.viewWhat = fmt.Sprintf("Live  %dx%d  %s  %.0f us", fr.W, fr.H, fr.PixelFormat, fr.ExposureUS)
-				if u.view != nil {
-					u.view.Invalidate()
-				}
-			})
-			time.Sleep(80 * time.Millisecond)
+			img := hikcam.PreviewGray(fr.Pix, fr.W, fr.H, hikcam.LivePreviewMaxEdge)
+			what := fmt.Sprintf("Live  %dx%d  %s  %.0f us", fr.W, fr.H, fr.PixelFormat, fr.ExposureUS)
+			if u.previewUI.CompareAndSwap(false, true) {
+				u.ui(func() {
+					defer u.previewUI.Store(false)
+					if u.cam != cam || !u.previewOn.Load() {
+						return
+					}
+					bmp, e := walk.NewBitmapFromImage(img)
+					if e != nil {
+						return
+					}
+					if u.bmp != nil {
+						u.bmp.Dispose()
+					}
+					u.bmp = bmp
+					u.viewWhat = what
+					if u.view != nil {
+						u.view.Invalidate()
+					}
+				})
+			}
+			if cam.Info().Simulated {
+				time.Sleep(40 * time.Millisecond)
+			}
 		}
 		_ = cam.StopGrab()
 	}()
@@ -422,17 +459,13 @@ func (u *MonoUI) startPreview() {
 
 func (u *MonoUI) stopPreview() {
 	u.previewOn.Store(false)
-	for i := 0; i < 30 && u.previewRun.Load(); i++ {
+	for i := 0; i < 40 && u.previewRun.Load(); i++ {
 		time.Sleep(50 * time.Millisecond)
 	}
 }
 
 func grayImage(fr *hikcam.Frame) *image.Gray {
-	img := image.NewGray(image.Rect(0, 0, fr.W, fr.H))
-	for i, v := range fr.Pix {
-		img.Pix[i] = byte(v >> 8)
-	}
-	return img
+	return hikcam.PreviewGray(fr.Pix, fr.W, fr.H, 0)
 }
 
 func (u *MonoUI) paint(c *walk.Canvas, _ walk.Rectangle) error {
@@ -512,16 +545,17 @@ func (u *MonoUI) capture() {
 	if u.usingBestScan() {
 		u.fillBestScanUI()
 	}
-	if err := u.applySettings(); err != nil {
-		u.say("Apply settings: " + err.Error())
-		walk.MsgBox(u.hdr.win(), "Mono trichrome", "Could not apply camera settings:\n\n"+err.Error(), walk.MsgBoxIconWarning)
-		return
-	}
 	evs := u.captureEVs()
 	po := u.hdr.processOptions(dir)
 	u.stopPreview()
 	if u.light != nil {
 		u.light.stopHikPreview()
+	}
+	if err := u.applySettings(); err != nil {
+		u.say("Apply settings: " + err.Error())
+		walk.MsgBox(u.hdr.win(), "Mono trichrome", "Could not apply camera settings:\n\n"+err.Error(), walk.MsgBoxIconWarning)
+		u.startPreview()
+		return
 	}
 	u.running = true
 	u.updateButtons()
@@ -793,8 +827,15 @@ func (u *MonoUI) Page() TabPage {
 							if u.usingBestScan() {
 								u.fillBestScanUI()
 							}
+							live := u.previewOn.Load() || u.previewRun.Load()
+							if live {
+								u.stopPreview()
+							}
 							if err := u.applySettings(); err != nil {
 								u.say("Apply failed: " + err.Error())
+							}
+							if live {
+								u.startPreview()
 							}
 						}},
 					},

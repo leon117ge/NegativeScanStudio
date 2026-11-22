@@ -124,6 +124,10 @@ type Settings struct {
 	OffsetX         int
 	OffsetY         int
 	SoftwareTrigger bool
+	// Binning is a square sensor reduction (1 = off, 2 = 2x2). Apply
+	// tries BinningHorizontal/Vertical, then Decimation*, and ignores
+	// missing GenICam nodes so a body without them still streams.
+	Binning int
 	// QualityPreset asks Apply to also try noise-relevant GenICam nodes
 	// (ExposureAuto/GainAuto Off, DigitalShift 0, sharpness/denoise/LUT
 	// off, ADC 12-bit). Missing nodes are ignored so older firmware still
@@ -210,7 +214,34 @@ func (s Settings) Clamp() Settings {
 	if s.OffsetY < 0 {
 		s.OffsetY = 0
 	}
+	if s.Binning < 0 {
+		s.Binning = 0
+	}
+	if s.Binning > 4 {
+		s.Binning = 4
+	}
 	return s
+}
+
+// LiveViewSettings derives a free-run live-view setup from the user's
+// scan settings. Capture quality is unchanged: the caller must Apply the
+// original scan settings (Mono12, software trigger, full frame, no
+// binning) before a still is taken. Live view turns the trigger off,
+// requests Mono8 so USB3 can sustain the stream, and optionally asks
+// for 2x2 binning (binning<=1 keeps full resolution, for Focus Check).
+func LiveViewSettings(scan Settings, binning int) Settings {
+	st := scan
+	st.SoftwareTrigger = false
+	st.PixelFormat = PixelMono8
+	st.QualityPreset = false
+	if binning < 1 {
+		binning = 1
+	}
+	if binning > 4 {
+		binning = 4
+	}
+	st.Binning = binning
+	return st.Clamp()
 }
 
 // Frame is one grabbed monochrome image, linearized to 16-bit (the native

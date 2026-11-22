@@ -7,6 +7,7 @@ import (
 	"image"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 
 	"basetool/hdrscan"
@@ -229,28 +230,37 @@ func (u *LightUI) startHikPreview() {
 			u.log("Hikrobot preview: %v", err)
 			return
 		}
+		if err := d.Apply(hikcam.LiveViewSettings(d.Settings(), 2)); err != nil {
+			u.log("Hikrobot live settings: %v", err)
+		}
 		if err := d.StartGrab(); err != nil {
 			u.log("Hikrobot preview grab: %v", err)
 			return
 		}
+		var posting atomic.Bool
 		for u.hikPrevGen.Load() == gen {
-			fr, err := d.Grab(1500 * time.Millisecond)
+			fr, err := d.Grab(300 * time.Millisecond)
 			if err != nil {
 				if u.hikPrevGen.Load() != gen {
 					return
 				}
-				time.Sleep(200 * time.Millisecond)
+				time.Sleep(50 * time.Millisecond)
 				continue
 			}
-			img := previewGray(fr, 1600)
+			img := hikcam.PreviewGray(fr.Pix, fr.W, fr.H, hikcam.LivePreviewMaxEdge)
 			what := fmt.Sprintf("Hikrobot live  %dx%d  %s  %.0f us", fr.W, fr.H, fr.PixelFormat, fr.ExposureUS)
-			u.ui(func() {
-				if u.hikPrevGen.Load() != gen || u.hdr == nil {
-					return
-				}
-				u.hdr.setImage(img, what)
-			})
-			time.Sleep(80 * time.Millisecond)
+			if posting.CompareAndSwap(false, true) {
+				u.ui(func() {
+					defer posting.Store(false)
+					if u.hikPrevGen.Load() != gen || u.hdr == nil {
+						return
+					}
+					u.hdr.setImage(img, what)
+				})
+			}
+			if d.Info().Simulated {
+				time.Sleep(40 * time.Millisecond)
+			}
 		}
 	}(gen)
 }
@@ -260,22 +270,7 @@ func (u *LightUI) stopHikPreview() {
 }
 
 func previewGray(fr *hikcam.Frame, maxEdge int) *image.Gray {
-	w, h := fr.W, fr.H
-	if w <= 0 || h <= 0 {
-		return image.NewGray(image.Rect(0, 0, 1, 1))
-	}
-	scale := 1
-	if max(w, h) > maxEdge && maxEdge > 0 {
-		scale = (max(w, h) + maxEdge - 1) / maxEdge
-	}
-	nw, nh := max(1, w/scale), max(1, h/scale)
-	img := image.NewGray(image.Rect(0, 0, nw, nh))
-	for y := 0; y < nh; y++ {
-		for x := 0; x < nw; x++ {
-			img.Pix[y*nw+x] = byte(fr.Pix[(y*scale)*w+(x*scale)] >> 8)
-		}
-	}
-	return img
+	return hikcam.PreviewGray(fr.Pix, fr.W, fr.H, maxEdge)
 }
 
 func (u *HDRUI) updateLiveRouting() {

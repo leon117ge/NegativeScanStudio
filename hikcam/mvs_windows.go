@@ -142,7 +142,7 @@ func (d *realDev) Apply(st Settings) error {
 		C.hik_stop(d.h)
 		d.grab = false
 	}
-	if err := d.applyLocked(st); err != nil {
+	if err := d.applyLocked(&st); err != nil {
 		if restart {
 			if C.hik_start(d.h) == 0 {
 				d.grab = true
@@ -160,7 +160,7 @@ func (d *realDev) Apply(st Settings) error {
 	return nil
 }
 
-func (d *realDev) applyLocked(st Settings) error {
+func (d *realDev) applyLocked(st *Settings) error {
 	// Manual exposure / gain, gamma off unless the user asked for it.
 	_ = callEnum(d.h, "ExposureAuto", "Off")
 	_ = callEnum(d.h, "GainAuto", "Off")
@@ -199,6 +199,7 @@ func (d *realDev) applyLocked(st Settings) error {
 	} else {
 		_ = callEnum(d.h, "TriggerMode", "Off")
 	}
+	applyBinning(d.h, st.Binning)
 	if st.FullFrame {
 		// Restore the sensor's maximum image. Offset must go to 0 first
 		// so Width/Height can grow back to the full frame.
@@ -239,6 +240,59 @@ func (d *realDev) applyLocked(st Settings) error {
 		applyQualityNodes(d.h)
 	}
 	return nil
+}
+
+// applyBinning requests a square bin/decimation factor. Missing nodes
+// are ignored so a camera that only offers one of the names, or none,
+// still applies the rest of the settings.
+func applyBinning(h unsafe.Pointer, bin int) {
+	if bin < 1 {
+		bin = 1
+	}
+	applied := false
+	if callInt(h, "BinningHorizontal", int64(bin)) == nil {
+		_ = callInt(h, "BinningVertical", int64(bin))
+		applied = true
+	} else {
+		name := binEnumName(bin)
+		if callEnum(h, "BinningHorizontal", name) == nil {
+			_ = callEnum(h, "BinningVertical", name)
+			applied = true
+		} else if bin == 1 && callEnum(h, "BinningHorizontal", "Off") == nil {
+			_ = callEnum(h, "BinningVertical", "Off")
+			applied = true
+		}
+	}
+	if bin <= 1 {
+		_ = callInt(h, "DecimationHorizontal", 1)
+		_ = callInt(h, "DecimationVertical", 1)
+		_ = callEnum(h, "DecimationHorizontal", "Off")
+		_ = callEnum(h, "DecimationVertical", "Off")
+		return
+	}
+	if applied {
+		return
+	}
+	if callInt(h, "DecimationHorizontal", int64(bin)) == nil {
+		_ = callInt(h, "DecimationVertical", int64(bin))
+		return
+	}
+	name := binEnumName(bin)
+	_ = callEnum(h, "DecimationHorizontal", name)
+	_ = callEnum(h, "DecimationVertical", name)
+}
+
+func binEnumName(bin int) string {
+	if bin <= 1 {
+		return "1"
+	}
+	if bin == 2 {
+		return "2"
+	}
+	if bin == 4 {
+		return "4"
+	}
+	return "1"
 }
 
 // applyQualityNodes tries optional noise-relevant GenICam features.
@@ -307,6 +361,11 @@ func (d *realDev) Grab(timeout time.Duration) (*Frame, error) {
 	}
 	if !d.grab {
 		return nil, ErrNotGrab
+	}
+	if !d.set.SoftwareTrigger {
+		// Drop queued frames so a slow display loop cannot fall behind
+		// the free-run stream and show stale images.
+		C.hik_clear(d.h)
 	}
 	if d.set.SoftwareTrigger {
 		ck := C.CString("TriggerSoftware")

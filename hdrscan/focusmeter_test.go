@@ -41,3 +41,17 @@ func TestCropGray(t *testing.T) {
 		t.Fatalf("got %v %dx%d", c, cw, ch)
 	}
 }
+
+func TestCropGray16ToFloat64(t *testing.T) {
+	p := []uint16{
+		0, 65535, 0,
+		32768, 16384, 8192,
+	}
+	c, cw, ch := CropGray16ToFloat64(p, 3, 2, 1, 0, 3, 2)
+	if cw != 2 || ch != 2 {
+		t.Fatalf("size %dx%d", cw, ch)
+	}
+	if c[0] != 1 || c[2] < 0.24 || c[2] > 0.26 {
+		t.Fatalf("vals %v", c)
+	}
+}
