@@ -1428,7 +1428,7 @@ func (u *LightUI) Page() TabPage {
 							}},
 							Label{AssignTo: &u.hikExpLbl, Text: "Exposure", MinSize: Size{Width: 96}, Visible: false},
 							Composite{AssignTo: &u.hikExpRow, Visible: false, Layout: HBox{MarginsZero: true, Spacing: 4}, Children: []Widget{
-								NumberEdit{AssignTo: &u.hikExpNE, Value: 10000, MinValue: 32, MaxValue: 10000000, Decimals: 0, Increment: 100,
+								NumberEdit{AssignTo: &u.hikExpNE, Value: 10000, MinValue: 0, MaxValue: 10000000, Decimals: 0, Increment: 100,
 									Suffix: " us", SpinButtonsVisible: true,
 									ToolTipText: "Hikrobot ExposureTime in microseconds, taken from Mono Trichrome scan settings. Leveling uses this one common exposure (gain 0 dB, Mono12, full frame) for R, G and B. If a channel cannot reach the target at brightness 100, the exposure is raised automatically and written back to Mono Trichrome."},
 								Label{Text: "Gain 0 dB (fixed)"},
