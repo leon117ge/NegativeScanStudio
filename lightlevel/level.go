@@ -39,7 +39,8 @@ type Camera interface {
 	Mono() bool
 	// Prepare sets / checks the fixed exposure once before the sequence.
 	// After Prepare, only a VariableExposure camera may change the
-	// exposure, and only before the light-code search begins.
+	// exposure (to place the coarsest light code on target, and later
+	// to fine-tune if an integer step cannot hit the tolerance).
 	Prepare() (string, error)
 	// Shoot captures a frame with only channel ch lit and returns that
 	// channel on the scan converter's linear scale (all pixels on a mono camera).

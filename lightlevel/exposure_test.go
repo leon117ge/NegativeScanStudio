@@ -159,28 +159,106 @@ func TestFitCommonExposureLowersWhenRedCodeTooLow(t *testing.T) {
 	}
 }
 
-func TestChooseCommonUSLowersForBrightRed(t *testing.T) {
-	// Measurements at 14289 us: R already 0.515 at code 5, G/B mid.
-	// Construct unclipped points that imply R wants a much lower exposure.
+func TestChooseCoarsePlanLowersForBrightRed(t *testing.T) {
+	// At 14289 us, R is already on target at code 5; G/B need 15 and 18.
+	// The plan should lower exposure so R's integer code is as high as
+	// possible while G and B stay at or below FitHeadroomMax.
 	cur := 14289.0
 	pts := [3][]probePt{
 		{{code: 5, level: 0.50}},
 		{{code: 15, level: 0.50}},
 		{{code: 18, level: 0.50}},
 	}
-	need, reason, tight := chooseCommonUS(cur, pts, 0.50, 0.02)
-	if tight {
-		t.Fatalf("this ratio should still fit a window, got tight %s need %.0f", reason, need)
-	}
-	if need >= cur {
-		t.Fatalf("should lower exposure, got %.0f (%s)", need, reason)
-	}
-	// R at 30: us = 14289 * 0.51539 / estimate(30) wait usForTargetAt uses estimate then cur*target/level
-	want, ok := usForTargetAt(pts[0], FitMinCode, cur, 0.50)
+	plan, ok := chooseCoarsePlan(cur, pts, 0.50)
 	if !ok {
-		t.Fatal("could not estimate US for R at 30")
+		t.Fatal("expected a coarse plan")
 	}
-	if math.Abs(need-want)/want > 0.15 && math.Abs(need-want) > 200 {
-		t.Fatalf("need %.0f us, expected around R@30 = %.0f us (%s)", need, want, reason)
+	if plan.ch != 0 {
+		t.Fatalf("coarsest should be R, got %c", "RGB"[plan.ch])
+	}
+	if plan.us >= cur {
+		t.Fatalf("should lower exposure, got %.0f (%s)", plan.us, plan.reason)
+	}
+	if plan.code < 25 {
+		t.Fatalf("R should be raised well above 5, got code %d at %.0f us (%s)", plan.code, plan.us, plan.reason)
+	}
+	for c, start := range []int{15, 18} {
+		n, ok := neededCodeAt(pts[c+1], cur, plan.us, 0.50)
+		if !ok || n > float64(FitHeadroomMax)+1.5 {
+			t.Fatalf("other channel %c should stay at or below %d, needed %.1f (from %d) at %.0f us",
+				"RGB"[c+1], FitHeadroomMax, n, start, plan.us)
+		}
+	}
+}
+
+func TestFitExposureFineTunesCoarseRed(t *testing.T) {
+	// Hardware-like ratio: at 11567 us, R needs ~7, G ~85, B ~86.
+	// The 25-85 window is impossible (~12x channel ratio). Exposure
+	// must fine-tune the coarsest integer (R) so all three land within 2%.
+	const startUS = 11567.0
+	const ref = 10000.0
+	scale := startUS / ref
+	d, c := setup(t)
+	syn := NewSynth(d.Lights)
+	syn.Gain = [3]float64{
+		0.50 / ledDrive(7) / scale,
+		0.50 / ledDrive(85) / scale,
+		0.50 / ledDrive(86) / scale,
+	}
+	cam := &expoCam{Synth: syn, us: startUS, ref: ref, baseGain: syn.Gain}
+	res, err := Run(context.Background(), simLight{c}, cam, Params{
+		Target: 0.50, Tol: 0.02, Settle: time.Millisecond, Start: [3]int{7, 85, 86},
+	}, [3]bool{true, true, true}, func(s string) { t.Log(s) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Converged() {
+		t.Fatalf("R@7 vs G/B@85 should converge by fine-tuning exposure: %v (exposure %.0f us, values %v, post %v, fit %s)",
+			res.Problems(), res.Fit.FinalUS, res.Values, res.Post, res.Fit.Reason)
+	}
+	if res.Values[0] < 1 || res.Values[0] > 25 {
+		t.Fatalf("R should stay on a low integer code (ratio cannot reach 25-85), got %v at %.0f us", res.Values, res.Fit.FinalUS)
+	}
+	if res.Values[1] > 100 || res.Values[2] > 100 {
+		t.Fatalf("G/B must stay reachable, got %v", res.Values)
+	}
+	for c, v := range res.Post {
+		if math.Abs(v/0.50-1) > 0.02 {
+			t.Fatalf("%c post %.5f is outside 2%% at values %v, exposure %.0f us", "RGB"[c], v, res.Values, res.Fit.FinalUS)
+		}
+	}
+}
+
+func TestChooseCoarsePlanHardwareRatio(t *testing.T) {
+	// Measurements matching the v1.06 hardware miss: R at 7 is 2.5% low,
+	// G/B are already on target at 85/86, 11567 us.
+	cur := 11567.0
+	pts := [3][]probePt{
+		{{code: 7, level: 0.48756}},
+		{{code: 85, level: 0.49805}},
+		{{code: 86, level: 0.50172}},
+	}
+	plan, ok := chooseCoarsePlan(cur, pts, 0.50)
+	if !ok {
+		t.Fatal("expected a coarse plan")
+	}
+	if plan.ch != 0 {
+		t.Fatalf("coarsest should be R, got %c (%s)", "RGB"[plan.ch], plan.reason)
+	}
+	if plan.code < 5 || plan.code > 20 {
+		t.Fatalf("R code should stay low, got %d at %.0f us (%s)", plan.code, plan.us, plan.reason)
+	}
+	// Exposure for R at that integer should be near cur * 0.50/0.48756 if code stays 7.
+	if plan.code == 7 {
+		want := cur * 0.50 / 0.48756
+		if math.Abs(plan.us-want)/want > 0.05 {
+			t.Fatalf("R@7 exposure %.0f, want around %.0f (%s)", plan.us, want, plan.reason)
+		}
+	}
+	for c := 1; c < 3; c++ {
+		n, ok := neededCodeAt(pts[c], cur, plan.us, 0.50)
+		if !ok || n > 100 {
+			t.Fatalf("%c should stay reachable, needed %.1f at %.0f us", "RGB"[c], n, plan.us)
+		}
 	}
 }

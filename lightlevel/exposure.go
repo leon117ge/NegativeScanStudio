@@ -8,36 +8,42 @@ import (
 	"time"
 )
 
-// FitProbeCode is the high light-brightness probe. FitHeadroomCode is the
-// comfortable code the dimmest channel should hit the target at.
-// FitMinCode is the lowest code we want any channel to land on (about
-// 25–30): below this, one integer step is a large fraction of the level
-// and may miss the tolerance.
+// FitProbeCode is the high light-brightness probe. FitMinCode is still
+// used as a low probe point. FitHeadroomMax is the highest light code
+// we try to leave the dimmest other channels at, so they keep headroom
+// below 100 while the coarsest channel's code is raised as far as the
+// ratio allows. Exposure, which is continuous, is then the fine control
+// for that coarsest integer code; the other channels are leveled by
+// integer codes, whose steps are then fine.
 const (
 	FitProbeCode    = 100
 	FitHeadroomCode = 85
 	FitMinCode      = 25
+	FitHeadroomMax  = 90
 	MinExposureUS   = 32.0
 	MaxExposureUS   = 10_000_000.0
 )
 
-// VariableExposure is a camera whose fixed exposure can be raised or
-// lowered once before the light-code search and then held for all three
-// channels. Hikrobot monochrome leveling uses this; Bayer / X-T3 cameras
-// do not.
+// VariableExposure is a camera whose exposure can be raised, lowered
+// and fine-tuned during monochrome leveling (Hikrobot). Bayer / X-T3
+// cameras do not implement this: their exposure stays fixed while only
+// the light codes change.
 type VariableExposure interface {
 	Camera
 	GetExposure() (us, gainDB float64)
 	SetExposure(us, gainDB float64) error
 }
 
-// ExposureFit records whether the common camera exposure was changed so
-// the three light codes land in a well-resolved window.
+// ExposureFit records the common camera exposure chosen so the coarsest
+// light channel can be placed on target at an integer code.
 type ExposureFit struct {
 	StartedUS, FinalUS     float64
 	StartedGain, FinalGain float64
 	Changed                bool
 	Reason                 string
+	HasCoarse              bool
+	CoarseCh               int
+	CoarseCode             int
 }
 
 // ledDrive is a fallback interpolator for the RGB Light Air curve when
@@ -127,85 +133,201 @@ func usForTargetAt(pts []probePt, code int, curUS, target float64) (float64, boo
 	return clampExposureUS(curUS * target / lv), true
 }
 
-// chooseCommonUS picks one exposure so light codes land in [FitMinCode,
-// FitHeadroomCode] when possible. If the channel ratio cannot satisfy both
-// ends, it keeps the dimmest channel reachable at 100 and raises the
-// brightest channel's code as far as that allows.
-func chooseCommonUS(curUS float64, pts [3][]probePt, target, tol float64) (need float64, reason string, tight bool) {
+// neededCodeAt is the continuous light code that would hit target at
+// newUS, given measurements taken at curUS. ok is false when even code
+// 100 would fall short (the returned code is then 100).
+func neededCodeAt(pts []probePt, curUS, newUS, target float64) (float64, bool) {
+	if curUS <= 0 || newUS <= 0 || target <= 0 {
+		return 0, false
+	}
+	want := target * curUS / newUS
+	lv100, ok100 := estimateLevel(pts, 100)
+	if !ok100 {
+		return 0, false
+	}
+	if lv100 < want {
+		return 100, false
+	}
+	if lv1, ok1 := estimateLevel(pts, 1); ok1 && lv1 >= want {
+		return 1, true
+	}
+	lo, hi := 1, 100
+	for hi-lo > 1 {
+		mid := (lo + hi) / 2
+		lv, ok := estimateLevel(pts, mid)
+		if !ok {
+			return 0, false
+		}
+		if lv < want {
+			lo = mid
+		} else {
+			hi = mid
+		}
+	}
+	lvLo, okLo := estimateLevel(pts, lo)
+	lvHi, okHi := estimateLevel(pts, hi)
+	if !okLo || !okHi {
+		return float64(hi), okHi
+	}
+	if math.Abs(lvHi-lvLo) < 1e-12 {
+		return float64(hi), true
+	}
+	frac := (want - lvLo) / (lvHi - lvLo)
+	return float64(lo) + frac*float64(hi-lo), true
+}
+
+// coarsePlan is the integer code and exposure that put the coarsest
+// channel on target, with the other channels still reachable at or
+// below a headroom cap.
+type coarsePlan struct {
+	ch     int
+	code   int
+	us     float64
+	reason string
+}
+
+func coarsestChannel(pts [3][]probePt, measUS, atUS, target float64) (int, bool) {
+	ch, best, found := 0, 0.0, false
+	for c := 0; c < 3; c++ {
+		n, ok := neededCodeAt(pts[c], measUS, atUS, target)
+		if !ok {
+			// Unreachable at atUS: this is a dim channel, not the coarsest.
+			continue
+		}
+		if !found || n < best {
+			ch, best, found = c, n, true
+		}
+	}
+	return ch, found
+}
+
+func planFits(pts [3][]probePt, coarse, k int, us, curUS, target float64, maxOther int) bool {
+	if us < MinExposureUS || us > MaxExposureUS {
+		return false
+	}
+	for c := 0; c < 3; c++ {
+		if c == coarse {
+			continue
+		}
+		n, ok := neededCodeAt(pts[c], curUS, us, target)
+		if !ok || n > float64(maxOther)+1e-6 {
+			return false
+		}
+	}
+	return true
+}
+
+// chooseCoarsePlan picks the channel with the lowest needed light code
+// (the coarsest integer step) and the highest integer code for it that
+// still leaves the other channels at or below maxOther (then 100).
+// The returned exposure places that channel on target at that integer.
+func chooseCoarsePlan(curUS float64, pts [3][]probePt, target float64) (coarsePlan, bool) {
 	if curUS <= 0 {
 		curUS = 10_000
 	}
 	if target <= 0 {
 		target = 0.50
 	}
-	var usDim100, usDimHead, usBrightMin float64
-	haveDim, haveHead, haveBright := false, false, false
-	dimCh, brightCh := -1, -1
+	coarse, ok := coarsestChannel(pts, curUS, curUS, target)
+	if !ok {
+		// Every channel is short at the current exposure: raise to the
+		// dimmest channel at 100, then identify the coarsest there.
+		// Measurements in pts are still at curUS.
+		var usMin float64
+		have := false
+		for c := 0; c < 3; c++ {
+			if v, ok := usForTargetAt(pts[c], FitProbeCode, curUS, target); ok {
+				if !have || v > usMin {
+					usMin, have = v, true
+				}
+			}
+		}
+		if !have {
+			return coarsePlan{}, false
+		}
+		coarse, ok = coarsestChannel(pts, curUS, usMin, target)
+		if !ok {
+			return coarsePlan{}, false
+		}
+	}
+	pick := func(maxOther int) (coarsePlan, bool) {
+		for k := 100; k >= 1; k-- {
+			us, ok := usForTargetAt(pts[coarse], k, curUS, target)
+			if !ok {
+				continue
+			}
+			if planFits(pts, coarse, k, us, curUS, target, maxOther) {
+				return coarsePlan{
+					ch:   coarse,
+					code: k,
+					us:   us,
+					reason: fmt.Sprintf("set common exposure to %.0f us so %c lands on target at light code %d; the other channels stay at or below code %d and are then leveled by integer steps (gain 0 dB)",
+						us, "RGB"[coarse], k, maxOther),
+				}, true
+			}
+		}
+		return coarsePlan{}, false
+	}
+	if plan, ok := pick(FitHeadroomMax); ok {
+		return plan, true
+	}
+	if plan, ok := pick(FitProbeCode); ok {
+		return plan, true
+	}
+	// Last resort: put the dimmest channel on target at 100 and use the
+	// matching integer for the coarsest channel.
+	var usMin float64
+	have := false
 	for c := 0; c < 3; c++ {
 		if v, ok := usForTargetAt(pts[c], FitProbeCode, curUS, target); ok {
-			if !haveDim || v > usDim100 {
-				usDim100, haveDim, dimCh = v, true, c
-			}
-		}
-		if v, ok := usForTargetAt(pts[c], FitHeadroomCode, curUS, target); ok {
-			if !haveHead || v > usDimHead {
-				usDimHead, haveHead, dimCh = v, true, c
-			}
-		}
-		if v, ok := usForTargetAt(pts[c], FitMinCode, curUS, target); ok {
-			if !haveBright || v < usBrightMin {
-				usBrightMin, haveBright, brightCh = v, true, c
+			if !have || v > usMin {
+				usMin, have = v, true
 			}
 		}
 	}
-	if !haveDim && haveHead {
-		usDim100, haveDim = usDimHead, true
+	if !have {
+		return coarsePlan{}, false
 	}
-	if !haveHead && haveDim {
-		usDimHead, haveHead = usDim100, true
+	n, ok := neededCodeAt(pts[coarse], curUS, usMin, target)
+	if !ok {
+		n = 1
 	}
-	if !haveDim {
-		return curUS, "could not measure a usable film-base response to choose an exposure", false
+	k := int(math.Round(n))
+	if k < 1 {
+		k = 1
 	}
-	_ = tol
-	if haveBright && usDimHead <= usBrightMin*1.01 {
-		// A window exists: dimmest at <= 85 and brightest at >= 30.
-		if curUS >= usDimHead*0.99 && curUS <= usBrightMin*1.01 {
-			return curUS, fmt.Sprintf("exposure already places the light codes in a well-resolved window (about %d to %d)", FitMinCode, FitHeadroomCode), false
-		}
-		need = curUS
-		if curUS < usDimHead {
-			need = usDimHead
-		} else if curUS > usBrightMin {
-			need = usBrightMin
-		}
-		need = clampExposureUS(need)
-		why := "adjusted"
-		if need > curUS*1.005 {
-			why = "raised"
-		} else if need < curUS*0.995 {
-			why = "lowered"
-		}
-		ch := "a channel"
-		if need <= curUS && brightCh >= 0 {
-			ch = string([]byte{"RGB"[brightCh]})
-		} else if dimCh >= 0 {
-			ch = string([]byte{"RGB"[dimCh]})
-		}
-		return need, fmt.Sprintf("%s common exposure from %.0f us to %.0f us so %s can reach the target at a light code in %d–%d (gain 0 dB)",
-			why, curUS, need, ch, FitMinCode, FitHeadroomCode), false
+	if k > 100 {
+		k = 100
 	}
-	// Impossible to satisfy both ends. Keep the dimmest channel reachable
-	// at code 100; that choice also makes the brightest code as high as
-	// possible without putting the dimmest out of range.
-	need = clampExposureUS(usDim100)
-	msg := fmt.Sprintf("channel ratio cannot place every light code in %d–%d; using %.0f us so the dimmest channel still reaches the target at code 100 and the brightest code is as high as possible (gain 0 dB)",
-		FitMinCode, FitHeadroomCode, need)
-	if dimCh >= 0 && brightCh >= 0 {
-		msg = fmt.Sprintf("channel ratio cannot place every light code in %d–%d (%c vs %c); using %.0f us so %c still reaches the target at code 100 and the brightest code is as high as possible (gain 0 dB)",
-			FitMinCode, FitHeadroomCode, "RGB"[dimCh], "RGB"[brightCh], need, "RGB"[dimCh])
+	if us, ok := usForTargetAt(pts[coarse], k, curUS, target); ok {
+		usMin = us
 	}
-	return need, msg, true
+	return coarsePlan{
+		ch:   coarse,
+		code: k,
+		us:   clampExposureUS(usMin),
+		reason: fmt.Sprintf("set common exposure to %.0f us so %c lands on target at light code %d (the other channels may be near code 100; gain 0 dB)",
+			clampExposureUS(usMin), "RGB"[coarse], k),
+	}, true
+}
+
+// trimExposureToReading scales the common exposure so a just-measured
+// raw level becomes target. The light code is left unchanged: exposure
+// is the continuous fine control.
+func trimExposureToReading(cam VariableExposure, measured, target float64) (newUS float64, changed bool, err error) {
+	us, _ := cam.GetExposure()
+	if measured <= 1e-9 || target <= 0 {
+		return us, false, nil
+	}
+	adj := clampExposureUS(us * target / measured)
+	if math.Abs(adj-us)/math.Max(us, 1) < 0.001 {
+		return us, false, nil
+	}
+	if err := cam.SetExposure(adj, 0); err != nil {
+		return us, false, err
+	}
+	newUS, _ = cam.GetExposure()
+	return newUS, math.Abs(newUS-us) > 0.5, nil
 }
 
 func fitCommonExposure(ctx context.Context, l Light, cam VariableExposure, p Params, say func(string, ...any)) (ExposureFit, error) {
@@ -218,7 +340,7 @@ func fitCommonExposureSeeded(ctx context.Context, l Light, cam VariableExposure,
 	if us <= 0 {
 		us = 10_000
 	}
-	fit := ExposureFit{StartedUS: us, FinalUS: us, StartedGain: gain, FinalGain: 0, Reason: "exposure already in a well-resolved window"}
+	fit := ExposureFit{StartedUS: us, FinalUS: us, StartedGain: gain, FinalGain: 0, Reason: "exposure already places the coarsest channel on target"}
 	if gain != 0 {
 		if err := cam.SetExposure(us, 0); err != nil {
 			return fit, fmt.Errorf("set gain 0 dB: %w", err)
@@ -296,8 +418,6 @@ func fitCommonExposureSeeded(ctx context.Context, l Light, cam VariableExposure,
 	}
 	for c := 0; c < 3; c++ {
 		if hasUsable(pts[c]) {
-			// If the only usable points are at 100, also try a mid/low code
-			// that may already have been taken; otherwise go lower.
 			onlyHigh := true
 			for _, p := range pts[c] {
 				if p.usable() && p.code < FitProbeCode {
@@ -322,66 +442,78 @@ func fitCommonExposureSeeded(ctx context.Context, l Light, cam VariableExposure,
 		}
 	}
 
-	need, reason, _ := chooseCommonUS(us, pts, p.Target, p.Tol)
-	if math.Abs(need-us)/math.Max(us, 1) <= 0.01 {
-		fit.Reason = reason
+	plan, ok := chooseCoarsePlan(us, pts, p.Target)
+	if !ok {
+		fit.Reason = "could not measure a usable film-base response to choose an exposure"
 		if say != nil {
-			say("%s", reason)
+			say("%s", fit.Reason)
 		}
 		fit.FinalUS = us
 		return fit, nil
 	}
-	if err := cam.SetExposure(need, 0); err != nil {
-		return fit, fmt.Errorf("set exposure %.0f us: %w", need, err)
-	}
-	us, _ = cam.GetExposure()
-	fit.FinalUS, fit.FinalGain, fit.Changed = us, 0, true
-	fit.Reason = reason
-	if say != nil {
-		say("%s", reason)
-	}
-
-	// One confirm at the new exposure, using the dimmest channel at 85
-	// and the brightest at 30 when those readings are unclipped.
-	dim, bright := 0, 0
-	bestDim, bestBright := math.Inf(1), 0.0
-	for c := 0; c < 3; c++ {
-		if lv, ok := estimateLevel(pts[c], FitProbeCode); ok && lv < bestDim {
-			bestDim, dim = lv, c
+	if math.Abs(plan.us-us)/math.Max(us, 1) > 0.01 {
+		if err := cam.SetExposure(plan.us, 0); err != nil {
+			return fit, fmt.Errorf("set exposure %.0f us: %w", plan.us, err)
 		}
-		if lv, ok := estimateLevel(pts[c], FitProbeCode); ok && lv > bestBright {
-			bestBright, bright = lv, c
-		}
+		us, _ = cam.GetExposure()
+		fit.Changed = true
 	}
-	if rd, err := probe(dim, FitHeadroomCode); err == nil && rd.Level > 1e-9 && !rd.BaseClipped() {
+	// Verify with a capture and refine exposure once or twice so the
+	// coarsest channel lands on target at the chosen integer code.
+	for i := 0; i < 2; i++ {
+		rd, err := probe(plan.ch, plan.code)
+		if err != nil {
+			return fit, fmt.Errorf("exposure confirm %c at %d: %w", "RGB"[plan.ch], plan.code, err)
+		}
 		if say != nil {
-			say("Exposure confirm: %c at brightness %d = %.5f FS (%.0f us)", "RGB"[dim], FitHeadroomCode, rd.Level, us)
+			say("Exposure confirm: %c at brightness %d = %.5f FS (%.0f us)", "RGB"[plan.ch], plan.code, rd.Level, us)
 		}
-		if rd.Level < p.Target*(1-p.Tol) && us < MaxExposureUS-0.5 {
-			adj := clampExposureUS(us * p.Target / rd.Level)
-			if adj > us*1.01 {
-				if err := cam.SetExposure(adj, 0); err != nil {
-					return fit, fmt.Errorf("set exposure %.0f us: %w", adj, err)
-				}
-				us, _ = cam.GetExposure()
-				fit.FinalUS = us
-				fit.Reason = fmt.Sprintf("raised common exposure from %.0f us to %.0f us so %c can reach the target at light code %d (gain 0 dB)", fit.StartedUS, us, "RGB"[dim], FitHeadroomCode)
-				if say != nil {
-					say("Dimmest channel still short at code %d; exposure now %.0f us", FitHeadroomCode, us)
-				}
-			}
+		if rd.Level <= 1e-9 || rd.BaseClipped() {
+			break
+		}
+		if math.Abs(rd.Level/p.Target-1) <= p.Tol {
+			break
+		}
+		newUS, changed, err := trimExposureToReading(cam, rd.Level, p.Target)
+		if err != nil {
+			return fit, fmt.Errorf("set exposure %.0f us: %w", newUS, err)
+		}
+		if !changed {
+			break
+		}
+		us = newUS
+		fit.Changed = true
+		if say != nil {
+			say("Refined common exposure to %.0f us so %c at light code %d is on target", us, "RGB"[plan.ch], plan.code)
 		}
 	}
-	_ = bright
+	fit.FinalUS, fit.FinalGain = us, 0
+	fit.HasCoarse, fit.CoarseCh, fit.CoarseCode = true, plan.ch, plan.code
+	fit.Reason = plan.reason
+	if say != nil {
+		say("%s", fit.Reason)
+	}
 	return fit, nil
 }
 
-func historyPoints(h [3]response) [3][]probePt {
-	var pts [3][]probePt
-	for c := 0; c < 3; c++ {
-		for code, s := range h[c] {
-			pts[c] = append(pts[c], probePt{code: code, level: s.reading.Level, clipped: s.reading.BaseClipped() || s.reading.Level >= 0.98})
+// coarsestOffTarget is the off-tolerance channel with the lowest light
+// code (the coarsest integer step). VariableExposure leveling uses this
+// to decide which channel exposure should put on target.
+func coarsestOffTarget(current [3]int, history [3]response, post [3]float64, target, tol float64) (int, bool) {
+	ch, found := -1, false
+	bestCode, bestErr := 101, 0.0
+	for c, code := range current {
+		s, ok := history[c][code]
+		if !ok || s.reading.BaseClipped() {
+			continue
+		}
+		rel := math.Abs(post[c]/target - 1)
+		if rel <= tol {
+			continue
+		}
+		if !found || code < bestCode || (code == bestCode && rel > bestErr) {
+			ch, found, bestCode, bestErr = c, true, code, rel
 		}
 	}
-	return pts
+	return ch, found
 }

@@ -287,6 +287,9 @@ func Run(ctx context.Context, l Light, cam Camera, p Params, restore [3]bool, pr
 	}
 	selectArea := p.SelectArea
 	current := p.Start
+	if res.Fit.HasCoarse && res.Fit.CoarseCode >= 1 && res.Fit.CoarseCh >= 0 && res.Fit.CoarseCh < 3 {
+		current[res.Fit.CoarseCh] = res.Fit.CoarseCode
+	}
 	reason := "round limit reached"
 	for round := 1; round <= p.MaxIter; round++ {
 		res.Rounds = round
@@ -377,28 +380,34 @@ func Run(ctx context.Context, l Light, cam Camera, p Params, restore [3]bool, pr
 			if frozen == 0 {
 				reason = "integer resolution limit"
 			}
-			if vc != nil && frozen < 3 && round < p.MaxIter && refits < 2 {
-				fit2, ferr := fitCommonExposureSeeded(ctx, l, vc, p, say, historyPoints(history))
-				if ferr != nil {
-					return res, ferr
-				}
-				if fit2.Changed && math.Abs(fit2.FinalUS-res.Fit.FinalUS) > 1 && (res.Fit.FinalUS == 0 || math.Abs(fit2.FinalUS-res.Fit.FinalUS)/math.Max(res.Fit.FinalUS, 1) > 0.01) {
-					startUS := res.Fit.StartedUS
-					if startUS <= 0 {
-						startUS = fit2.StartedUS
+			if vc != nil && frozen == 0 && round < p.MaxIter && refits < 4 {
+				ch, ok := coarsestOffTarget(current, history, res.Post, p.Target, p.Tol)
+				if ok {
+					s := history[ch][current[ch]]
+					newUS, changed, ferr := trimExposureToReading(vc, s.reading.Level, target[ch])
+					if ferr != nil {
+						return res, ferr
 					}
-					res.Fit = fit2
-					res.Fit.StartedUS = startUS
-					res.Fit.Changed = true
-					refits++
-					say("Integer step is too coarse at the current light codes; retrying at %.0f us (gain 0 dB) with the remaining rounds.", fit2.FinalUS)
-					for c := range history {
-						history[c] = make(response)
+					if changed {
+						startUS := res.Fit.StartedUS
+						if startUS <= 0 {
+							startUS, _ = vc.GetExposure()
+						}
+						res.Fit.StartedUS = startUS
+						res.Fit.FinalUS, res.Fit.FinalGain, res.Fit.Changed = newUS, 0, true
+						res.Fit.HasCoarse, res.Fit.CoarseCh, res.Fit.CoarseCode = true, ch, current[ch]
+						res.Fit.Reason = fmt.Sprintf("fine-tuned common exposure to %.0f us so %c lands on target at light code %d; the other channels are then re-leveled (gain 0 dB)",
+							newUS, "RGB"[ch], current[ch])
+						refits++
+						say("Integer step is too coarse on %c at code %d (%.5f FS); fine-tuned exposure to %.0f us so %c is on target, then re-leveling the other channels.",
+							"RGB"[ch], current[ch], s.reading.Level, newUS, "RGB"[ch])
+						for c := range history {
+							history[c] = make(response)
+						}
+						res.Limited, res.TooBright, res.Needed, res.Boundary = [3]bool{}, [3]bool{}, [3]float64{}, [3]float64{}
+						reason = "round limit reached"
+						continue
 					}
-					res.Limited, res.TooBright, res.Needed, res.Boundary = [3]bool{}, [3]bool{}, [3]float64{}, [3]float64{}
-					current = [3]int{50, 50, 50}
-					reason = "round limit reached"
-					continue
 				}
 			}
 			break
