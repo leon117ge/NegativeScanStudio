@@ -298,7 +298,7 @@ func loadHDRConfig() HDRConfig {
 		case "HIK_METER_EACH":
 			c.HikMeterEach = v != "0"
 		case "HIK_FRAMES_PER_EXP":
-			if n >= 1 && n <= 16 {
+			if n >= framesPerExpMin && n <= framesPerExpMax {
 				c.HikFramesPerExp = n
 			}
 		case "HIK_APPLY_DARK":

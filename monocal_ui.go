@@ -28,8 +28,37 @@ func (c HDRConfig) monoNoise() hdrscan.MonoNoise {
 	return nz
 }
 
+// Frames-per-exposure range shown on the Mono page (v1.10).
+const (
+	framesPerExpMin = 1
+	framesPerExpMax = 16
+)
+
 func monoCalStore() monocap.Store {
 	return monocap.Store{Dir: filepath.Join(configDir(), "hikcal")}
+}
+
+// clampFloat limits v to [lo, hi] when lo != hi. A walk NumberEdit rejects
+// a SetValue outside that range with "value out of range".
+func clampFloat(v, lo, hi float64) float64 {
+	if lo != hi {
+		if v < lo {
+			return lo
+		}
+		if v > hi {
+			return hi
+		}
+	}
+	return v
+}
+
+// setNumberEdit sets a NumberEdit after clamping to the widget's current
+// range, so a saved config value cannot crash the UI.
+func setNumberEdit(ne *walk.NumberEdit, v float64) {
+	if ne == nil {
+		return
+	}
+	_ = ne.SetValue(clampFloat(v, ne.MinValue(), ne.MaxValue()))
 }
 
 func onOff(b bool) string {
@@ -43,7 +72,7 @@ func onOff(b bool) string {
 func (u *MonoUI) captureOptions() monocap.Options {
 	o := monocap.Options{FramesPerExposure: 1, Calib: monoCalStore()}
 	if u.fpeNE != nil {
-		o.FramesPerExposure = int(math.Round(u.fpeNE.Value()))
+		o.FramesPerExposure = int(math.Round(clampFloat(u.fpeNE.Value(), framesPerExpMin, framesPerExpMax)))
 	}
 	o.UseDark = u.darkCB != nil && u.darkCB.Checked()
 	o.UseFlat = u.flatCB != nil && u.flatCB.Checked()
@@ -61,7 +90,11 @@ func (u *MonoUI) loadCalOptions() {
 	}
 	c := u.hdr.cfg
 	if u.fpeNE != nil {
-		u.fpeNE.SetValue(float64(max(1, c.HikFramesPerExp)))
+		n := c.HikFramesPerExp
+		if n < framesPerExpMin {
+			n = framesPerExpMin
+		}
+		setNumberEdit(u.fpeNE, float64(n))
 	}
 	if u.darkCB != nil {
 		u.darkCB.SetChecked(c.HikApplyDark)
@@ -76,7 +109,7 @@ func (u *MonoUI) saveCalOptions() {
 	if u.hdr == nil || u.fpeNE == nil || u.darkCB == nil || u.flatCB == nil {
 		return
 	}
-	u.hdr.cfg.HikFramesPerExp = int(math.Round(u.fpeNE.Value()))
+	u.hdr.cfg.HikFramesPerExp = int(math.Round(clampFloat(u.fpeNE.Value(), framesPerExpMin, framesPerExpMax)))
 	u.hdr.cfg.HikApplyDark = u.darkCB.Checked()
 	u.hdr.cfg.HikApplyFlat = u.flatCB.Checked()
 	u.hdr.save()

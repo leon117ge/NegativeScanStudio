@@ -15,6 +15,7 @@ Monochrome camera (Hikrobot MV-CS240-90UM) image-quality release. OFX plugin unc
 - **Light settle check.** After the fixed settle wait, frames are grabbed until two consecutive means agree within 0.3 % (timeout 3 s or 4x settle); a light that never settles is logged as a warning.
 - **R/G/B movement check.** Global R vs G and B vs G translation is measured at quarter resolution before CA correction; above 1.5 px an English warning is logged, shown on the page and stored in the metadata. Nothing is corrected.
 - **Dark frames and flat field.** New Mono page tools capture averaged darks (light off, per exposure) and empty-gate R/G/B flats into `<config>/NegativeScanStudio/hikcal`. "Apply dark frames" / "Apply flat field" use them only when present; otherwise the scan is unchanged and the report says which calibration was missing.
+- **Startup fix.** The new "Frames per exposure" NumberEdit used `Value: 1` (an int). walk stores NumberEdit.Value as an interface and only accepts float64, so it applied 0, which is below MinValue 1, and the app failed to start with "value out of range". The default is now `1.0`, other NumberEdit defaults are explicit float64, and a config value outside 1-16 is clamped before SetValue.
 - Local only; no tag/push/release.
 
 ## v0.96 local test build

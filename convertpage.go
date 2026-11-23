@@ -532,7 +532,7 @@ func (u *ConvertUI) Page() TabPage {
 						Label{AssignTo: &u.info, Text: info0, TextColor: walk.RGB(128, 128, 136), MinSize: Size{Height: 56}},
 						Composite{Layout: HBox{MarginsZero: true, Spacing: 4}, Children: []Widget{
 							Label{Text: "Exposure (EV)"},
-							NumberEdit{AssignTo: &u.evNE, Value: 0, MinValue: -5, MaxValue: 5, Decimals: 2, Increment: 0.1,
+							NumberEdit{AssignTo: &u.evNE, Value: 0.0, MinValue: -5, MaxValue: 5, Decimals: 2, Increment: 0.1,
 								OnValueChanged: func() { u.ev = u.evNE.Value(); u.reprocess() }},
 						}},
 						CheckBox{AssignTo: &u.wbChk, Text: "Apply camera white balance (as-shot)", Checked: true, OnCheckedChanged: func() {
@@ -579,7 +579,7 @@ func (u *ConvertUI) Page() TabPage {
 						}, ToolTipText: "Poisson dye-cloud grain; local transmittance equalised so mean tone stays put. ISO 100 finer; ISO 400 coarser."},
 						Composite{Layout: HBox{MarginsZero: true, Spacing: 4}, Children: []Widget{
 							Label{Text: "Grain strength"},
-							NumberEdit{AssignTo: &u.gStrNE, Value: 1, MinValue: 0, MaxValue: 3, Decimals: 2, Increment: 0.1,
+							NumberEdit{AssignTo: &u.gStrNE, Value: 1.0, MinValue: 0, MaxValue: 3, Decimals: 2, Increment: 0.1,
 								OnValueChanged: func() { u.gStrength = u.gStrNE.Value(); u.reprocess() }},
 						}},
 					}},

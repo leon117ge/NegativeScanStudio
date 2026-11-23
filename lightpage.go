@@ -142,25 +142,25 @@ type LightUI struct {
 	dragX    float64
 	dragY    float64
 
-	portCB, isoCB, targetCB, presetCB, areaCB             *walk.ComboBox
-	shutCB                                                *walk.ComboBox // v0.81 base shutter (shared with HDR scan)
-	isoLbl, hikExpLbl                                     *walk.Label
-	isoRow, hikExpRow                                     *walk.Composite
-	hikExpNE                                              *walk.NumberEdit
-	connBtn, applyBtn, readBtn, offBtn                    *walk.PushButton
-	startBtn, stopBtn, saveBtn, loadBtn                   *walk.PushButton
-	enCB                                                  [3]*walk.CheckBox
-	valEd                                                 [3]*walk.LineEdit
-	tolEd, iterEd, settleEd                               *walk.LineEdit
-	autoCB                                                *walk.CheckBox
+	portCB, isoCB, targetCB, presetCB, areaCB     *walk.ComboBox
+	shutCB                                        *walk.ComboBox // v0.81 base shutter (shared with HDR scan)
+	isoLbl, hikExpLbl                             *walk.Label
+	isoRow, hikExpRow                             *walk.Composite
+	hikExpNE                                      *walk.NumberEdit
+	connBtn, applyBtn, readBtn, offBtn            *walk.PushButton
+	startBtn, stopBtn, saveBtn, loadBtn           *walk.PushButton
+	enCB                                          [3]*walk.CheckBox
+	valEd                                         [3]*walk.LineEdit
+	tolEd, iterEd, settleEd                       *walk.LineEdit
+	autoCB                                        *walk.CheckBox
 	infoLbl, telLbl, stateLbl, viewLbl, presetLbl *walk.Label
-	resTE                                           *walk.TextEdit
-	nameEd, stockEd, notesEd                              *walk.LineEdit // v0.83 config / preset
-	fileSaveBtn, fileLoadBtn, delBtn                      *walk.PushButton
-	presets                                               *scanconfig.Store
-	inPreset                                              bool
-	logTE, faultTE                                        *walk.TextEdit
-	saveMu                                                sync.Mutex
+	resTE                                         *walk.TextEdit
+	nameEd, stockEd, notesEd                      *walk.LineEdit // v0.83 config / preset
+	fileSaveBtn, fileLoadBtn, delBtn              *walk.PushButton
+	presets                                       *scanconfig.Store
+	inPreset                                      bool
+	logTE, faultTE                                *walk.TextEdit
+	saveMu                                        sync.Mutex
 }
 
 func (u *LightUI) win() *walk.MainWindow { return *u.mw }
@@ -1443,7 +1443,7 @@ func (u *LightUI) Page() TabPage {
 							}},
 							Label{AssignTo: &u.hikExpLbl, Text: "Exposure", MinSize: Size{Width: 96}, Visible: false},
 							Composite{AssignTo: &u.hikExpRow, Visible: false, Layout: HBox{MarginsZero: true, Spacing: 4}, Children: []Widget{
-								NumberEdit{AssignTo: &u.hikExpNE, Value: 10000, MinValue: 0, MaxValue: 10000000, Decimals: 0, Increment: 100,
+								NumberEdit{AssignTo: &u.hikExpNE, Value: 10000.0, MinValue: 0, MaxValue: 10000000, Decimals: 0, Increment: 100,
 									Suffix: " us", SpinButtonsVisible: true, MinSize: Size{Width: 160},
 									ToolTipText: "Shared Hikrobot ExposureTime in microseconds (gain 0 dB). This is the same value as Mono Trichrome. Leveling uses it for R, G and B (Mono12, full frame), places the coarsest channel on target at an integer light code inside the feasible window while keeping the other channels within headroom, and saves the result back to both fields.",
 									OnValueChanged: func() {
