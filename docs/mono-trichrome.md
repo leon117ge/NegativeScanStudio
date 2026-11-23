@@ -112,49 +112,155 @@ Air changes). Capture metering is a separate safety/primary step so a
 scan does not clip if the light or the film changed after leveling. The
 saved 0.5 film-base metadata comes from the last accepted leveling run.
 
-## Black level, HDR and calibration (v1.10)
+## Black level and HDR (v1.10, v1.11)
 
 Every frame still contains the camera BlackLevel pedestal (Best scan
-quality: 32 DN at 12-bit = 512 in left-justified 16-bit). v1.10 subtracts
-it (or the matching dark frame) from every frame before merging, and the
-Light-page leveling measures the same black-subtracted values, so the
-leveled 0.5 film base and the scan agree. Clipping is still judged on the
-raw code.
+quality: 32 DN at 12-bit = 512 in left-justified 16-bit). Since v1.10 it
+is subtracted from every frame before merging, and the Light-page
+leveling measures the same black-subtracted values, so the leveled 0.5
+film base and the scan agree. Clipping is still judged on the raw code.
+There is no dark-frame or flat-field step (removed in v1.11): the noise
+model comes from the camera's published specifications instead.
 
-**HDR.** Each channel's bracket (0 / +2 or 0 / +2 / +3 EV) is merged on
-the mono plane in memory (`hdrscan.MergeMonoNative`):
+**HDR.** Each channel's bracket is merged on the mono plane in memory
+(`hdrscan.MergeMonoNative`):
 
-- exposure ratio of each brighter frame to frame 0 measured on 16 x 16
-  blocks in the linear range (fallback: exposure-time ratio);
+- the brightness ratio of each frame to the previous bracket step is
+  measured on 16 x 16 blocks in the linear range of both (fallback:
+  exposure-time ratio) and chained back to frame 0 (v1.11; v1.10 compared
+  every frame with frame 0, which leaves little overlap for a +5 EV frame);
 - inverse-variance weights from a shot + read + quantisation noise model
-  (config `HIK_FULL_WELL_E`, `HIK_READ_NOISE_E`; defaults 9000 e- and
-  2.0 e-, to be replaced by measured values);
+  with the MV-CS240-90UM sensor values below;
 - a saturation hat on the value predicted from frame 0 and zero weight at
   the raw white code; no clip-mask dilation (no demosaic halo);
 - 5-7 sigma ghost rejection against the darker estimate, with the noise
-  scale re-measured from the frames.
+  scale re-measured from the frames (v1.11: a step with too few unclipped
+  samples keeps the previous step's scale, and a scale far above the
+  model is capped at 50 instead of falling back to 1).
 
 The result is linear, black-subtracted and in frame-0 units.
 
-**Frames per exposure** averages N same-exposure grabs per bracket step.
+**Frames per exposure** averages N same-exposure grabs per bracket step
+(default 1).
 
 **Light settle check.** After switching the light and the fixed settle
 wait, frames are grabbed until two consecutive means agree within 0.3 %
 (timeout 3 s or 4 x settle). A light that does not settle is logged as a
 warning and the capture continues.
 
-**Dark frames and flat field.** "Capture dark frames..." switches the
-light off and averages 16 grabs at the shared exposure and every bracket
-exposure. "Capture flat field..." shoots the empty gate under R, G and B
-at the scan light values (exposure set to about 45 % of full scale),
-subtracts the dark or pedestal and stores a gain map normalised to 1.0 at
-the centre median. Files live in `%AppData%/NegativeScanStudio/hikcal`
-(`.nsscal`: header JSON + 16-bit pixels). They are used only when "Apply
-dark frames" / "Apply flat field" are checked and a frame with the same
-exposure (darks), pixel format and size exists; ids go into
-`mono_capture.dark_frames` / `flat_field`. Darks do not match a scan made
-with per-channel auto-metering (different exposures); the pedestal is then
-subtracted and the report says so.
+## Sensor model (v1.11)
+
+Published values only; nothing is measured on the user's camera.
+
+| Quantity | Value | Source |
+| --- | --- | --- |
+| Sensor | Gpixel GMAX2424, 2.4 um pixels, 6016 x 4096, rolling shutter | Hikrobot datasheet MV-CS240-90UM/UC; Hikrobot 2025Q4 catalog |
+| Camera dynamic range / SNR | 72 dB / 41 dB | same |
+| Full well | 12.1 ke- (12-bit, 1x analog gain) | Gpixel GMAX2424 product page |
+| Read noise | 2.7 e- (12-bit) | Gpixel GMAX2424 press release (product page: 1.3 e- at 16x gain, 2.4 e- at 10-bit 8x) |
+| Sensor dynamic range / max SNR | 73 dB / 40.8 dB | Gpixel product page |
+
+Links:
+
+- [Hikrobot datasheet MV-CS240-90UM/UC](https://lumaspec-media2.pages.dev/downloads/hikrobot/MV-CS240-90UMUC_20261015.pdf), [LumaSpec product page](https://lumaspecvision.com/products/lumaspec-mv-cs240-90um)
+- [Hikrobot Machine Vision Standard Product Catalog 2025Q4](https://www.hikrobotics.com/en2/source/vision/video/2026/1/20/Machine%20Vision%20Standard%20Product%20Catalog_2025Q4.pdf)
+- [Gpixel GMAX2424 product page](https://www.gpixel.com/en/pro_details_11311.html), [Gpixel GMAX2424 press release](https://www.gpixel.com/en/details_216.html)
+
+Checks: 20 log10(12100 / 2.7) = 73.0 dB and 20 log10(sqrt(12100)) =
+40.8 dB match the sensor sheet. If full well fills the 12-bit range above
+the pedestal, one 12-bit step is about 3.0 e- (quantisation 0.86 e- rms);
+2.7 e- read plus quantisation gives a 2.83 e- floor, 72.6 dB, which
+matches the camera's 72 dB. Assumptions: camera gain 0 dB is the sensor's
+1x analog gain, and the body uses the sensor at its 12-bit, 1x settings.
+The model replaces the v1.10 estimates (9000 e-, 2.0 e-); the old
+`HIK_FULL_WELL_E` / `HIK_READ_NOISE_E` config keys are ignored.
+
+A real-file consistency check: in scan 0281 (v1.08, 0/+2/+3) the
+flattest film-base-level areas of R show 1.66 % pixel-to-pixel noise at
+0.47 of full scale. Pure shot noise at 12.1 ke- full well would be 1.33 %;
+film grain adds the rest. The measurement only shows that the effective
+full well is at least about 7,800 e-, so it is consistent with the sheet
+but is not a measurement of it.
+
+## Default HDR bracket: 0 / +2 / +3 / +5 EV (v1.11)
+
+The Mono page now starts in HDR mode with 0 / +2 / +3 / +5 EV; 0 / +2 and
+0 / +2 / +3 stay selectable (`HIK_MODE`, `HIK_BRACKET` in the config). The
+White light and Trichrome pages keep their own list.
+
+Reasoning with the sensor model, film base leveled to 0.5 of full scale
+(frame 0 holds about 6,050 e- at the base) and densities up to 2.4 above
+base (dense highlights of Vision3 500T and still negatives):
+
+- thin parts of the negative (the positive's shadows, 0-1.2 D) are already
+  covered well by 0 / +2 / +3;
+- the dense parts (1.5-2.4 D, the positive's highlights) get only 25-190
+  e- per pixel in frame 0, so the 2.7 e- read noise and quantisation still
+  count; +5 EV puts 32x the light there;
+- the bracket contains 0 / +2 / +3, so no density gets worse;
+- 0 / +3 / +5 is a little more efficient per second but drops the +2 frame
+  and loses about 40 % SNR at 0.45-0.6 D; 0 / +3 / +6 is 1.5x slower.
+
+Per-pixel SNR on the sensor model (ideal inverse-variance merge, same
+numbers as the merge test `TestDefaultBracketDenseSNR` within noise):
+
+| D above base | 0 | 0.3 | 0.6 | 0.9 | 1.2 | 1.5 | 1.8 | 2.1 | 2.4 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| single frame | 78 | 55 | 39 | 28 | 19 | 14 | 9 | 6 | 4 |
+| 0 / +2 | 78 | 55 | 87 | 62 | 44 | 31 | 22 | 15 | 10 |
+| 0 / +2 / +3 | 78 | 55 | 87 | 99 | 70 | 50 | 35 | 25 | 17 |
+| **0 / +2 / +3 / +5** | 78 | 55 | 87 | 99 | 70 | **93** | **65** | **46** | **33** |
+
+Density reach for SNR 20: 2.27 D (0 / +2 / +3) to 2.81 D (0 / +2 / +3 /
++5); for SNR 10: 2.82 D to 3.36 D. Engineering range: 12.1 stops per
+frame, 17.1 stops with the +5 EV frame.
+
+Capture time (estimate shown on the Mono page): per channel the sum of the
+exposures plus one frame readout per grab. Readout is not in the
+datasheet; 135 ms is derived from 24.6 MP x 2 bytes at about 365 MB/s
+(USB3; the sheet gives 15 fps in Mono8). At the 14.3 ms base exposure of
+scan 0281: 0 / +2 about 1.0 s for R, G and B, 0 / +2 / +3 about 1.8 s,
+0 / +2 / +3 / +5 about 3.6 s, plus light settling and the merge. The
++5 EV frame is 32x the base exposure (459 ms at 14.3 ms; capped at the
+camera's 10 s).
+
+## Comparison with the X-T3 path (v1.11, model)
+
+A noise model of both, not a side-by-side scan of the same frame (no X-T3
+scan of the same negative is on hand). X-T3 at ISO 160: read noise 1.815
+DN = 3.6 e-, full well about 30,100 e-, 14-bit (Photons to Photos data via
+[this summary](https://alpereninyeri.com/araclar/noise-testi/camera/fujifilm-x-t3);
+[Optyczne.pl](https://www.optyczne.pl/411.8-Test_aparatu-Fujifilm_X-T3_Zakres_i_dynamika_tonalna.html)
+estimates more). X-Trans: 26 MP (6240 x 4160), green on 20 of 36 sites,
+red and blue on 8 of 36 each. The X-T3 is modelled at its best: ideal
+merge, every channel base leveled to 0.5, no colour crosstalk penalty.
+Per-channel SNR is normalised to the mono 24.6 MP grid (SNR per site x
+sqrt(site fraction x 26.0 / 24.6)).
+
+| D above base | 0 | 0.6 | 1.2 | 1.8 | 2.4 |
+| --- | --- | --- | --- | --- | --- |
+| Mono, any channel, 0 / +2 / +3 / +5 | 78 | 87 | 70 | 65 | 33 |
+| X-T3 R or B, 0 / +2 / +3 | 59 | 67 | 54 | 27 | 13 |
+| X-T3 G, 0 / +2 / +3 | 94 | 105 | 85 | 42 | 21 |
+| X-T3 R or B, 0 / +2 | 59 | 67 | 33 | 17 | 8 |
+
+- Red and blue: the mono path is 1.3x better in thin areas and 2.4x
+  better in dense areas than X-T3 0 / +2 / +3 (3.9x vs X-T3 0 / +2).
+- Green: the X-T3's larger well wins by about 1.2x in thin and mid areas;
+  the mono path wins from about 1.3 D up (1.5x at 1.5 D and above).
+- Density reach for SNR 20: mono 2.81 D; X-T3 0 / +2 / +3 2.05 D (R, B)
+  and 2.44 D (G).
+- Resolution: every mono pixel is a measurement for each channel (24.6 M
+  samples per channel, nothing interpolated, no colour crosstalk between
+  filters). The X-T3 measures red and blue on 5.8 M sites each and green
+  on 14.4 M; the rest is demosaiced. The luminance resolution limit is
+  set by the lens at f/4: on the mono body (magnification about 0.41) the
+  Airy disc on the film is about 18.5 um (3.2 px) and diffraction MTF at
+  the sensor's Nyquist (85 lp/mm on the film) is about 0.24; on the X-T3
+  (magnification 0.65, same lens and f-number) it is 13.6 um and 0.41 at
+  87 lp/mm. So the gain is in colour-channel resolution and dense-area
+  noise, not in luminance sharpness; f/2.8 would lower diffraction if
+  the EX50 is sharp enough wide open (not tested).
 
 ## Light leveling with the monochrome camera (v1.01)
 

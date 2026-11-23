@@ -32,7 +32,7 @@ import (
 )
 
 const appName = "NegativeScan Studio"
-const appVersion = appName + " v1.10"
+const appVersion = appName + " v1.11"
 
 // legacyAppName: the program was called Film Base Meter up to v0.67; its
 // settings folder is still read (copied once, never changed) by migrateLegacyConfig.
@@ -69,12 +69,13 @@ type HDRConfig struct {
 	HikLeveledUS  float64 // exposure recorded at the last successful hik leveling
 	HikLeveledRGB [3]int
 	HikLeveledAt  string // RFC3339; empty if never leveled
-	// v1.10 mono capture options.
-	HikFramesPerExp int     // same-exposure grabs averaged per bracket step (1 = off)
-	HikApplyDark    bool    // subtract stored dark frames when present
-	HikApplyFlat    bool    // divide by stored flat fields when present
-	HikFullWellE    float64 // noise model: electrons at white, 0 dB (0 = default)
-	HikReadNoiseE   float64 // noise model: read noise in electrons (0 = default)
+	// Mono capture options (v1.10, v1.11). The merge noise model is the
+	// MV-CS240-90UM sensor model and no longer read from the config: v1.10
+	// wrote HIK_FULL_WELL_E=9000 / HIK_READ_NOISE_E=2.00 estimates, which
+	// are ignored now, as are HIK_APPLY_DARK / HIK_APPLY_FLAT.
+	HikFramesPerExp int  // same-exposure grabs averaged per bracket step (1 = off)
+	HikHDR          bool // Mono page mode: HDR bracket (default) or single frame
+	HikBracket      int  // index into monoBracketEVs
 }
 
 // Bracket presets (display order). Config: BRACKET_EV=0,2 (v0.62+);
@@ -179,7 +180,7 @@ func defaultOutDir() string {
 }
 
 func loadHDRConfig() HDRConfig {
-	c := HDRConfig{Target: targetDefault, OutDir: defaultOutDir(), LZW: true, StockTol: stockTolDefault, Bracket: bracketDefault, Merge: mergeDefault, CenterMark: true, HikExposureUS: hikbase.DefaultExposureUS}
+	c := HDRConfig{Target: targetDefault, OutDir: defaultOutDir(), LZW: true, StockTol: stockTolDefault, Bracket: bracketDefault, Merge: mergeDefault, CenterMark: true, HikExposureUS: hikbase.DefaultExposureUS, HikHDR: true, HikBracket: monoBracketDefault}
 	haveFS, haveEV, haveMM := false, false, false
 	b, err := os.ReadFile(hdrConfigFile())
 	if err != nil {
@@ -301,17 +302,11 @@ func loadHDRConfig() HDRConfig {
 			if n >= framesPerExpMin && n <= framesPerExpMax {
 				c.HikFramesPerExp = n
 			}
-		case "HIK_APPLY_DARK":
-			c.HikApplyDark = v != "0"
-		case "HIK_APPLY_FLAT":
-			c.HikApplyFlat = v != "0"
-		case "HIK_FULL_WELL_E":
-			if f, err := strconv.ParseFloat(v, 64); err == nil && f >= 100 && f <= 1e6 {
-				c.HikFullWellE = f
-			}
-		case "HIK_READ_NOISE_E":
-			if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 && f <= 100 {
-				c.HikReadNoiseE = f
+		case "HIK_MODE":
+			c.HikHDR = v != "single"
+		case "HIK_BRACKET":
+			if i := monoBracketIndex(v); i >= 0 {
+				c.HikBracket = i
 			}
 		case "HIK_LEVELED_US":
 			if f, err := strconv.ParseFloat(v, 64); err == nil && f >= hikbase.ExpMinUS {
@@ -379,9 +374,12 @@ func saveHDRConfig(c HDRConfig) {
 		hikUS = hikbase.DefaultExposureUS
 	}
 	s += fmt.Sprintf("HIK_EXPOSURE=%.0f\r\nHIK_METER_EACH=%s\r\n", hikbase.ClampExposureUS(hikUS), b(c.HikMeterEach))
-	nz := c.monoNoise()
-	s += fmt.Sprintf("HIK_FRAMES_PER_EXP=%d\r\nHIK_APPLY_DARK=%s\r\nHIK_APPLY_FLAT=%s\r\nHIK_FULL_WELL_E=%.0f\r\nHIK_READ_NOISE_E=%.2f\r\n",
-		max(1, c.HikFramesPerExp), b(c.HikApplyDark), b(c.HikApplyFlat), nz.FullWellE, nz.ReadE)
+	hikMode := "hdr"
+	if !c.HikHDR {
+		hikMode = "single"
+	}
+	s += fmt.Sprintf("HIK_FRAMES_PER_EXP=%d\r\nHIK_MODE=%s\r\nHIK_BRACKET=%s\r\n",
+		max(1, c.HikFramesPerExp), hikMode, evKey(monoBracketEVs[clampIdx(c.HikBracket, len(monoBracketEVs))]))
 	if c.HikLeveledAt != "" {
 		s += fmt.Sprintf("HIK_LEVELED_US=%.0f\r\nHIK_LEVELED_RGB=%s\r\nHIK_LEVELED_AT=%s\r\n", hikbase.ClampExposureUS(c.HikLeveledUS), hikbase.FormatRGB(c.HikLeveledRGB), c.HikLeveledAt)
 	}

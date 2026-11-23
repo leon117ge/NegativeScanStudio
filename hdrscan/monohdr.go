@@ -16,11 +16,9 @@ import (
 type MonoFrame struct {
 	W, H int
 	Pix  []uint16
-	// Black16 is the pedestal subtracted when Dark is nil (16-bit units).
+	// Black16 is the BlackLevel pedestal subtracted from every pixel
+	// (16-bit units).
 	Black16 float64
-	// Dark is an optional per-pixel dark frame for this exposure (pedestal
-	// included). When set it replaces Black16.
-	Dark []uint16
 	// White16 is the raw clipping level (65520 for Mono12); 0 means 65535.
 	White16    float64
 	ExposureUS float64
@@ -31,17 +29,38 @@ type MonoFrame struct {
 
 // MonoNoise is the sensor noise model used for inverse-variance weights.
 // FullWellE is the electron count at the raw white level at 0 dB, ReadE
-// the temporal read noise in electrons. The defaults are datasheet-class
-// values for a 2.5 um global/rolling CMOS (GMAX2424 class); they only set
-// the relative weights and the ghost threshold scale, and the ghost test
-// re-measures the actual scale from the frames.
+// the temporal read noise in electrons. They only set the relative weights
+// and the ghost threshold scale; the ghost test re-measures the actual
+// scale from the frames.
 type MonoNoise struct {
 	FullWellE float64
 	ReadE     float64
 }
 
-// DefaultMonoNoise is the v1.10 default noise model.
-func DefaultMonoNoise() MonoNoise { return MonoNoise{FullWellE: 9000, ReadE: 2.0} }
+// Sensor model of the Hikrobot MV-CS240-90UM (v1.11). Published values
+// only; nothing here is measured on the user's camera:
+//
+//   - Camera: Gpixel GMAX2424 sensor, 2.4 um pixels, 6016 x 4096, 12-bit
+//     ADC (Mono12), dynamic range 72 dB, SNR 41 dB, gain 0-24 dB
+//     (Hikrobot MV-CS240-90UM datasheet / 2025Q4 standard product catalog).
+//   - Sensor: GMAX2424 full well 12.1 ke- (12-bit, 1x analog gain), read
+//     noise 2.7 e- (12-bit), dynamic range 73 dB, max SNR 40.8 dB (Gpixel
+//     product page and GMAX2424 press release).
+//
+// Cross-checks: 20*log10(12100/2.7) = 73.0 dB and 20*log10(sqrt(12100)) =
+// 40.8 dB match the sensor sheet; the camera's 72 dB implies about 3.0 e-
+// total floor, which is the 2.7 e- read noise plus Mono12 quantisation
+// (about 3.0 e- per 12-bit step, 0.86 e- rms). Assumption: camera gain 0 dB
+// is the sensor's 1x analog gain and full well maps to the 12-bit range.
+const (
+	CS240FullWellE  = 12100.0
+	CS240ReadNoiseE = 2.7
+)
+
+// DefaultMonoNoise is the MV-CS240-90UM sensor model (see above).
+func DefaultMonoNoise() MonoNoise {
+	return MonoNoise{FullWellE: CS240FullWellE, ReadE: CS240ReadNoiseE}
+}
 
 func (n MonoNoise) norm() MonoNoise {
 	if !(n.FullWellE > 100) {
@@ -85,31 +104,21 @@ func (f *MonoFrame) frames() int {
 	return f.Frames
 }
 
-func (f *MonoFrame) offset(i int) float64 {
-	if f.Dark != nil {
-		return float64(f.Dark[i])
-	}
-	return f.Black16
-}
-
 func checkMonoFrame(f MonoFrame, name string) error {
 	if f.W <= 0 || f.H <= 0 || len(f.Pix) < f.W*f.H {
 		return fmt.Errorf("no %s frame", name)
 	}
-	if f.Dark != nil && len(f.Dark) < f.W*f.H {
-		return fmt.Errorf("%s dark frame size mismatch", name)
-	}
 	return nil
 }
 
-// SubtractBlack returns frame minus its dark frame or pedestal, as a
+// SubtractBlack returns frame minus its BlackLevel pedestal, as a
 // 16-bit plane clamped at 0. This is the single-exposure path.
 func SubtractBlack(f MonoFrame) MonoPlane {
 	n := f.W * f.H
 	out := make([]uint16, n)
 	parallelRows(f.H, func(y0, y1 int) {
 		for i := y0 * f.W; i < y1*f.W; i++ {
-			out[i] = f64ToU16(float64(f.Pix[i]) - f.offset(i))
+			out[i] = f64ToU16(float64(f.Pix[i]) - f.Black16)
 		}
 	})
 	return MonoPlane{W: f.W, H: f.H, Pix: out}
@@ -143,7 +152,7 @@ func AverageFrames(frames [][]uint16) []uint16 {
 // MonoMergeStats describes a native mono HDR merge.
 type MonoMergeStats struct {
 	EV         []int
-	Ratio      []float64 // measured brightness ratio of frame k to frame 0
+	Ratio      []float64 // brightness ratio of frame k to frame 0 (chained step ratios)
 	Nominal    []float64
 	RatioFrom  []string // "measured" or "nominal"
 	NoiseScale []float64
@@ -171,9 +180,11 @@ func (s MonoMergeStats) String() string {
 // MergeMonoNative merges an exposure bracket of raw mono frames on the
 // single mono plane (no demosaic, no RGB round trip, no temporary files):
 //
-//   - every frame has its dark frame or BlackLevel pedestal removed first;
-//   - the brightness ratio of each brighter frame to frame 0 is measured on
-//     16x16 blocks well inside the linear range (fallback: exposure ratio);
+//   - every frame has its BlackLevel pedestal removed first;
+//   - the brightness ratio of each brighter frame to the previous one is
+//     measured on 16x16 blocks well inside the linear range of both
+//     (fallback: exposure ratio) and chained back to frame 0, so wide
+//     brackets such as 0/+3/+5 still have plenty of overlap per step;
 //   - each pixel gets the inverse-variance weight of the shot + read +
 //     quantisation noise model, times a saturation hat driven by the value
 //     predicted from frame 0 (not by the frame's own noisy value), and zero
@@ -215,7 +226,7 @@ func MergeMonoNative(frames []MonoFrame, nz MonoNoise) (MonoPlane, MonoMergeStat
 	e0 := make([]float32, n)
 	parallelRows(H, func(y0, y1 int) {
 		for i := y0 * W; i < y1*W; i++ {
-			e0[i] = float32(float64(f0.Pix[i]) - f0.offset(i))
+			e0[i] = float32(float64(f0.Pix[i]) - f0.Black16)
 		}
 	})
 	m0 := boxMean32(e0, W, H, 2)
@@ -235,25 +246,45 @@ func MergeMonoNative(frames []MonoFrame, nz MonoNoise) (MonoPlane, MonoMergeStat
 	st.Used = make([]float64, len(frames))
 	st.Ghost = make([]float64, len(frames))
 	st.Ratio[0], st.Nominal[0], st.RatioFrom[0], st.NoiseScale[0], st.Used[0] = 1, 1, "reference", 1, 1
+	prevE := e0
 	for k := 1; k < len(frames); k++ {
-		fk := &frames[k]
+		fk, fp := &frames[k], &frames[k-1]
 		nom := math.Pow(2, float64(fk.EV-f0.EV))
-		if f0.ExposureUS > 0 && fk.ExposureUS > 0 {
+		link := math.Pow(2, float64(fk.EV-fp.EV))
+		if f0.ExposureUS > 0 && fk.ExposureUS > 0 && fp.ExposureUS > 0 {
 			nom = fk.ExposureUS / f0.ExposureUS * math.Pow(10, (fk.GainDB-f0.GainDB)/20)
+			link = fk.ExposureUS / fp.ExposureUS * math.Pow(10, (fk.GainDB-fp.GainDB)/20)
 		}
-		r, ok := monoRatio(f0, fk, e0, nom)
 		st.Nominal[k] = nom
+		lr, ok := monoRatio(fp, fk, prevE, link)
+		var r float64
 		if ok {
-			st.Ratio[k], st.RatioFrom[k] = r, "measured"
+			r = st.Ratio[k-1] * lr
+			st.RatioFrom[k] = "measured"
 		} else {
-			r = nom
-			st.Ratio[k], st.RatioFrom[k] = nom, "nominal"
+			r = st.Ratio[k-1] * link
+			st.RatioFrom[k] = "nominal"
+		}
+		st.Ratio[k] = r
+		if k+1 < len(frames) {
+			ek := make([]float32, n)
+			parallelRows(H, func(y0, y1 int) {
+				for i := y0 * W; i < y1*W; i++ {
+					ek[i] = float32(float64(fk.Pix[i]) - fk.Black16)
+				}
+			})
+			prevE = ek
 		}
 		kk := nz.unitsPerE(fk)
 		white := fk.white()
 		clipAt := white - 0.5*16 // any code at the top 12-bit step is clipped
 		headroom := white - fk.Black16
-		s := monoNoiseScale(fk, m0, num, den, r, nz, kk, headroom)
+		s, ok := monoNoiseScale(fk, m0, num, den, r, nz, kk, headroom)
+		if !ok {
+			// Too few unclipped samples (a +5 EV frame on a thin
+			// negative): keep the previous step's scale.
+			s = st.NoiseScale[k-1]
+		}
 		st.NoiseScale[k] = s
 		var used, ghost atomic.Int64
 		parallelRows(H, func(y0, y1 int) {
@@ -268,7 +299,7 @@ func MergeMonoNative(frames []MonoFrame, nz MonoNoise) (MonoPlane, MonoMergeStat
 				if hat <= 0 {
 					continue
 				}
-				x := (raw - fk.offset(i)) / r
+				x := (raw - fk.Black16) / r
 				vk := nz.variance(pred, kk, fk.frames()) / (r * r)
 				est := float64(num[i]) / float64(den[i])
 				ve := 1 / float64(den[i])
@@ -300,8 +331,9 @@ func MergeMonoNative(frames []MonoFrame, nz MonoNoise) (MonoPlane, MonoMergeStat
 	return MonoPlane{W: W, H: H, Pix: out}, st, nil
 }
 
-// monoRatio measures frame k / frame 0 on 16x16 blocks where frame 0 is
-// well above the noise floor and frame k is well below clipping.
+// monoRatio measures frame k / frame p (the previous bracket step, its
+// black-subtracted values in e0) on 16x16 blocks where frame p is well
+// above the noise floor and frame k is well below clipping.
 func monoRatio(f0, fk *MonoFrame, e0 []float32, nom float64) (float64, bool) {
 	W, H := f0.W, f0.H
 	const B = 16
@@ -317,7 +349,7 @@ func monoRatio(f0, fk *MonoFrame, e0 []float32, nom float64) (float64, bool) {
 					i := y*W + x
 					s0 += float64(e0[i])
 					v := float64(fk.Pix[i])
-					sk += v - fk.offset(i)
+					sk += v - fk.Black16
 					if v > mx {
 						mx = v
 					}
@@ -343,8 +375,9 @@ func monoRatio(f0, fk *MonoFrame, e0 []float32, nom float64) (float64, bool) {
 }
 
 // monoNoiseScale is the robust ratio of the observed frame-k vs merged
-// difference to the noise model (1 = the model is right).
-func monoNoiseScale(fk *MonoFrame, m0, num, den []float32, r float64, nz MonoNoise, kk, headroom float64) float64 {
+// difference to the noise model (1 = the model is right); false when there
+// are too few usable samples to tell.
+func monoNoiseScale(fk *MonoFrame, m0, num, den []float32, r float64, nz MonoNoise, kk, headroom float64) (float64, bool) {
 	W, H := fk.W, fk.H
 	var zs []float64
 	for y := 0; y < H; y += 7 {
@@ -354,27 +387,29 @@ func monoNoiseScale(fk *MonoFrame, m0, num, den []float32, r float64, nz MonoNoi
 			if pred < 0.02*headroom || pred > 0.75*headroom {
 				continue
 			}
-			xk := (float64(fk.Pix[i]) - fk.offset(i)) / r
+			xk := (float64(fk.Pix[i]) - fk.Black16) / r
 			vk := nz.variance(pred, kk, fk.frames()) / (r * r)
 			est := float64(num[i]) / float64(den[i])
 			zs = append(zs, math.Abs(xk-est)/math.Sqrt(vk+1/float64(den[i])))
 		}
 	}
 	if len(zs) < 500 {
-		return 1
+		return 1, false
 	}
 	sort.Float64s(zs)
 	s := 1.4826 * zs[len(zs)/2]
-	if s < 0.5 || s > 5 {
-		return 1
+	if s > 50 {
+		// Far off the model: cap rather than fall back to 1, which would
+		// reject ordinary noise as ghosts and throw the bright frames away.
+		return 50, true
 	}
 	if s < 1 {
 		// Never tighten the ghost test below the model: smooth content
 		// with an over-estimated noise model would otherwise reject nothing
 		// anyway, and texture would be rejected spuriously.
-		return 1
+		return 1, true
 	}
-	return s
+	return s, true
 }
 
 // boxMean32 is a (2r+1)^2 box mean with edge clamping.
@@ -417,66 +452,6 @@ func boxMean32(src []float32, w, h, r int) []float32 {
 		}
 	})
 	return out
-}
-
-// ---- flat field -----------------------------------------------------------
-
-// FlatScale is the fixed-point scale of a stored flat-field gain (1.0).
-const FlatScale = 32768
-
-// NormalizeFlat turns a black-subtracted empty-gate frame into a gain map
-// (FlatScale = 1.0 at the median of the centre 50 %), lightly smoothed so
-// photon noise of the flat itself is not printed into every scan.
-func NormalizeFlat(p MonoPlane) ([]uint16, float64, error) {
-	W, H := p.W, p.H
-	if err := checkMono(p, "flat"); err != nil {
-		return nil, 0, err
-	}
-	f := make([]float32, W*H)
-	for i := range f {
-		f[i] = float32(p.Pix[i])
-	}
-	f = boxMean32(f, W, H, 1)
-	var c []float64
-	for y := H / 4; y < 3*H/4; y += 2 {
-		for x := W / 4; x < 3*W/4; x += 2 {
-			c = append(c, float64(f[y*W+x]))
-		}
-	}
-	if len(c) == 0 {
-		return nil, 0, fmt.Errorf("flat frame too small")
-	}
-	sort.Float64s(c)
-	med := c[len(c)/2]
-	if med < 0.02*65535 {
-		return nil, 0, fmt.Errorf("flat frame too dark (centre median %.0f)", med)
-	}
-	out := make([]uint16, W*H)
-	for i, v := range f {
-		g := float64(v) / med
-		if g < 0.05 {
-			g = 0.05
-		}
-		if g > 1.99 {
-			g = 1.99
-		}
-		out[i] = uint16(math.Round(g * FlatScale))
-	}
-	return out, med, nil
-}
-
-// ApplyFlat divides a black-subtracted plane by a FlatScale gain map.
-func ApplyFlat(p MonoPlane, gain []uint16) (MonoPlane, error) {
-	if len(gain) < p.W*p.H {
-		return p, fmt.Errorf("flat field size mismatch")
-	}
-	out := make([]uint16, p.W*p.H)
-	parallelRows(p.H, func(y0, y1 int) {
-		for i := y0 * p.W; i < y1*p.W; i++ {
-			out[i] = f64ToU16(float64(p.Pix[i]) * FlatScale / float64(gain[i]))
-		}
-	})
-	return MonoPlane{W: p.W, H: p.H, Pix: out}, nil
 }
 
 // ---- leveling -------------------------------------------------------------

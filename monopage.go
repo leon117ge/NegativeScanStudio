@@ -42,9 +42,7 @@ type MonoUI struct {
 	baseExpLbl                                       *walk.Label
 	presetTip                                        *walk.Label
 	fpeNE                                            *walk.NumberEdit // v1.10 frames per exposure
-	darkCB, flatCB                                   *walk.CheckBox
-	darkBtn, flatBtn                                 *walk.PushButton
-	calLbl                                           *walk.Label
+	loading, optsLoaded                              bool             // saved capture options: being restored / restored
 	levelSim                                         hikcam.Device
 	repTE, logTE                                     *walk.TextEdit
 	pb                                               *walk.ProgressBar
@@ -129,11 +127,6 @@ func (u *MonoUI) updateButtons() {
 	why := u.reason()
 	if u.capBtn != nil {
 		u.capBtn.SetEnabled(why == "" && !u.running)
-	}
-	for _, b := range []*walk.PushButton{u.darkBtn, u.flatBtn} {
-		if b != nil {
-			b.SetEnabled(why == "" && !u.running)
-		}
 	}
 	if u.stopBtn != nil {
 		u.stopBtn.SetEnabled(u.cancel != nil)
@@ -417,9 +410,9 @@ func (u *MonoUI) captureEVs() []int {
 	if u.capModeCB != nil && u.capModeCB.CurrentIndex() == 1 {
 		br := 0
 		if u.brCB != nil {
-			br = clampIdx(u.brCB.CurrentIndex(), len(bracketEVs))
+			br = clampIdx(u.brCB.CurrentIndex(), len(monoBracketEVs))
 		}
-		return append([]int(nil), bracketEVs[br]...)
+		return append([]int(nil), monoBracketEVs[br]...)
 	}
 	return []int{0}
 }
@@ -435,15 +428,20 @@ func (u *MonoUI) readyStatusText() string {
 		if u.hdr != nil {
 			baseUS = u.hdr.sharedHikExposure()
 		}
-		return fmt.Sprintf("READY - HDR (%s) for R, G, B. All channels use the shared exposure (%.0f us, 0 dB) plus HDR EV offsets.", evText(evs), baseUS)
+		return fmt.Sprintf("READY - HDR (%s) for R, G, B. All channels use the shared exposure (%.0f us, 0 dB) plus HDR EV offsets. Capture about %.1f s (estimate: exposure plus frame readout, without light settling).", evText(evs), baseUS, monocap.EstimateCapture(baseUS, evs, u.framesPerExposure()).Seconds())
 	}
 	if meterEach {
 		return "READY - Single frame per channel (R, G, B). Auto-meter each channel is ON (each channel meters separately)."
 	}
-	return "READY - Single frame per channel (R, G, B). All channels use the shared exposure (gain 0 dB)."
+	baseUS := hikbase.DefaultExposureUS
+	if u.hdr != nil {
+		baseUS = u.hdr.sharedHikExposure()
+	}
+	return fmt.Sprintf("READY - Single frame per channel (R, G, B). All channels use the shared exposure (gain 0 dB). Capture about %.1f s (estimate, without light settling).", monocap.EstimateCapture(baseUS, evs, u.framesPerExposure()).Seconds())
 }
 
 func (u *MonoUI) updateCaptureLabel() {
+	u.saveCaptureOptions()
 	evs := u.captureEVs()
 	if u.brCB != nil {
 		u.brCB.SetEnabled(!u.running && u.capModeCB != nil && u.capModeCB.CurrentIndex() == 1)
@@ -657,8 +655,8 @@ func (u *MonoUI) capture() {
 		light = monocap.SimLight{S: sim}
 	}
 	opt := u.captureOptions()
-	u.say(fmt.Sprintf("==== Mono trichrome: light R %d G %d B %d (%s), settle %v + stability check, CA correction %v, bracket %v, %d frame(s) per exposure, dark frames %s, flat field %s ====",
-		vals[0], vals[1], vals[2], src, settle, correct, evs, opt.FramesPerExposure, onOff(opt.UseDark), onOff(opt.UseFlat)))
+	u.say(fmt.Sprintf("==== Mono trichrome: light R %d G %d B %d (%s), settle %v + stability check, CA correction %v, bracket %v, %d frame(s) per exposure, noise model %.0f e- / %.2f e- (MV-CS240-90UM datasheet) ====",
+		vals[0], vals[1], vals[2], src, settle, correct, evs, opt.FramesPerExposure, opt.Noise.FullWellE, opt.Noise.ReadE))
 	u.say(hikbase.CaptureLog(meterEach, baseUS, snap, vals))
 	if u.repTE != nil {
 		if len(evs) > 1 {
@@ -678,6 +676,7 @@ func (u *MonoUI) capture() {
 		hdr    string
 		err    error
 		ms     float64
+		capS   float64
 	}
 	done := make(chan result, 1)
 	go func() {
@@ -723,6 +722,7 @@ func (u *MonoUI) capture() {
 		}
 		res.notes = cr.Notes
 		res.hdr = cr.Mono.HDR
+		res.capS = cr.Elapsed.Seconds()
 		planes := cr.Planes
 		roll, last := u.hdr.cfg.Roll, u.hdr.cfg.Counter
 		base, num := hdrscan.NextShot(dir, roll, time.Now(), last)
@@ -789,7 +789,7 @@ func (u *MonoUI) capture() {
 				for _, n := range res.notes {
 					warn += n + "\r\n"
 				}
-				msg := fmt.Sprintf("%sSaved %s  (%s, %.1f s)\r\n%s\r\n%s\r\n%s", warn, res.path, modeTag, res.ms, res.move.String(), res.hdr, res.report.String())
+				msg := fmt.Sprintf("%sSaved %s  (%s, capture %.1f s, total %.1f s)\r\n%s\r\n%s\r\n%s", warn, res.path, modeTag, res.capS, res.ms, res.move.String(), res.hdr, res.report.String())
 				if u.whyLbl != nil {
 					if res.move.Warn {
 						u.whyLbl.SetText("WARNING: R/G/B film movement detected - see the report")
@@ -934,34 +934,20 @@ func (u *MonoUI) Page() TabPage {
 							}},
 						Composite{Layout: Grid{Columns: 2, MarginsZero: true, Spacing: 4}, Children: []Widget{
 							Label{Text: "Mode"},
-							ComboBox{AssignTo: &u.capModeCB, Model: []string{"Single frame per channel", "HDR bracket per channel (same options as HDR Scan)"}, CurrentIndex: 0,
-								ToolTipText:           "HDR uses the White light / Trichrome bracket list (0/+2 or 0/+2/+3). Each R, G and B channel captures the bracket on the mono camera and merges it natively on the mono plane (black-subtracted, noise-weighted, ghost rejection), then CA correction and the trichrome merge run as usual.",
+							ComboBox{AssignTo: &u.capModeCB, Model: []string{"Single frame per channel", "HDR bracket per channel (recommended)"}, CurrentIndex: 1,
+								ToolTipText:           "HDR (default): each R, G and B channel captures the bracket on the mono camera and merges it natively on the mono plane (black-subtracted, weighted by the MV-CS240-90UM noise model, ghost rejection), then CA correction and the trichrome merge run as usual.",
 								OnCurrentIndexChanged: u.updateCaptureLabel},
 							Label{Text: "HDR bracket"},
-							ComboBox{AssignTo: &u.brCB, Model: bracketItems, CurrentIndex: 0, Enabled: false,
-								ToolTipText:           "Same presets as White light scan and Trichrome: 0 / +2 EV or 0 / +2 / +3 EV. Active only when Mode is HDR.",
+							ComboBox{AssignTo: &u.brCB, Model: monoBracketItems, CurrentIndex: monoBracketDefault,
+								ToolTipText:           "0 / +2 / +3 / +5 EV (recommended): the +5 EV frame puts 32x the light on the dense parts of the negative (the positive's highlights) and roughly doubles their signal-to-noise ratio versus 0 / +2 / +3, which it contains, so no density gets worse. Costs one more grab per channel. 0 / +2 is the fastest. Active only when Mode is HDR.",
 								OnCurrentIndexChanged: u.updateCaptureLabel},
 						}},
 						Composite{Layout: Grid{Columns: 2, MarginsZero: true, Spacing: 4}, Children: []Widget{
 							Label{Text: "Frames per exposure"},
 							NumberEdit{AssignTo: &u.fpeNE, Value: float64(framesPerExpMin), MinValue: framesPerExpMin, MaxValue: framesPerExpMax, Decimals: 0, Increment: 1, SpinButtonsVisible: true, MaxSize: Size{Width: 70},
 								ToolTipText:    "Same-exposure grabs averaged for every bracket step (1 = off). N frames cut temporal noise by the square root of N; capture time grows N times.",
-								OnValueChanged: u.saveCalOptions},
+								OnValueChanged: u.updateCaptureLabel},
 						}},
-						Composite{Layout: HBox{MarginsZero: true, Spacing: 6}, Children: []Widget{
-							CheckBox{AssignTo: &u.darkCB, Text: "Apply dark frames", OnCheckedChanged: u.saveCalOptions,
-								ToolTipText: "Subtract the stored dark frame of the same exposure, pixel format and size instead of the BlackLevel pedestal. Without a matching dark frame the pedestal is subtracted and the report says so."},
-							CheckBox{AssignTo: &u.flatCB, Text: "Apply flat field", OnCheckedChanged: u.saveCalOptions,
-								ToolTipText: "Divide each channel by its stored empty-gate flat field (1.0 at the centre median), removing lens fall-off, light-panel unevenness and sensor PRNU."},
-							HSpacer{},
-						}},
-						Composite{Layout: HBox{MarginsZero: true, Spacing: 6}, Children: []Widget{
-							PushButton{AssignTo: &u.darkBtn, Text: "Capture dark frames...", OnClicked: u.captureDarks,
-								ToolTipText: "Light off and lens covered: averages 16 grabs at the shared exposure and at every exposure of the selected HDR bracket."},
-							PushButton{AssignTo: &u.flatBtn, Text: "Capture flat field...", OnClicked: u.captureFlats,
-								ToolTipText: "Film removed (empty gate): averages 16 grabs under R, G and B at the scan light values, exposure set automatically to about 45% of full scale."},
-						}},
-						Label{AssignTo: &u.calLbl, Text: "Calibration: -", TextColor: grey},
 						Composite{Layout: HBox{MarginsZero: true, Spacing: 6}, Children: []Widget{
 							PushButton{AssignTo: &u.capBtn, Text: "Capture mono trichrome  (R, G, B; shared exposure)", Enabled: false,
 								MinSize: Size{Height: 34}, StretchFactor: 3,
@@ -1013,9 +999,9 @@ func (u *MonoUI) AfterCreate() {
 	if u.hdr != nil {
 		u.hdr.applySharedHikFromConfig()
 	}
+	u.loadCaptureOptions()
 	u.updateCaptureLabel()
 	u.updateBaseExposureLabel()
-	u.loadCalOptions()
 	u.say(appVersion + " Mono trichrome page ready. The monochrome camera is not required to open the app; Connect uses the MVS SDK when it is installed. Best scan quality is selected; Capture uses the shared exposure for R, G and B unless Auto-meter each channel is checked.")
 	u.updateButtons()
 }

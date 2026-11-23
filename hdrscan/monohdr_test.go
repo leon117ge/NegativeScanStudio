@@ -14,12 +14,12 @@ import (
 )
 
 // synthetic Mono12 sensor: pedestal 32 DN (512 in 16-bit units), white
-// 4095 DN, full well 9000 e-, read noise 2 e-.
+// 4095 DN, MV-CS240-90UM model (12.1 ke- full well, 2.7 e- read noise).
 const (
 	synBlack = 512.0
 	synWhite = 65520.0
-	synFW    = 9000.0
-	synRead  = 2.0
+	synFW    = CS240FullWellE
+	synRead  = CS240ReadNoiseE
 )
 
 func synFrame(L []float64, w, h, ev int, rng *rand.Rand) MonoFrame {
@@ -253,58 +253,12 @@ func TestMergeMonoNativeClipAndGhost(t *testing.T) {
 	}
 }
 
-func TestMergeMonoNativeUsesDarkFrame(t *testing.T) {
-	const w, h = 64, 32
-	dark := make([]uint16, w*h)
-	pix := make([]uint16, w*h)
-	for i := range pix {
-		dark[i] = uint16(512 + 16*(i%5)) // column fixed pattern
-		pix[i] = dark[i] + 8000
-	}
-	f := MonoFrame{W: w, H: h, Pix: pix, Black16: 512, Dark: dark}
-	p := SubtractBlack(f)
-	for i, v := range p.Pix {
-		if v != 8000 {
-			t.Fatalf("pixel %d = %d", i, v)
-		}
-	}
-}
-
 func TestAverageFrames(t *testing.T) {
 	a := []uint16{100, 200, 65535}
 	b := []uint16{103, 200, 65535}
 	got := AverageFrames([][]uint16{a, b})
 	if got[0] != 102 || got[1] != 200 || got[2] != 65535 {
 		t.Fatalf("%v", got)
-	}
-}
-
-func TestFlatNormalizeAndApply(t *testing.T) {
-	const w, h = 64, 48
-	fl := make([]uint16, w*h)
-	img := make([]uint16, w*h)
-	for y := 0; y < h; y++ {
-		for x := 0; x < w; x++ {
-			v := 1.0 - 0.3*math.Abs(float64(x)-w/2)/(w/2) // vignetting
-			fl[y*w+x] = uint16(30000 * v)
-			img[y*w+x] = uint16(20000 * v)
-		}
-	}
-	g, med, err := NormalizeFlat(MonoPlane{W: w, H: h, Pix: fl})
-	if err != nil || med < 25000 {
-		t.Fatal(err, med)
-	}
-	out, err := ApplyFlat(MonoPlane{W: w, H: h, Pix: img}, g)
-	if err != nil {
-		t.Fatal(err)
-	}
-	c := float64(out.Pix[h/2*w+w/2])
-	e := float64(out.Pix[h/2*w+2])
-	if math.Abs(e/c-1) > 0.01 {
-		t.Fatalf("flat not removed: centre %.0f edge %.0f", c, e)
-	}
-	if _, _, err := NormalizeFlat(MonoPlane{W: w, H: h, Pix: make([]uint16, w*h)}); err == nil {
-		t.Fatal("dark flat accepted")
 	}
 }
 
@@ -417,7 +371,7 @@ func TestMonoTrichromeMetadataAcceptedByOFX(t *testing.T) {
 	base := [3]float64{0.5, 0.5, 0.5}
 	rgb := [3]int{20, 80, 30}
 	meta := scanmeta.Metadata{Encoding: "linear", LightRGB: &rgb, FilmBase: &base, FilmBaseSpace: scanmeta.AfterProfile, BaseSource: scanmeta.LevelingSource,
-		Mono: &scanmeta.MonoCapture{PixelFormat: "Mono12", BlackLevelDN: 32, BlackSubtracted16: 512, FramesPerExposure: 1, Dark: "off", Flat: "off"}}
+		Mono: &scanmeta.MonoCapture{PixelFormat: "Mono12", BlackLevelDN: 32, BlackSubtracted16: 512, FramesPerExposure: 1}}
 	res, err := ProcessMonoTrichrome(toU(r), toU(g), toU(b), MonoTriOptions{
 		OutPath: filepath.Join(t.TempDir(), "x_RGB.tiff"), LZW: true, CorrectCA: true, CheckMovement: true,
 		Software: "NegativeScan Studio test", Metadata: meta,
@@ -453,5 +407,70 @@ func TestMonoTrichromeMetadataAcceptedByOFX(t *testing.T) {
 			t.Fatalf("OFX math_runner rejected the scan: %v %s", err, out)
 		}
 		t.Logf("OFX math_runner: %s", strings.TrimSpace(string(out)))
+	}
+}
+
+// densityScene: 16 x 6 constant patches with the film base leveled to 0.5
+// of frame-0 headroom and densities 0 ... 2.4 above base.
+func densityScene(w, h int) ([]float64, []float64) {
+	ds := make([]float64, 96)
+	L := make([]float64, w*h)
+	for i := range ds {
+		ds[i] = 2.4 * float64(i) / 95
+	}
+	pw, ph := w/16, h/6
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			L[y*w+x] = 0.5 * math.Pow(10, -ds[min(5, y/ph)*16+min(15, x/pw)])
+		}
+	}
+	return L, ds
+}
+
+// The v1.11 default bracket (0/+2/+3/+5) must stay linear, never be worse
+// than 0/+2/+3 and beat it clearly in
+// the dense parts of a negative, which is where sensor noise survives
+// inversion. This runs the real merge on the sensor model, not a formula.
+func TestDefaultBracketDenseSNR(t *testing.T) {
+	const w, h = 768, 384
+	L, ds := densityScene(w, h)
+	levels := make([]float64, len(ds))
+	for i, d := range ds {
+		levels[i] = 0.5 * math.Pow(10, -d)
+	}
+	run := func(evs []int, seed int64) []patchStat {
+		rng := rand.New(rand.NewSource(seed))
+		var fr []MonoFrame
+		for _, ev := range evs {
+			fr = append(fr, synFrame(L, w, h, ev, rng))
+		}
+		got, st, err := MergeMonoNative(fr, DefaultMonoNoise())
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v: %s", evs, st.String())
+		return patchStats(got.Pix, w, h, levels, 0)
+	}
+	single := run([]int{0}, 3)
+	old := run([]int{0, 2, 3}, 3)
+	nw := run([]int{0, 2, 3, 5}, 3)
+	var worst float64
+	t.Logf("%6s %9s %9s %11s %9s %8s", "D", "SNR 0", "SNR 0/2/3", "SNR 0/2/3/5", "new/old", "lin new")
+	for i := range nw {
+		snr := func(p patchStat) float64 { return p.level / math.Max(p.std, 1e-9) }
+		lin := nw[i].mean/nw[i].level - 1
+		worst = math.Max(worst, math.Abs(lin))
+		if i%8 == 7 || i == len(nw)-1 {
+			t.Logf("%6.2f %9.1f %9.1f %11.1f %9.2f %7.2f%%", ds[i], snr(single[i]), snr(old[i]), snr(nw[i]), snr(nw[i])/snr(old[i]), 100*lin)
+		}
+		if ds[i] >= 1.5 && snr(nw[i]) < 1.5*snr(old[i]) {
+			t.Fatalf("D %.2f: 0/+2/+3/+5 SNR %.1f not 1.5x 0/+2/+3 %.1f", ds[i], snr(nw[i]), snr(old[i]))
+		}
+		if snr(nw[i]) < 0.95*snr(old[i]) {
+			t.Fatalf("D %.2f: 0/+2/+3/+5 SNR %.1f below 0/+2/+3 %.1f", ds[i], snr(nw[i]), snr(old[i]))
+		}
+	}
+	if worst > 0.005 {
+		t.Fatalf("0/+2/+3/+5 merge not linear: worst %.3f%%", 100*worst)
 	}
 }

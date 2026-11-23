@@ -48,8 +48,7 @@ type MonoCapture struct {
 	BlackSubtracted16 float64 `json:"black_subtracted_16bit"` // pedestal removed from every plane, 16-bit units
 	FramesPerExposure int     `json:"frames_per_exposure,omitempty"`
 	HDR               string  `json:"hdr_merge,omitempty"`
-	Dark              string  `json:"dark_frames,omitempty"` // calibration id, or "off" / "none"
-	Flat              string  `json:"flat_field,omitempty"`  // calibration id, or "off" / "none"
+	NoiseModel        string  `json:"noise_model,omitempty"` // sensor model behind the merge weights
 	Settle            string  `json:"light_settle,omitempty"`
 	Movement          string  `json:"movement_check,omitempty"`
 	CA                string  `json:"ca_correction,omitempty"`

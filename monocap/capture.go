@@ -12,6 +12,26 @@ import (
 	"basetool/scanmeta"
 )
 
+// FrameReadout is the estimated time to read one full 6016 x 4096 Mono12
+// frame over USB3 (24.6 MP x 2 bytes at about 365 MB/s). Derived, not
+// measured: the datasheet gives 15 fps for Mono8 at full resolution, and
+// Mono12 moves twice the bytes.
+const FrameReadout = 135 * time.Millisecond
+
+// EstimateCapture is the expected R+G+B grab time for a bracket: every
+// exposure plus one frame readout per grab, without light settling or
+// the merge. It is what the Mono page shows before Capture.
+func EstimateCapture(baseUS float64, evs []int, framesPerExposure int) time.Duration {
+	if framesPerExposure < 1 {
+		framesPerExposure = 1
+	}
+	var us float64
+	for _, ev := range append([]int{0}, nonZero(evs)...) {
+		us += math.Min(hikcam.CS240ExpMaxUS, baseUS*hdrscan.EVScale(ev)) + float64(FrameReadout.Microseconds())
+	}
+	return time.Duration(3*us*float64(framesPerExposure)) * time.Microsecond
+}
+
 // Light switches the trichrome light. rgblight.ChannelSwitch satisfies it.
 type Light interface {
 	Only(ch int) error
@@ -30,6 +50,21 @@ func (l SimLight) Only(ch int) error {
 func (l SimLight) Off() error { l.S.SetDark(true); return nil }
 
 var tags = [3]string{"R", "G", "B"}
+
+// DefaultEVs is the recommended mono HDR bracket (v1.11): frame 0 at the
+// shared film-base exposure, then +2, +3 and +5 EV.
+//
+// Why: with the film base leveled to 0.5 of full scale, frame 0 holds about
+// 6,000 e- per pixel at the base, but the dense parts of a negative (scene
+// highlights, 1.5-2.4 D above base) get only 25-190 e-, where the 2.7 e-
+// read noise and Mono12 quantisation still matter. On the MV-CS240-90UM
+// sensor model (12.1 ke- full well, 2.7 e- read noise) the +5 EV frame puts
+// 32x the light there: SNR at 1.8 D above base goes from 35 (0/+2/+3) to
+// 65, at 2.4 D from 17 to 32. Because 0/+2/+3 is kept as a subset, no
+// density gets worse (0/+3/+5 would be faster but drops the +2 frame and
+// loses about 40% SNR at 0.45-0.6 D, the positive's shadows). Cost: one
+// more grab per channel (about 0.6 s at a 14 ms base exposure).
+var DefaultEVs = []int{0, 2, 3, 5}
 
 // Settle check defaults.
 const (
@@ -54,9 +89,7 @@ type Options struct {
 	EVs           []int // bracket; must include 0
 	// FramesPerExposure same-exposure grabs averaged per bracket step (>=1).
 	FramesPerExposure int
-	Noise             hdrscan.MonoNoise
-	Calib             Store
-	UseDark, UseFlat  bool
+	Noise             hdrscan.MonoNoise // zero value: the MV-CS240-90UM sensor model
 	Log               func(string)
 	Status            func(string)
 }
@@ -201,22 +234,12 @@ func Capture(o Options) (*Result, error) {
 	cam := o.Cam
 	res := &Result{}
 	res.Mono.FramesPerExposure = o.FramesPerExposure
-	res.Mono.Dark, res.Mono.Flat = "off", "off"
-	if o.UseDark {
-		res.Mono.Dark = "none found"
+	nz := o.Noise
+	if !(nz.FullWellE > 100) || !(nz.ReadE > 0) {
+		nz = hdrscan.DefaultMonoNoise()
 	}
-	if o.UseFlat {
-		res.Mono.Flat = "none found"
-	}
-	var darkIDs, flatIDs []string
-	addID := func(list *[]string, id string) {
-		for _, v := range *list {
-			if v == id {
-				return
-			}
-		}
-		*list = append(*list, id)
-	}
+	o.Noise = nz
+	res.Mono.NoiseModel = fmt.Sprintf("full well %.0f e-, read noise %.2f e- at 0 dB", nz.FullWellE, nz.ReadE)
 	var hdrNotes []string
 	for ch := 0; ch < 3; ch++ {
 		if o.Light != nil {
@@ -284,15 +307,6 @@ func Capture(o Options) (*Result, error) {
 				res.Mono.BlackSubtracted16 = fr.Black16
 				res.Mono.BlackLevelDN = fr.Black16 / hikcam.Scale16(fr.PixelFormat)
 			}
-			if o.UseDark {
-				if d := o.Calib.FindDark(fr.ExposureUS, fr.GainDB, fr.PixelFormat, fr.W, fr.H); d != nil {
-					mf.Dark = d.Pix
-					addID(&darkIDs, d.ID)
-				} else {
-					msg := fmt.Sprintf("no dark frame for %.0f us %s %dx%d: BlackLevel pedestal subtracted instead", fr.ExposureUS, fr.PixelFormat, fr.W, fr.H)
-					addID(&res.Notes, msg)
-				}
-			}
 			frames = append(frames, mf)
 			o.log("Captured %s %+d EV: %dx%d %s (%.0f us, %d frame(s) averaged)", tags[ch], ev, fr.W, fr.H, fr.PixelFormat, fr.ExposureUS, o.FramesPerExposure)
 			o.status("Captured %s %+d EV (%.0f us) ...", tags[ch], ev, fr.ExposureUS)
@@ -310,28 +324,7 @@ func Capture(o Options) (*Result, error) {
 			o.log("%s %s", tags[ch], ms.String())
 			hdrNotes = append(hdrNotes, tags[ch]+": "+ms.String())
 		}
-		if o.UseFlat {
-			if f := o.Calib.FindFlat(ch, res.Mono.PixelFormat, plane.W, plane.H); f != nil {
-				p, err := hdrscan.ApplyFlat(plane, f.Pix)
-				if err != nil {
-					return nil, fmt.Errorf("%s flat field: %w", tags[ch], err)
-				}
-				plane = p
-				addID(&flatIDs, f.ID)
-			} else {
-				addID(&res.Notes, fmt.Sprintf("no %s flat field for %s %dx%d: not flat-field corrected", tags[ch], res.Mono.PixelFormat, plane.W, plane.H))
-			}
-		}
 		res.Planes[ch] = plane
-	}
-	if len(darkIDs) > 0 {
-		res.Mono.Dark = strings.Join(darkIDs, "; ")
-	}
-	if len(flatIDs) > 0 {
-		res.Mono.Flat = strings.Join(flatIDs, "; ")
-		if len(flatIDs) < 3 {
-			res.Mono.Flat += " (incomplete: some channels not corrected)"
-		}
 	}
 	if len(hdrNotes) > 0 {
 		res.Mono.HDR = strings.Join(hdrNotes, " | ")
@@ -351,221 +344,4 @@ func nonZero(evs []int) []int {
 		}
 	}
 	return out
-}
-
-// ---- calibration capture ----------------------------------------------------
-
-// CalOptions control dark / flat capture.
-type CalOptions struct {
-	Cam      hikcam.Device
-	Light    Light
-	Settle   time.Duration
-	Frames   int // grabs averaged per calibration frame (default 16)
-	Store    Store
-	Software string
-	LightRGB [3]int
-	Log      func(string)
-	Status   func(string)
-}
-
-func (o *CalOptions) log(f string, a ...any) {
-	if o.Log != nil {
-		o.Log(fmt.Sprintf(f, a...))
-	}
-}
-
-func (o *CalOptions) frames() int {
-	if o.Frames < 2 {
-		return 16
-	}
-	return o.Frames
-}
-
-func (o *CalOptions) grab(n int) (*hikcam.Frame, float64, error) {
-	var first *hikcam.Frame
-	var stack [][]uint16
-	for i := 0; i < n; i++ {
-		fr, err := o.Cam.Grab(grabTimeout(o.Cam.Settings().ExposureUS))
-		if err != nil {
-			return nil, 0, err
-		}
-		if first == nil {
-			first = fr
-		}
-		stack = append(stack, fr.Pix)
-	}
-	// temporal noise of one grab from the first two frames
-	noise := 0.0
-	if len(stack) >= 2 {
-		var s, s2, k float64
-		a, b := stack[0], stack[1]
-		for i := 0; i < len(a); i += 7 {
-			d := float64(a[i]) - float64(b[i])
-			s += d
-			s2 += d * d
-			k++
-		}
-		m := s / k
-		noise = math.Sqrt(math.Max(0, s2/k-m*m) / 2)
-	}
-	out := *first
-	out.Pix = hdrscan.AverageFrames(stack)
-	return &out, noise, nil
-}
-
-// CaptureDarks turns the light off and stores an averaged dark frame for
-// each exposure (gain 0 dB, current pixel format).
-func CaptureDarks(o CalOptions, exposures []float64) ([]CalHeader, error) {
-	if o.Light != nil {
-		if err := o.Light.Off(); err != nil {
-			return nil, fmt.Errorf("light off: %w", err)
-		}
-	}
-	time.Sleep(o.Settle)
-	st0 := o.Cam.Settings()
-	defer func() { _ = o.Cam.Apply(st0) }()
-	var out []CalHeader
-	for _, us := range exposures {
-		st := st0
-		st.ExposureUS = us
-		st.GainDB = 0
-		if err := o.Cam.Apply(st); err != nil {
-			return out, err
-		}
-		if o.Status != nil {
-			o.Status(fmt.Sprintf("Dark frames at %.0f us ...", us))
-		}
-		fr, noise, err := o.grab(o.frames())
-		if err != nil {
-			return out, err
-		}
-		var sum float64
-		for _, v := range fr.Pix {
-			sum += float64(v)
-		}
-		mean := sum / float64(len(fr.Pix))
-		now := tagTime()
-		h := CalHeader{Kind: "dark", Created: shanghai(now), Software: o.Software, Camera: o.Cam.Info().Model,
-			W: fr.W, H: fr.H, PixelFormat: fr.PixelFormat, ExposureUS: fr.ExposureUS, GainDB: fr.GainDB,
-			BlackLevelDN: st.BlackLevel, Black16: fr.Black16, Frames: o.frames(), Channel: -1, Mean16: mean, ReadNoise16: noise}
-		h.ID = fmt.Sprintf("dark %.0fus %s %dx%d x%d %s", h.ExposureUS, h.PixelFormat, h.W, h.H, h.Frames, h.Created)
-		if mean > fr.Black16+0.05*65535 {
-			return out, fmt.Errorf("dark frame at %.0f us is not dark (mean %.0f, pedestal %.0f): cover the lens or switch the light off", us, mean, fr.Black16)
-		}
-		path, err := o.Store.Save(CalFrame{CalHeader: h, Pix: fr.Pix})
-		if err != nil {
-			return out, err
-		}
-		sc := hikcam.Scale16(fr.PixelFormat)
-		o.log("Saved %s: mean %.1f DN (pedestal %.1f DN), temporal noise %.2f DN per grab (native DN, %s)",
-			path, mean/sc, fr.Black16/sc, noise/sc, fr.PixelFormat)
-		out = append(out, h)
-	}
-	return out, nil
-}
-
-// CaptureFlats shoots the empty gate under R, G and B, adjusting the
-// exposure so the centre sits near 45 % of full scale, and stores a
-// normalised gain map per channel (1.0 at the centre median).
-func CaptureFlats(o CalOptions, startUS float64) ([]CalHeader, error) {
-	st0 := o.Cam.Settings()
-	defer func() { _ = o.Cam.Apply(st0) }()
-	if sim, ok := o.Cam.(*hikcam.Sim); ok {
-		sim.SetFlatField(true)
-		defer sim.SetFlatField(false)
-	}
-	var out []CalHeader
-	for ch := 0; ch < 3; ch++ {
-		if o.Light != nil {
-			if err := o.Light.Only(ch); err != nil {
-				return out, fmt.Errorf("light %s only: %w", tags[ch], err)
-			}
-		}
-		time.Sleep(o.Settle)
-		st := st0
-		st.GainDB = 0
-		st.ExposureUS = startUS
-		var fr *hikcam.Frame
-		for it := 0; it < 6; it++ {
-			if err := o.Cam.Apply(st); err != nil {
-				return out, err
-			}
-			f, err := o.Cam.Grab(grabTimeout(st.ExposureUS))
-			if err != nil {
-				return out, err
-			}
-			fr = f
-			head := hikcam.White16(f.PixelFormat) - f.Black16
-			m := centreMedian(f) / head
-			if m > 0.35 && m < 0.55 {
-				break
-			}
-			ratio := 0.45 / math.Max(m, 0.005)
-			if m >= 0.97 {
-				ratio = 0.25
-			}
-			ratio = math.Max(0.1, math.Min(8, ratio))
-			st.ExposureUS = math.Max(hikcam.CS240ExpMinUS, math.Min(hikcam.CS240ExpMaxUS, st.ExposureUS*ratio))
-			o.log("%s flat: centre %.0f%% of full scale, exposure -> %.0f us", tags[ch], 100*m, st.ExposureUS)
-		}
-		if o.Status != nil {
-			o.Status(fmt.Sprintf("%s flat field at %.0f us ...", tags[ch], st.ExposureUS))
-		}
-		fr, _, err := o.grab(o.frames())
-		if err != nil {
-			return out, err
-		}
-		mf := hdrscan.MonoFrame{W: fr.W, H: fr.H, Pix: fr.Pix, Black16: fr.Black16}
-		darkUsed := fmt.Sprintf("pedestal %.0f", fr.Black16)
-		if d := o.Store.FindDark(fr.ExposureUS, fr.GainDB, fr.PixelFormat, fr.W, fr.H); d != nil {
-			mf.Dark = d.Pix
-			darkUsed = d.ID
-		}
-		gain, med, err := hdrscan.NormalizeFlat(hdrscan.SubtractBlack(mf))
-		if err != nil {
-			return out, fmt.Errorf("%s flat: %w", tags[ch], err)
-		}
-		now := tagTime()
-		h := CalHeader{Kind: "flat", Created: shanghai(now), Software: o.Software, Camera: o.Cam.Info().Model,
-			W: fr.W, H: fr.H, PixelFormat: fr.PixelFormat, ExposureUS: fr.ExposureUS, GainDB: fr.GainDB,
-			BlackLevelDN: st.BlackLevel, Black16: fr.Black16, Frames: o.frames(), Channel: ch, LightRGB: o.LightRGB, Mean16: med, DarkUsed: darkUsed}
-		h.ID = fmt.Sprintf("flat %s %s %dx%d x%d %s", tags[ch], h.PixelFormat, h.W, h.H, h.Frames, h.Created)
-		lo, hi := gainRange(gain)
-		path, err := o.Store.Save(CalFrame{CalHeader: h, Pix: gain})
-		if err != nil {
-			return out, err
-		}
-		o.log("Saved %s: centre median %.0f (16-bit), gain range %.3f..%.3f, %s subtracted", path, med, lo, hi, darkUsed)
-		out = append(out, h)
-	}
-	return out, nil
-}
-
-func centreMedian(f *hikcam.Frame) float64 {
-	var v []float64
-	for y := f.H / 4; y < 3*f.H/4; y += 8 {
-		for x := f.W / 4; x < 3*f.W/4; x += 8 {
-			v = append(v, float64(f.Pix[y*f.W+x])-f.Black16)
-		}
-	}
-	if len(v) == 0 {
-		return 0
-	}
-	return quickMedian(v)
-}
-
-func quickMedian(v []float64) float64 {
-	c := append([]float64(nil), v...)
-	sortFloat(c)
-	return c[len(c)/2]
-}
-
-func gainRange(g []uint16) (float64, float64) {
-	lo, hi := math.Inf(1), math.Inf(-1)
-	for i := 0; i < len(g); i += 13 {
-		v := float64(g[i]) / hdrscan.FlatScale
-		lo = math.Min(lo, v)
-		hi = math.Max(hi, v)
-	}
-	return lo, hi
 }

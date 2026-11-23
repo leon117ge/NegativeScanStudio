@@ -76,34 +76,16 @@ func TestWaitSettledWaitsForRamp(t *testing.T) {
 	}
 }
 
-// End to end on the simulator: darks, flats, a 0/+2 bracket with two
-// frames per exposure, native merge, movement check, CA, TIFF, and the
-// OFX metadata rule.
+// End to end on the simulator: the default 0/+3/+5 bracket, native merge,
+// movement check, CA, TIFF, and the OFX metadata rule.
 func TestSimulatorEndToEnd(t *testing.T) {
 	sim := openSim(t)
-	store := Store{Dir: t.TempDir()}
 	light := SimLight{S: sim}
 	base := 4000.0
-	evs := []int{0, 2}
-	exps := []float64{base, base * 4}
-	cal := CalOptions{Cam: sim, Light: light, Frames: 4, Store: store, Software: "test"}
-	darks, err := CaptureDarks(cal, exps)
-	if err != nil || len(darks) != 2 {
-		t.Fatal(err, darks)
-	}
-	if math.Abs(darks[0].Mean16-512) > 1 {
-		t.Fatalf("sim dark mean %.1f, want pedestal 512", darks[0].Mean16)
-	}
-	flats, err := CaptureFlats(cal, base)
-	if err != nil || len(flats) != 3 {
-		t.Fatal(err)
-	}
-	if s := store.Summary(); !strings.Contains(s, "flats RGB") || !strings.Contains(s, "darks at 4000 us, 16000 us") {
-		t.Fatal(s)
-	}
+	evs := DefaultEVs
 	var logs []string
-	res, err := Capture(Options{Cam: sim, Light: light, Settle: time.Millisecond, BaseUS: base, EVs: evs, FramesPerExposure: 2,
-		Noise: hdrscan.DefaultMonoNoise(), Calib: store, UseDark: true, UseFlat: true, Log: func(s string) { logs = append(logs, s) }})
+	res, err := Capture(Options{Cam: sim, Light: light, Settle: time.Millisecond, BaseUS: base, EVs: evs,
+		Log: func(s string) { logs = append(logs, s) }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,12 +95,13 @@ func TestSimulatorEndToEnd(t *testing.T) {
 	if res.Mono.BlackSubtracted16 != 512 || res.Mono.BlackLevelDN != 32 || res.Mono.PixelFormat != "Mono12" {
 		t.Fatalf("mono record %+v", res.Mono)
 	}
-	if !strings.Contains(res.Mono.Dark, "dark 4000us") || !strings.Contains(res.Mono.Dark, "dark 16000us") || !strings.Contains(res.Mono.Flat, "flat B") {
-		t.Fatalf("calibration ids: dark %q flat %q", res.Mono.Dark, res.Mono.Flat)
-	}
-	if !strings.Contains(res.Mono.HDR, "native mono HDR") || len(res.Notes) != 0 {
+	if !strings.Contains(res.Mono.HDR, "native mono HDR") || !strings.Contains(res.Mono.HDR, "+5 EV ratio") || len(res.Notes) != 0 {
 		t.Fatalf("hdr %q notes %v", res.Mono.HDR, res.Notes)
 	}
+	if res.Mono.NoiseModel != "full well 12100 e-, read noise 2.70 e- at 0 dB" {
+		t.Fatalf("noise model %q", res.Mono.NoiseModel)
+	}
+	t.Log(res.Mono.HDR)
 	for ch, p := range res.Planes {
 		if p.W != 960 || p.H != 654 {
 			t.Fatalf("%d: %dx%d", ch, p.W, p.H)
@@ -166,37 +149,29 @@ func TestSimulatorEndToEnd(t *testing.T) {
 	t.Logf("metadata: %s", ti.Description)
 }
 
-func TestCaptureWithoutCalibrationIsPlainBlackSubtraction(t *testing.T) {
+func TestSingleFrameIsPlainBlackSubtraction(t *testing.T) {
 	sim := openSim(t)
-	res, err := Capture(Options{Cam: sim, Light: SimLight{S: sim}, BaseUS: 4000, NoSettleCheck: true, Calib: Store{Dir: t.TempDir()}, UseDark: true, UseFlat: true})
+	res, err := Capture(Options{Cam: sim, Light: SimLight{S: sim}, BaseUS: 4000, NoSettleCheck: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res.Notes) == 0 || res.Mono.Dark != "none found" || res.Mono.Flat != "none found" {
-		t.Fatalf("expected missing-calibration notes: %+v %v", res.Mono, res.Notes)
-	}
-	// with calibration off, the plane is the raw frame minus the pedestal
-	sim2 := openSim(t)
-	res2, err := Capture(Options{Cam: sim2, Light: SimLight{S: sim2}, BaseUS: 4000, NoSettleCheck: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if res2.Mono.Dark != "off" || res2.Mono.Flat != "off" || len(res2.Notes) != 0 {
-		t.Fatalf("%+v %v", res2.Mono, res2.Notes)
+	if res.Mono.HDR != "single exposure per channel" || len(res.Notes) != 0 {
+		t.Fatalf("%+v %v", res.Mono, res.Notes)
 	}
 }
 
-func TestStoreRoundTrip(t *testing.T) {
-	s := Store{Dir: t.TempDir()}
-	c := CalFrame{CalHeader: CalHeader{Kind: "dark", ID: "x", W: 3, H: 2, PixelFormat: "Mono12", ExposureUS: 1000}, Pix: []uint16{1, 2, 3, 4, 5, 65535}}
-	if _, err := s.Save(c); err != nil {
-		t.Fatal(err)
+func TestEstimateCapture(t *testing.T) {
+	// scan 0281 base exposure: 14344 us
+	for _, c := range []struct {
+		evs  []int
+		want float64
+	}{{[]int{0}, 0.448}, {[]int{0, 2}, 1.025}, {[]int{0, 2, 3}, 1.774}, {DefaultEVs, 3.556}} {
+		got := EstimateCapture(14344, c.evs, 1).Seconds()
+		if math.Abs(got-c.want) > 0.01 {
+			t.Errorf("%v: %.3f s, want %.3f", c.evs, got, c.want)
+		}
 	}
-	got := s.FindDark(1010, 0, "Mono12", 3, 2)
-	if got == nil || got.Pix[5] != 65535 || got.ID != "x" {
-		t.Fatalf("%+v", got)
-	}
-	if s.FindDark(1100, 0, "Mono12", 3, 2) != nil || s.FindDark(1000, 0, "Mono10", 3, 2) != nil || s.FindDark(1000, 0, "Mono12", 4, 2) != nil {
-		t.Fatal("dark matched the wrong exposure / format / size")
+	if got := EstimateCapture(400000, DefaultEVs, 1).Seconds(); got > 3*(0.4*(1+4+8)+10+4*0.135)+0.01 {
+		t.Errorf("+5 EV not capped at 10 s: %.1f", got)
 	}
 }

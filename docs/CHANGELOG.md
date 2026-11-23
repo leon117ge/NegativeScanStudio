@@ -1,8 +1,20 @@
 # NegativeScan Studio app — Changelog / 扫描软件更新日志
 
-Current local test app: **v1.10**, not published. Latest published app: **v1.08** · [App release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/v1.08) · [OFX plugin changelog](../ofx/CHANGELOG.md) · [Versioning policy](VERSIONING.md)
+Current local test app: **v1.11**, not published. Latest published app: **v1.08** · [App release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/v1.08) · [OFX plugin changelog](../ofx/CHANGELOG.md) · [Versioning policy](VERSIONING.md)
 
 This file tracks the scanning app, not plugin-only releases. / 本文件只记录扫描软件。
+
+## v1.11 local test build
+
+Monochrome camera (Hikrobot MV-CS240-90UM) defaults from the camera specifications, and a better default HDR bracket. OFX plugin unchanged (0.90.6).
+
+- **Sensor model from published specs.** The mono HDR merge now uses full well 12.1 ke- and read noise 2.7 e- (Gpixel GMAX2424, 12-bit, 1x gain; cross-checked against the Hikrobot sheet's 72 dB / 41 dB). Replaces the v1.10 estimates (9000 e-, 2.0 e-). The `HIK_FULL_WELL_E` / `HIK_READ_NOISE_E` config keys are ignored. Sources and derivation in [mono-trichrome.md](mono-trichrome.md#sensor-model-v111). `mono_capture.noise_model` records the values used.
+- **Dark frames and flat field removed.** No calibration buttons, checkboxes or `hikcal` files any more; black-level subtraction stays. `mono_capture` no longer has `dark_frames` / `flat_field`.
+- **New default HDR bracket 0 / +2 / +3 / +5 EV**, and the Mono page now starts in HDR mode. On the sensor model the +5 EV frame roughly doubles SNR in the dense parts of the negative (1.5-2.4 D above base: 17 to 33 at 2.4 D, 35 to 65 at 1.8 D) and no density gets worse, because 0 / +2 / +3 is contained. 0 / +2 and 0 / +2 / +3 stay selectable. Mode, bracket and frames per exposure are saved (`HIK_MODE`, `HIK_BRACKET`). White light and Trichrome brackets are unchanged.
+- **Capture time.** The ready line shows an estimate (exposures plus about 135 ms readout per grab): about 3.6 s for R, G and B at a 14 ms base, against about 1.8 s for 0 / +2 / +3. The report after a capture shows the measured capture time and the total time.
+- **Merge robustness for wide brackets.** Exposure ratios are measured step to step and chained, so the +5 EV frame is checked against the +3 EV frame instead of frame 0. A step with too few unclipped samples keeps the previous noise scale; a scale far above the model is capped instead of falling back to 1 (that fallback rejected normal noise as ghosts).
+- **Comparison with the X-T3 path** (model, not a same-frame scan) in [mono-trichrome.md](mono-trichrome.md#comparison-with-the-x-t3-path-v111-model).
+- Local only; no tag/push/release.
 
 ## v1.10 local test build
 

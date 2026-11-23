@@ -180,3 +180,45 @@ func TestHikExposureConfig(t *testing.T) {
 		t.Fatalf("invalid exposure should stay default: %v", c.HikExposureUS)
 	}
 }
+
+// v1.11: the Mono page defaults to HDR 0/+2/+3/+5; the v1.10 noise-model
+// and dark/flat keys are ignored and dropped on save.
+func TestMonoCaptureConfig(t *testing.T) {
+	t.Setenv("APPDATA", t.TempDir())
+	os.MkdirAll(configDir(), 0o755)
+	cases := []struct {
+		cfg     string
+		hdr     bool
+		bracket string
+	}{
+		{"", true, "0,2,3,5"},
+		{"HIK_FRAMES_PER_EXP=1\r\nHIK_APPLY_DARK=1\r\nHIK_APPLY_FLAT=1\r\nHIK_FULL_WELL_E=9000\r\nHIK_READ_NOISE_E=2.00\r\n", true, "0,2,3,5"}, // v1.10 file
+		{"HIK_MODE=single\r\nHIK_BRACKET=0,2\r\n", false, "0,2"},
+		{"HIK_MODE=hdr\r\nHIK_BRACKET=0,2,3\r\n", true, "0,2,3"},
+		{"HIK_BRACKET=0,2,4\r\n", true, "0,2,3,5"}, // unknown -> default
+	}
+	for _, c := range cases {
+		os.Remove(hdrConfigFile())
+		if c.cfg != "" {
+			os.WriteFile(hdrConfigFile(), []byte(c.cfg), 0o644)
+		}
+		got := loadHDRConfig()
+		if got.HikHDR != c.hdr || evKey(monoBracketEVs[got.HikBracket]) != c.bracket {
+			t.Errorf("%q: hdr %v bracket %s", c.cfg, got.HikHDR, evKey(monoBracketEVs[got.HikBracket]))
+		}
+		saveHDRConfig(got)
+		b, _ := os.ReadFile(hdrConfigFile())
+		for _, k := range []string{"HIK_FULL_WELL_E", "HIK_READ_NOISE_E", "HIK_APPLY_DARK", "HIK_APPLY_FLAT"} {
+			if strings.Contains(string(b), k) {
+				t.Errorf("%s still saved", k)
+			}
+		}
+		again := loadHDRConfig()
+		if again.HikHDR != c.hdr || again.HikBracket != got.HikBracket {
+			t.Errorf("%q round trip: %v %d", c.cfg, again.HikHDR, again.HikBracket)
+		}
+	}
+	if evKey(monoBracketEVs[monoBracketDefault]) != "0,2,3,5" || len(monoBracketEVs) != len(monoBracketItems) {
+		t.Error("mono bracket table")
+	}
+}

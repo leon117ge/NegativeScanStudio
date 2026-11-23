@@ -1,6 +1,6 @@
 # NegativeScan Studio app roadmap
 
-Current app: **v1.10** (local; v1.08 published) · [App changelog](CHANGELOG.md) · [OFX roadmap](../ofx/ROADMAP.md) · [Versioning](VERSIONING.md)
+Current app: **v1.11** (local; v1.08 published) · [App changelog](CHANGELOG.md) · [OFX roadmap](../ofx/ROADMAP.md) · [Versioning](VERSIONING.md)
 
 ## Implemented
 
@@ -16,7 +16,7 @@ Current app: **v1.10** (local; v1.08 published) · [App changelog](CHANGELOG.md)
 2. Improve scan provenance coverage and missing-value diagnostics without inventing old scans' lamp/base values. Keep interoperability with the independent OFX plugin.
 3. Validate the app's Develop-preview neutral-reference tools and model error using same-roll neutral steps. A transmission chart alone does not measure emulsion gamma.
 4. Research measured scanner spectra, density crosstalk, and CIE daylight models. Keep capture-layer sensitivity distinct from scanner RGB axes.
-5. Hikrobot monochrome (MV-CS240-90UM): v1.10 added black-level subtraction, a native mono HDR merge, frame averaging, a light settle check, an R/G/B movement check and dark / flat calibration. Next: measure the sensor's real full-well and read noise from the dark / flat tools and replace the noise-model defaults; validate flats against the leveling measurement area on real film; consider a per-roll dark refresh reminder.
+5. Hikrobot monochrome (MV-CS240-90UM): v1.10 added black-level subtraction, a native mono HDR merge, frame averaging, a light settle check and an R/G/B movement check. v1.11 takes the noise model from the published sensor specs (12.1 ke-, 2.7 e-), removes the dark / flat tools and makes 0 / +2 / +3 / +5 EV HDR the default. Next: check on real film that the +5 EV frame's measured ratio and noise scale stay near nominal and that it adds no ghosting; time a real capture against the 3.6 s estimate; check that BlackLevel 32 is the real dark offset at long exposures; try the EX50 at f/2.8 (diffraction at f/4 limits luminance sharpness on this body).
 
 DCTL export is retired, not planned work. Historical implementations remain in tags through v0.90. Resolve GPU rendering, viewer picking, and per-stock Base presets belong to the OFX product.
 
