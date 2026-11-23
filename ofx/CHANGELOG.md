@@ -1,9 +1,13 @@
 # NegativeScan Studio OFX — Changelog
 
-Current local test plugin: **0.90.10** (not pushed/released) · Last published tag: **0.90.6** ([Plugin release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/ofx-v0.90.6)) · [Scanning app changelog](../docs/CHANGELOG.md) · [Versioning policy](../docs/VERSIONING.md)
+Current local test plugin: **0.90.11** (not pushed/released) · Last published tag: **0.90.6** ([Plugin release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/ofx-v0.90.6)) · [Scanning app changelog](../docs/CHANGELOG.md) · [Versioning policy](../docs/VERSIONING.md)
 
 Plugin releases are independent from the Windows scanning app.
 
+
+## 0.90.11 — Exposure default 1.0 (local test build)
+
+- Change the `Exposure` default from `0.90` to **1.0** at the user's request (with Gamma scale 1.0 from 0.90.9, new instances now match the original 0.90.1 defaults). Balances stay `1.07 / 0 / 0.67`. Existing Resolve projects keep their saved values. Core math unchanged.
 ## 0.90.10 — User-saved Color balance presets (local test build)
 
 - UI only in **Color balance**: add `Balance preset` (fixed `None | Slot 1..8`), `Preset name`, `Save`, `Delete`, and a read-only `Preset status` line under the Red/Green/Blue balance sliders. Saving stores the current visible `positive_bal_r/g/b` values under that English (ASCII) name; the same name overwrites. Delete removes the selected slot. Selecting a slot writes only those three sliders; core render math, kernels, and performance are unchanged. Existing parameter IDs and defaults are preserved; new parameters are appended.

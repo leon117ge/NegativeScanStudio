@@ -48,7 +48,7 @@ for p in UI:
  key=p['stage'].lower()+'_'+p['name'];opts='|'.join(p['options'])
  kind={'DCTLUI_SLIDER_FLOAT':'Number','DCTLUI_CHECK_BOX':'Boolean','DCTLUI_COMBO_BOX':'Choice'}[p['type']]
  group='balance' if p['stage']=='Density' and p['name'].startswith('base_') else p['stage'].lower()
- default=.5 if p['stage']=='Density' and p['name'].startswith('base_') else .9 if key=='positive_expo' else p['default']
+ default=.5 if p['stage']=='Density' and p['name'].startswith('base_') else 1.0 if key=='positive_expo' else p['default']
  lines.append(f'{{"{key}","{p["label"]}",Kind::{kind},{default},{p["min"]},{p["max"]},{p["step"]},"{opts}","{group}"}},\n')
  if key=='positive_gam_b':lines.append('{"gamma_scale","Gamma scale",Kind::Number,1.0,0.25,2.0,0.01,"","positive"},\n')
 (ROOT/'ofx/src/parameter_defs.inc').write_text(''.join(lines))

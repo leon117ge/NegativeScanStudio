@@ -19,7 +19,7 @@
 {"positive_gam_g","Gamma G",Kind::Number,0.635,0.2,2.0,0.01,"","positive"},
 {"positive_gam_b","Gamma B",Kind::Number,0.62,0.2,2.0,0.01,"","positive"},
 {"gamma_scale","Gamma scale",Kind::Number,1.0,0.25,2.0,0.01,"","positive"},
-{"positive_expo","Exposure",Kind::Number,0.9,-6.0,6.0,0.01,"","positive"},
+{"positive_expo","Exposure",Kind::Number,1.0,-6.0,6.0,0.01,"","positive"},
 {"positive_bal_r","Red balance",Kind::Number,1.07,-5.0,5.0,0.01,"","positive"},
 {"positive_bal_g","Green balance",Kind::Number,0.0,-5.0,5.0,0.01,"","positive"},
 {"positive_bal_b","Blue balance",Kind::Number,0.67,-5.0,5.0,0.01,"","positive"},

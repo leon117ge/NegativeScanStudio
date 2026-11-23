@@ -1,7 +1,7 @@
-# NegativeScan Studio OFX 0.90.10 - Windows x64 (local test build)
+# NegativeScan Studio OFX 0.90.11 - Windows x64 (local test build)
 
 ## Installation
-Quit Resolve, back up your project, and remove the previous bundle. Copy the entire `NegativeScanStudio.ofx.bundle` into `C:\Program Files\Common Files\OFX\Plugins\` (administrator access may be needed). Restart Resolve and find **NegativeScan Studio OFX 0.90.10** under OpenFX > NegativeScan Studio. Do not install duplicate bundles.
+Quit Resolve, back up your project, and remove the previous bundle. Copy the entire `NegativeScanStudio.ofx.bundle` into `C:\Program Files\Common Files\OFX\Plugins\` (administrator access may be needed). Restart Resolve and find **NegativeScan Studio OFX 0.90.11** under OpenFX > NegativeScan Studio. Do not install duplicate bundles.
 
 Auto uses CUDA or OpenCL buffers when offered by the host. CPU fallback is available. No extra CUDA/OpenCL DLL is bundled or required for CPU use. Keep the whole bundle together. Scanning app binaries are unchanged.
 
