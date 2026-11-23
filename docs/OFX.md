@@ -1,6 +1,15 @@
-# NegativeScan Studio OFX 0.90.6
+# NegativeScan Studio OFX 0.90.7 (local test build)
 
-This independently versioned plugin patch uses tag `ofx-v0.90.6`. App v0.91 has its own executable and tag. The metadata patch passes native CPU and mock-host tests. Real Windows Resolve and physical GPU acceptance remain outstanding. [Installation](../ofx/README.md).
+Current local test build is **0.90.7** (last published tag: `ofx-v0.90.6`). Core rendering math, computation order, CPU/OpenCL/CUDA kernels, and all numeric defaults remain unchanged. Real Windows Resolve and physical GPU acceptance remain outstanding. [Installation](../ofx/README.md).
+
+## 0.90.7 Simplified English UI & Camera Calibration Dropdown
+
+- **UI-only scope**: Reduces the Resolve inspector to 13 visible English controls in 4 open groups (`Camera calibration`, `Film base`, `Film & Gamma`, and `Color balance`). `Exposure` (`0.90`), `Contrast` (`Off`), `Output` (`Cineon` default), and `Red/Green/Blue balance` (`1.07 / 0.00 / 0.67`) stay visible. All 42 technical controls (matrix coefficients, individual gammas, `Gamma scale` `1.15`, `Film white balance`, Density In constants, gray pick, stage, render engine) are marked `kOfxParamPropSecret = 1` with unchanged IDs and defaults so existing projects load identically.
+- **Camera calibration dropdown (`camera_mode`)**:
+  - `X-T3`: Uses pending `camera_matrix` from `nss.scan/1` metadata, or falls back to `DefaultXT3Trichrome` (`[0.86426, 0.10467, -0.01969; -0.05068, 0.98176, 0.01644; 0.11287, -0.14623, 1.04095]`).
+  - `Monochrome (MV-CS240-90UM)`: Uses the fixed neutral-preserving matrix fitted from `chart_hik2.tiff` against SoftLoaf Ektachrome transmission target No. 000004 (`[0.942661, 0.195781, -0.138442; -0.056435, 1.036487, 0.019948; 0.014258, -0.089212, 1.074954]`, mean ΔE2000 ~2.16, exact unit row sums `[1, 1, 1]`).
+  - `Off` (default): True bypass (`camera_on = 0`). Metadata marked `camera_applied: true` forces `Off` to prevent double-applying a baked matrix.
+- **Coordinate consistency & color-science limitation**: Because the monochrome matrix has unit row sums, `[0.5, 0.5, 0.5]` film bases remain invariant across raw and `after_profile` coordinates. Metadata loading preserves a user-selected `Monochrome` mode when no embedded `camera_matrix` is present. Positive-chart color mapping (measured on Ektachrome dyes) is **not** a universal color-negative dye crosstalk correction and still requires validation on real negative film scans.
 
 ## 0.90.6 Ektar 100
 

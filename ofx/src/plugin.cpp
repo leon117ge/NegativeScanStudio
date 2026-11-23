@@ -33,6 +33,19 @@ struct Def {const char *key,*label;Kind kind;double def,lo,hi,step;const char *o
 const Def defs[]={
 #include "parameter_defs.inc"
 };
+// Default X-T3 trichrome matrix (convert/scan.go DefaultXT3Trichrome) and
+// MV-CS240-90UM neutral-preserving chart matrix (SoftLoaf No. 000004 chart_hik2, mean dE ~2.16, row sums = 1).
+constexpr std::array<double,9> kXT3Matrix={
+ 0.86426, 0.10467,-0.01969,
+-0.05068, 0.98176, 0.01644,
+ 0.11287,-0.14623, 1.04095
+};
+constexpr std::array<double,9> kMonoMatrix={
+ 0.942661, 0.195781,-0.138442,
+-0.056435, 1.036487, 0.019948,
+ 0.014258,-0.089212, 1.074954
+};
+inline OfxPropertySetHandle hideParam(OfxPropertySetHandle p){prop->propSetInt(p,kOfxParamPropSecret,0,1);return p;}
 void check(OfxStatus s){if(s!=kOfxStatOK)throw s;}
 std::string str(OfxPropertySetHandle p,const char *key,int i=0){char *s=nullptr;return p&&prop->propGetString(p,key,i,&s)==kOfxStatOK&&s?s:"";}
 OfxPropertySetHandle properties(OfxImageEffectHandle e){OfxPropertySetHandle p;check(effect->getPropertySet(e,&p));return p;}
@@ -90,16 +103,16 @@ void choices(OfxPropertySetHandle p,const char *s) {std::istringstream in(s);std
 OfxPropertySetHandle define(OfxParamSetHandle s,const char *key,const char *label,const char *type,const char *group="") {
  OfxPropertySetHandle p;check(param->paramDefine(s,type,key,&p));prop->propSetString(p,kOfxPropLabel,0,label);if(*group)prop->propSetString(p,kOfxParamPropParent,0,group);return p;
 }
-void numberDef(OfxParamSetHandle s,const char *key,const char *label,double d,double lo,double hi,const char *group) {
- auto p=define(s,key,label,kOfxParamTypeDouble,group);prop->propSetDouble(p,kOfxParamPropDefault,0,d);prop->propSetDouble(p,kOfxParamPropMin,0,lo);prop->propSetDouble(p,kOfxParamPropMax,0,hi);prop->propSetDouble(p,kOfxParamPropDisplayMin,0,lo);prop->propSetDouble(p,kOfxParamPropDisplayMax,0,hi);prop->propSetDouble(p,kOfxParamPropIncrement,0,.0001);prop->propSetInt(p,kOfxParamPropDigits,0,6);
+OfxPropertySetHandle numberDef(OfxParamSetHandle s,const char *key,const char *label,double d,double lo,double hi,const char *group) {
+ auto p=define(s,key,label,kOfxParamTypeDouble,group);prop->propSetDouble(p,kOfxParamPropDefault,0,d);prop->propSetDouble(p,kOfxParamPropMin,0,lo);prop->propSetDouble(p,kOfxParamPropMax,0,hi);prop->propSetDouble(p,kOfxParamPropDisplayMin,0,lo);prop->propSetDouble(p,kOfxParamPropDisplayMax,0,hi);prop->propSetDouble(p,kOfxParamPropIncrement,0,.0001);prop->propSetInt(p,kOfxParamPropDigits,0,6);return p;
 }
-void choiceDef(OfxParamSetHandle s,const char *key,const char *label,const char *items,int d,const char *group="") {
- auto p=define(s,key,label,kOfxParamTypeChoice,group);choices(p,items);prop->propSetInt(p,kOfxParamPropDefault,0,d);prop->propSetInt(p,kOfxParamPropAnimates,0,0);
+OfxPropertySetHandle choiceDef(OfxParamSetHandle s,const char *key,const char *label,const char *items,int d,const char *group="") {
+ auto p=define(s,key,label,kOfxParamTypeChoice,group);choices(p,items);prop->propSetInt(p,kOfxParamPropDefault,0,d);prop->propSetInt(p,kOfxParamPropAnimates,0,0);return p;
 }
 OfxPropertySetHandle boolDef(OfxParamSetHandle s,const char *key,const char *label,int d,const char *group="") {auto p=define(s,key,label,kOfxParamTypeBoolean,group);prop->propSetInt(p,kOfxParamPropDefault,0,d);return p;}
 OfxStatus describe(OfxImageEffectHandle e) {
  auto p=properties(e);if(interact){OfxPluginEntryPoint *callback=overlayEntry;void *address=nullptr;static_assert(sizeof(callback)==sizeof(address));std::memcpy(&address,&callback,sizeof(address));prop->propSetPointer(p,kOfxImageEffectPluginPropOverlayInteractV1,0,address);}
- prop->propSetString(p,kOfxPropLabel,0,"NegativeScan Studio OFX 0.90.6");prop->propSetString(p,kOfxImageEffectPluginPropGrouping,0,"NegativeScan Studio");prop->propSetString(p,kOfxImageEffectPropSupportedContexts,0,kOfxImageEffectContextFilter);prop->propSetString(p,kOfxImageEffectPropSupportedPixelDepths,0,kOfxBitDepthFloat);prop->propSetString(p,kOfxImageEffectPluginRenderThreadSafety,0,kOfxImageEffectRenderFullySafe);prop->propSetInt(p,kOfxImageEffectPropSupportsTiles,0,1);prop->propSetInt(p,kOfxImageEffectPropSupportsMultiResolution,0,1);prop->propSetInt(p,kOfxImageEffectPluginPropHostFrameThreading,0,0);
+ prop->propSetString(p,kOfxPropLabel,0,"NegativeScan Studio OFX 0.90.7");prop->propSetString(p,kOfxImageEffectPluginPropGrouping,0,"NegativeScan Studio");prop->propSetString(p,kOfxImageEffectPropSupportedContexts,0,kOfxImageEffectContextFilter);prop->propSetString(p,kOfxImageEffectPropSupportedPixelDepths,0,kOfxBitDepthFloat);prop->propSetString(p,kOfxImageEffectPluginRenderThreadSafety,0,kOfxImageEffectRenderFullySafe);prop->propSetInt(p,kOfxImageEffectPropSupportsTiles,0,1);prop->propSetInt(p,kOfxImageEffectPropSupportsMultiResolution,0,1);prop->propSetInt(p,kOfxImageEffectPluginPropHostFrameThreading,0,0);
  prop->propSetString(p,kOfxImageEffectPropOpenCLRenderSupported,0,nss::CLApi::get().available?"true":"false");
  prop->propSetString(p,kOfxImageEffectPropOpenCLSupported,0,"false");
  prop->propSetString(p,kOfxImageEffectPropCudaRenderSupported,0,nss::CudaApi::get().available?"true":"false");
@@ -110,40 +123,76 @@ OfxStatus describeContext(OfxImageEffectHandle e) {
   OfxPropertySetHandle p;check(effect->clipDefine(e,name,&p));prop->propSetString(p,kOfxImageEffectPropSupportedComponents,0,kOfxImageComponentRGBA);prop->propSetInt(p,kOfxImageEffectPropSupportsTiles,0,1);
  }
  auto s=params(e);
- const char *groups[][2]={{"graypick","Viewer gray / white pick"},{"balance","Film base and balance"},{"metadata","Scan metadata"},{"camera","Camera calibration"},{"density","Density In"},{"positive","Positive Out"},{"render","Rendering"}};
- for(auto &g:groups){auto gp=define(s,g[0],g[1],kOfxParamTypeGroup);if(std::strcmp(g[0],"graypick")==0)prop->propSetInt(gp,kOfxParamPropGroupOpen,0,1);}
- auto armProps=boolDef(s,"pick_on_viewer","Pick gray on viewer",0,"graypick");prop->propSetInt(armProps,kOfxParamPropAnimates,0,0);prop->propSetInt(armProps,kOfxParamPropEvaluateOnChange,0,0);prop->propSetString(armProps,kOfxParamPropHint,0,"Select Open FX Overlay in the viewer, then click/drag a neutral patch. Click enables Auto gray and resets visible Base balances once.");
- boolDef(s,"pick_auto","Auto gray from point",0,"graypick");
+ const char *groups[][2]={
+  {"camera","Camera calibration"},
+  {"balance","Film base"},
+  {"positive","Film & Gamma"},
+  {"color_balance","Color balance"},
+  {"graypick","Viewer gray / white pick"},
+  {"density","Density In"},
+  {"render","Rendering"}
+ };
+ for(auto &g:groups){
+  auto gp=define(s,g[0],g[1],kOfxParamTypeGroup);
+  if(std::strcmp(g[0],"camera")==0||std::strcmp(g[0],"balance")==0||std::strcmp(g[0],"positive")==0||std::strcmp(g[0],"color_balance")==0||std::strcmp(g[0],"graypick")==0)prop->propSetInt(gp,kOfxParamPropGroupOpen,0,1);
+  if(std::strcmp(g[0],"graypick")==0||std::strcmp(g[0],"density")==0||std::strcmp(g[0],"render")==0)hideParam(gp);
+ }
+ // 1. Camera calibration (visible selector; underlying 3x3 matrix & controls preserved as secret params)
+ auto camMode=choiceDef(s,"camera_mode","Camera calibration","X-T3|Monochrome (MV-CS240-90UM)|Off",2,"camera");
+ prop->propSetString(camMode,kOfxParamPropHint,0,"X-T3 uses embedded scan metadata matrix or default X-T3 trichrome matrix. Monochrome applies the MV-CS240-90UM chart matrix (SoftLoaf No. 000004 positive target; not a universal negative dye matrix). Off bypasses camera calibration.");
+ // 2. Film base (default 0.5/0.5/0.5; optional read from TIFF/JSON metadata)
+ auto p=define(s,"metadata_file","TIFF or JSON path",kOfxParamTypeString,"balance");
+ prop->propSetString(p,kOfxParamPropStringMode,0,kOfxParamStringIsFilePath);prop->propSetString(p,kOfxParamPropDefault,0,"");prop->propSetInt(p,kOfxParamPropAnimates,0,0);
+ auto loadBtn=define(s,"load_metadata","Load film base from metadata",kOfxParamTypePushButton,"balance");
+ prop->propSetString(loadBtn,kOfxParamPropHint,0,"Read film_base (and any pending camera matrix) from TIFF ImageDescription or sidecar JSON. Default film base is 0.50 / 0.50 / 0.50.");
+ p=define(s,"metadata_status","Film base status",kOfxParamTypeString,"balance");
+ prop->propSetString(p,kOfxParamPropDefault,0,"Default 0.50/0.50/0.50");prop->propSetInt(p,kOfxParamPropEnabled,0,0);prop->propSetInt(p,kOfxParamPropAnimates,0,0);prop->propSetInt(p,kOfxParamPropEvaluateOnChange,0,0);
+ // 3. Film & Gamma dropdowns (Exposure, Contrast and Output retained visible)
+ choiceDef(s,"stock","Film stock","Legacy defaults / manual|Vision3 500T 5219 Status M|Vision3 500T LED estimate|Vision3 250D 5207|UltraMax 400|Portra 400|Gold 200|Ektar 100",0,"positive");
+ choiceDef(s,"film_type","Film balance","T - tungsten|D - daylight",0,"positive");
+ choiceDef(s,"temperature","Scene illuminant","3200 K|3800 K|4400 K|5000 K|5600 K",0,"positive");
+ // Secret technical parameters (preserved with identical IDs & defaults for saved project compatibility)
+ auto armProps=boolDef(s,"pick_on_viewer","Pick gray on viewer",0,"graypick");prop->propSetInt(armProps,kOfxParamPropAnimates,0,0);prop->propSetInt(armProps,kOfxParamPropEvaluateOnChange,0,0);prop->propSetString(armProps,kOfxParamPropHint,0,"Select Open FX Overlay in the viewer, then click/drag a neutral patch. Click enables Auto gray and resets visible Base balances once.");hideParam(armProps);
+ hideParam(boolDef(s,"pick_auto","Auto gray from point",0,"graypick"));
  auto point=define(s,"pick_point","Gray / white point",kOfxParamTypeDouble2D,"graypick");
  prop->propSetString(point,kOfxParamPropDoubleType,0,kOfxParamDoubleTypeXYAbsolute);
  prop->propSetString(point,kOfxParamPropDefaultCoordinateSystem,0,kOfxParamCoordinatesNormalised);
  prop->propSetInt(point,kOfxParamPropUseHostOverlayHandle,0,1);
  for(int c=0;c<2;c++)prop->propSetDouble(point,kOfxParamPropDefault,c,.5);
- numberDef(s,"pick_radius","Sample radius (pixels)",3,0,32,"graypick");
- choiceDef(s,"stage","Pipeline output","Density In|Positive Out",1);
- choiceDef(s,"render_device","Render engine","Auto (CUDA/OpenCL if offered)|CPU",0,"render");
- define(s,"render_info","Show render engine",kOfxParamTypePushButton,"render");
- boolDef(s,"auto_metadata","Auto-read Resolve 20 source metadata",1,"metadata");
- auto p=define(s,"metadata_file","Scan TIFF or sidecar JSON",kOfxParamTypeString,"metadata");prop->propSetString(p,kOfxParamPropStringMode,0,kOfxParamStringIsFilePath);prop->propSetString(p,kOfxParamPropDefault,0,"");prop->propSetInt(p,kOfxParamPropAnimates,0,0);
- define(s,"load_metadata","Load from file (or Resolve source)",kOfxParamTypePushButton,"metadata");
- p=define(s,"metadata_status","File status",kOfxParamTypeString,"metadata");prop->propSetString(p,kOfxParamPropDefault,0,"Choose TIFF or JSON");prop->propSetInt(p,kOfxParamPropEnabled,0,0);prop->propSetInt(p,kOfxParamPropAnimates,0,0);prop->propSetInt(p,kOfxParamPropEvaluateOnChange,0,0);
- boolDef(s,"camera_on","Enable camera calibration",1,"camera");boolDef(s,"neutralise","Neutralise grey - bake white balance",0,"camera");numberDef(s,"camera_strength","Camera strength",1,0,1,"camera");
- for(int i=0;i<9;i++)for(auto prefix:{"camera_","neutral_"}) {auto k=std::string(prefix)+std::to_string(i);numberDef(s,k.c_str(),k.c_str(),i%4==0?1:0,-16,16,"camera");}
- choiceDef(s,"stock","Film stock gamma preset","Legacy defaults / manual|Vision3 500T 5219 Status M|Vision3 500T LED estimate|Vision3 250D 5207|UltraMax 400|Portra 400|Gold 200|Ektar 100",0,"balance");
- choiceDef(s,"film_type","Film balance (overridable)","T - tungsten|D - daylight",0,"balance");choiceDef(s,"temperature","Scene illuminant (Planck approx.)","3200 K|3800 K|4400 K|5000 K|5600 K",0,"balance");
+ hideParam(point);
+ hideParam(numberDef(s,"pick_radius","Sample radius (pixels)",3,0,32,"graypick"));
+ hideParam(choiceDef(s,"stage","Pipeline output","Density In|Positive Out",1));
+ hideParam(choiceDef(s,"render_device","Render engine","Auto (CUDA/OpenCL if offered)|CPU",0,"render"));
+ hideParam(define(s,"render_info","Show render engine",kOfxParamTypePushButton,"render"));
+ hideParam(boolDef(s,"auto_metadata","Auto-read Resolve 20 source metadata",1,"balance"));
+ hideParam(boolDef(s,"camera_on","Enable camera calibration",1,"camera"));
+ hideParam(boolDef(s,"neutralise","Neutralise grey - bake white balance",0,"camera"));
+ hideParam(numberDef(s,"camera_strength","Camera strength",1,0,1,"camera"));
+ for(int i=0;i<9;i++)for(auto prefix:{"camera_","neutral_"}) {auto k=std::string(prefix)+std::to_string(i);hideParam(numberDef(s,k.c_str(),k.c_str(),i%4==0?1:0,-16,16,"camera"));}
  for(auto key:{"reference_base_r","reference_base_g","reference_base_b"}){
-  auto hidden=define(s,key,key,kOfxParamTypeDouble,"balance");prop->propSetDouble(hidden,kOfxParamPropDefault,0,.5);prop->propSetInt(hidden,kOfxParamPropSecret,0,1);prop->propSetInt(hidden,kOfxParamPropAnimates,0,0);
+  auto hidden=define(s,key,key,kOfxParamTypeDouble,"balance");prop->propSetDouble(hidden,kOfxParamPropDefault,0,.5);hideParam(hidden);prop->propSetInt(hidden,kOfxParamPropAnimates,0,0);
  }
+ auto isVisibleDef=[](const char *key){
+  return std::strcmp(key,"positive_out_mode")==0||std::strcmp(key,"positive_contrast")==0||std::strcmp(key,"positive_expo")==0||std::strncmp(key,"positive_bal_",13)==0;
+ };
  for(auto &d:defs) {
-  if(d.kind==Kind::Number)numberDef(s,d.key,d.label,d.def,d.lo,d.hi,d.group);
-  else if(d.kind==Kind::Choice)choiceDef(s,d.key,d.label,d.options,int(d.def),d.group);
-  else boolDef(s,d.key,d.label,int(d.def),d.group);
+  const char *grp=std::strncmp(d.key,"positive_bal_",13)==0?"color_balance":d.group;
+  OfxPropertySetHandle dp=nullptr;
+  if(d.kind==Kind::Number)dp=numberDef(s,d.key,d.label,d.def,d.lo,d.hi,grp);
+  else if(d.kind==Kind::Choice)dp=choiceDef(s,d.key,d.label,d.options,int(d.def),grp);
+  else dp=boolDef(s,d.key,d.label,int(d.def),grp);
+  if(!isVisibleDef(d.key))hideParam(dp);
  }
  auto page=define(s,"controls","Controls",kOfxParamTypePage);
- std::vector<std::string> children={"pick_on_viewer","pick_auto","pick_point","pick_radius","stage","render_device","render_info","auto_metadata","metadata_file","load_metadata","metadata_status","camera_on","neutralise","camera_strength"};
+ std::vector<std::string> children={
+  "camera_mode",
+  "metadata_file","load_metadata","metadata_status",
+  "stock","film_type","temperature","positive_expo","positive_contrast","positive_out_mode",
+  "positive_bal_r","positive_bal_g","positive_bal_b"
+ };
+ for(auto key:{"pick_on_viewer","pick_auto","pick_point","pick_radius","stage","render_device","render_info","auto_metadata","camera_on","neutralise","camera_strength"})children.push_back(key);
  for(int i=0;i<9;i++)for(auto prefix:{"camera_","neutral_"})children.push_back(std::string(prefix)+std::to_string(i));
- for(auto key:{"stock","film_type","temperature"})children.push_back(key);
- for(auto &d:defs)children.push_back(d.key);
+ for(auto &d:defs)if(!isVisibleDef(d.key))children.push_back(d.key);
  for(size_t i=0;i<children.size();i++)prop->propSetString(page,kOfxParamPropPageChild,int(i),children[i].c_str());
  return kOfxStatOK;
 }
@@ -161,8 +210,20 @@ void applyWB(OfxParamSetHandle s,double t) {
 void fillMetadata(OfxParamSetHandle s,const nss::Metadata &m,double t) {
  Pipeline p;nss::applyMetadata(p,m);
  setD(s,"reference_base_r",p.density.base_r);setD(s,"reference_base_g",p.density.base_g);setD(s,"reference_base_b",p.density.base_b);
- updateBase(s,t);setI(s,"camera_on",p.cameraOn);setI(s,"neutralise",0);setD(s,"camera_strength",p.cameraStrength);
- if(m.camera)for(int a=0;a<9;a++){auto k="camera_"+std::to_string(a);setD(s,k.c_str(),p.camera[a]);}
+ updateBase(s,t);
+ int camMode=integer(s,"camera_mode",t);
+ if(m.cameraApplied){
+  setI(s,"camera_on",0);setI(s,"neutralise",0);setI(s,"camera_mode",2);
+ }else if(m.camera){
+  setI(s,"camera_on",1);setI(s,"neutralise",0);setD(s,"camera_strength",p.cameraStrength);
+  for(int a=0;a<9;a++){auto k="camera_"+std::to_string(a);setD(s,k.c_str(),p.camera[a]);}
+  setI(s,"camera_mode",0);
+ }else if(camMode==1){
+  setI(s,"camera_on",1);setI(s,"neutralise",0);setD(s,"camera_strength",1.0);
+  for(int a=0;a<9;a++){auto k="camera_"+std::to_string(a);setD(s,k.c_str(),kMonoMatrix[a]);}
+ }else{
+  setI(s,"camera_on",0);setI(s,"neutralise",0);setI(s,"camera_mode",2);
+ }
  auto b=nss::balancedBase({p.density.base_r,p.density.base_g,p.density.base_b},integer(s,"film_type",t),integer(s,"temperature",t));
  char text[80];std::snprintf(text,sizeof(text),"Loaded: %.2f/%.2f/%.2f",b.x,b.y,b.z);setS(s,"metadata_status",text);
  setI(s,"auto_metadata",0);
@@ -202,6 +263,32 @@ OfxStatus changed(OfxImageEffectHandle e,OfxPropertySetHandle a) {
   Edit edit(s,"Film stock gamma");
   for(int c=0;c<3;c++){auto k=std::string("positive_gam_")+"rgb"[c];setD(s,k.c_str(),gammas[stock][c]);}
   if(stock){syncReference(e,s,time);setI(s,"film_type",stock<=2?0:1);applyWB(s,time);}
+ }else if(key=="camera_mode"){
+  int mode=integer(s,"camera_mode",time);
+  if(mode<0||mode>2)throw kOfxStatErrValue;
+  Edit edit(s,"Camera calibration");
+  if(integer(s,"auto_metadata",time)){syncReference(e,s,time);updateBase(s,time);}
+  setI(s,"auto_metadata",0);
+  setI(s,"neutralise",0);
+  if(mode==2){
+   setI(s,"camera_on",0);
+  }else{
+   std::array<double,9> m=(mode==1)?kMonoMatrix:kXT3Matrix;
+   double strength=1.0;
+   if(mode==0){
+    auto i=instance(e);
+    auto path=stringParam(s,"metadata_file");if(path.empty())path=sourcePath(e,i,a);
+    auto norm=nss::normalizePath(path);
+    std::lock_guard<std::mutex> lock(i->mutex);
+    if(!norm.empty()&&i->path==norm&&i->meta&&i->meta->camera&&!i->meta->cameraApplied){
+     for(int c=0;c<9;c++)m[c]=(*i->meta->camera)[c];
+     strength=i->meta->strength;
+    }
+   }
+   setI(s,"camera_on",1);
+   setD(s,"camera_strength",strength);
+   for(int c=0;c<9;c++){auto k="camera_"+std::to_string(c);setD(s,k.c_str(),m[c]);}
+  }
  }else if(key=="density_base_r"||key=="density_base_g"||key=="density_base_b"){
   setI(s,"auto_metadata",0);
  }else if(key=="render_device"){
@@ -325,7 +412,7 @@ OfxStatus entry(const char *action,const void *handle_,OfxPropertySetHandle in,O
   return kOfxStatReplyDefault;
  }catch(OfxStatus s){return s;}catch(const std::bad_alloc &){return kOfxStatErrMemory;}catch(...){return kOfxStatFailed;}
 }
-OfxPlugin plugin={kOfxImageEffectPluginApi,1,"org.negativescanstudio.complete",0,9006,setHost,entry};
+OfxPlugin plugin={kOfxImageEffectPluginApi,1,"org.negativescanstudio.complete",0,9007,setHost,entry};
 }
 extern "C" {
 #ifdef _WIN32

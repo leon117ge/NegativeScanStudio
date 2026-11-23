@@ -1,8 +1,21 @@
 # NegativeScan Studio OFX — Changelog
 
-Current plugin: **0.90.6** · [Plugin release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/ofx-v0.90.6) · [Scanning app changelog](../docs/CHANGELOG.md) · [Versioning policy](../docs/VERSIONING.md)
+Current local test plugin: **0.90.7** (not pushed/released) · Last published tag: **0.90.6** ([Plugin release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/ofx-v0.90.6)) · [Scanning app changelog](../docs/CHANGELOG.md) · [Versioning policy](../docs/VERSIONING.md)
 
 Plugin releases are independent from the Windows scanning app.
+
+## 0.90.7 — Simplified English UI and Camera calibration dropdown (local test build)
+
+- **UI simplification only; core math, computation order, and CPU/OpenCL/CUDA performance implementations are unchanged.**
+- Consolidate the inspector to 13 visible English-only controls across 4 open groups:
+  - **Camera calibration**: `Camera calibration` (`X-T3 | Monochrome (MV-CS240-90UM) | Off`, default `Off`).
+  - **Film base**: `TIFF or JSON path`, `Load film base from metadata` button, and `Film base status` readout (default `0.50 / 0.50 / 0.50`).
+  - **Film & Gamma**: `Film stock`, `Film balance`, `Scene illuminant`, `Exposure` (default `0.90`), `Contrast` (default `Off`), and `Output` (default `Cineon`).
+  - **Color balance**: `Red balance` (`1.07`), `Green balance` (`0.00`), `Blue balance` (`0.67`).
+- Hide 42 technical controls (18 matrix elements, camera strength/neutralise, individual R/G/B gammas, Gamma scale `1.15`, Film white balance loader, Density In constants, black subtraction, white code, viewer gray pick, pipeline stage, and render engine selector) using OFX `kOfxParamPropSecret` while preserving every parameter ID and numerical default for existing Resolve project compatibility.
+- Add `Monochrome (MV-CS240-90UM)` fixed neutral-preserving chart matrix (`[0.942661, 0.195781, -0.138442; -0.056435, 1.036487, 0.019948; 0.014258, -0.089212, 1.074954]`, exact unit row sums `[1, 1, 1]`, SoftLoaf No. 000004 `chart_hik2` fit, mean ΔE2000 ~2.16). `X-T3` uses embedded metadata or `DefaultXT3Trichrome`; `Off` is a true bypass; `camera_applied: true` metadata prevents double-application.
+- **Limitation**: Positive-chart color mapping (Ektachrome target SoftLoaf No. 000004) is **not** a universal color-negative dye crosstalk correction.
+- Validation: `ofx/test.sh` (CPU/Go parity, mock OFX lifecycle/UI/camera/metadata/overlay, CUDA Driver contract, classic/BigTIFF metadata) and PoCL OpenCL parity (`NSS_TEST_OPENCL=1`). Real Windows Resolve UI/GPU execution remains unverified until tested on a host machine.
 
 ## 0.90.6 — Ektar 100
 

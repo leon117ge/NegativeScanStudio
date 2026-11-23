@@ -47,7 +47,7 @@ void init(){props.propSetInt=si;props.propSetDouble=sd;props.propSetString=ss;pr
 }
 int main(int argc,char **argv){require(argc==3);mock::init();OfxHost h{nullptr,mock::fetch};OfxGetPlugin(0)->setHost(&h);require(OfxGetNumberOfPlugins()==1&&OfxGetPlugin(1)==nullptr);auto call=OfxGetPlugin(0)->mainEntry;mock::Effect fx;auto e=reinterpret_cast<OfxImageEffectHandle>(&fx);auto bag=[](mock::Bag &b){return reinterpret_cast<OfxPropertySetHandle>(&b);};
 require(call(kOfxActionLoad,nullptr,nullptr,nullptr)==kOfxStatOK);require(call(kOfxActionDescribe,e,nullptr,nullptr)==kOfxStatOK);require(call(kOfxImageEffectActionDescribeInContext,e,nullptr,nullptr)==kOfxStatOK);require(fx.params.values.count("cross")==0);require(fx.params.values.count("cross_strength")==0);require(fx.params.values.count("density_cast_on")==0);require(fx.params.values.count("apply_wb")==0);require(fx.params.values.count("positive_film_wb")==1);require(call(kOfxActionCreateInstance,e,nullptr,nullptr)==kOfxStatOK);
-auto s=reinterpret_cast<OfxParamSetHandle>(&fx.params);require(std::abs(number(s,"positive_bal_r",0)-1.07)<1e-9&&number(s,"positive_bal_g",0)==0&&std::abs(number(s,"positive_bal_b",0)-.67)<1e-9);require(OfxGetPlugin(0)->pluginVersionMinor==9006);require(number(s,"gamma_scale",0)==1.15);require(number(s,"positive_expo",0)==.9);require(fx.params.values["gamma_scale"].strings[kOfxParamPropParent][0]=="positive");setI(s,"auto_metadata",0);require(number(s,"positive_gam_r",0)==.55);require(number(s,"density_base_r",0)==.5);require(number(s,"density_base_g",0)==.5);require(number(s,"density_base_b",0)==.5);require(integer(s,"positive_film_wb",0)==1);
+auto s=reinterpret_cast<OfxParamSetHandle>(&fx.params);require(std::abs(number(s,"positive_bal_r",0)-1.07)<1e-9&&number(s,"positive_bal_g",0)==0&&std::abs(number(s,"positive_bal_b",0)-.67)<1e-9);require(OfxGetPlugin(0)->pluginVersionMinor==9007);require(number(s,"gamma_scale",0)==1.15);require(number(s,"positive_expo",0)==.9);require(fx.params.values["gamma_scale"].strings[kOfxParamPropParent][0]=="positive");setI(s,"auto_metadata",0);require(number(s,"positive_gam_r",0)==.55);require(number(s,"density_base_r",0)==.5);require(number(s,"density_base_g",0)==.5);require(number(s,"density_base_b",0)==.5);require(integer(s,"positive_film_wb",0)==1);
 float in[16]={.03,.04,.05,1,.1,.2,.3,1,.4,.3,.2,1,.5,.5,.5,1},out[16]{};
 for(auto *b:{&fx.source.image,&fx.output.image}){auto p=bag(*b);mock::ss(p,kOfxImageEffectPropPixelDepth,0,kOfxBitDepthFloat);mock::ss(p,kOfxImageEffectPropComponents,0,kOfxImageComponentRGBA);mock::ss(p,kOfxImageEffectPropPreMultiplication,0,kOfxImageUnPreMultiplied);mock::si(p,kOfxImagePropRowBytes,0,-32);for(int j=0;j<4;j++)mock::si(p,kOfxImagePropBounds,j,(int[]){10,20,12,22}[j]);}
 mock::sp(bag(fx.source.image),kOfxImagePropData,0,in+8);mock::sp(bag(fx.output.image),kOfxImagePropData,0,out+8);
@@ -149,5 +149,65 @@ require(roiOut.doubles["OfxImageClipPropRoI_Source"][0]<10.5);
 check(param->paramSetValue(handle(s,"pick_point"),-100.,-100.));
 require(call(kOfxImageEffectActionRender,e,bag(args),nullptr)==kOfxStatOK);
 require(instance(e)->lastRender.find("pick unavailable")!=std::string::npos);
+// Simplified UI layout: exact 13 visible controls, Exposure/Contrast/Cineon/RGB balances kept visible, technical params secret, English-only strings.
+{
+ std::vector<std::string> visible;
+ for(auto &k:fx.params.values["controls"].strings[kOfxParamPropPageChild]){
+  auto &b=fx.params.values[k];
+  int sec=b.ints.count(kOfxParamPropSecret)?b.ints[kOfxParamPropSecret][0]:0;
+  if(!sec)visible.push_back(k);
+  for(auto &sp:b.strings)for(auto &sv:sp.second)for(unsigned char ch:sv)require(ch<128);
+ }
+ std::vector<std::string> expectedVisible={
+  "camera_mode",
+  "metadata_file","load_metadata","metadata_status",
+  "stock","film_type","temperature","positive_expo","positive_contrast","positive_out_mode",
+  "positive_bal_r","positive_bal_g","positive_bal_b"
+ };
+ require(visible==expectedVisible);
+ require(integer(s,"positive_out_mode",0)==2);
+ require(integer(s,"positive_contrast",0)==0);
+ require(number(s,"positive_expo",0)==.9);
+ // Camera calibration dropdown: X-T3, Monochrome (MV-CS240-90UM), Off
+ require(fx.params.values["camera_mode"].strings[kOfxParamPropChoiceOption]==std::vector<std::string>({"X-T3","Monochrome (MV-CS240-90UM)","Off"}));
+ // Monochrome matrix preserves 0.5/0.5/0.5 neutral base (unit row sums).
+ setI(s,"camera_mode",1);mock::ss(bag(changed),kOfxPropName,0,"camera_mode");require(call(kOfxActionInstanceChanged,e,bag(changed),nullptr)==kOfxStatOK);
+ require(integer(s,"camera_on",0)==1&&integer(s,"neutralise",0)==0);
+ auto monoP=readParams(s,0);
+ auto monoBase=monoP.cameraPixel({.5f,.5f,.5f});
+ require(std::abs(monoBase.x-.5f)<1e-6f&&std::abs(monoBase.y-.5f)<1e-6f&&std::abs(monoBase.z-.5f)<1e-6f);
+ // Switching to Off is a true bypass.
+ setI(s,"camera_mode",2);require(call(kOfxActionInstanceChanged,e,bag(changed),nullptr)==kOfxStatOK);
+ require(integer(s,"camera_on",0)==0);
+ auto offP=readParams(s,0);auto offPx=offP.cameraPixel({.2f,.3f,.4f});
+ require(offPx.x==.2f&&offPx.y==.3f&&offPx.z==.4f);
+ // Switching to X-T3 with loaded source metadata restores metadata matrix; without metadata loads DefaultXT3Trichrome.
+ setS(s,"metadata_file","");
+ setI(s,"camera_mode",0);require(call(kOfxActionInstanceChanged,e,bag(changed),nullptr)==kOfxStatOK);
+ require(integer(s,"camera_on",0)==1&&std::abs(number(s,"camera_0",0)-1.1)<1e-5&&std::abs(number(s,"camera_strength",0)-0.5)<1e-6);
+ mock::ss(bag(fx.props),"OfxImageEffectPropSrcFilePath",0,"");
+ setI(s,"camera_mode",0);require(call(kOfxActionInstanceChanged,e,bag(changed),nullptr)==kOfxStatOK);
+ require(integer(s,"camera_on",0)==1&&std::abs(number(s,"camera_0",0)-0.86426)<1e-5&&std::abs(number(s,"camera_strength",0)-1.0)<1e-6);
+ // Loading metadata with camera_applied=true forces Off (no double-apply), while Monochrome without embedded matrix preserves Monochrome selection.
+ {
+  std::string bakedJson="/tmp/nss_baked_test.json";
+  {std::ofstream f(bakedJson);f<<"{\"schema\":\"nss.scan/1\",\"encoding\":\"linear\",\"film_base\":[0.5,0.5,0.5],\"film_base_space\":\"after_profile\",\"camera_matrix\":[0.86426,0.10467,-0.01969,-0.05068,0.98176,0.01644,0.11287,-0.14623,1.04095],\"camera_strength\":1,\"camera_applied\":true}";}
+  setS(s,"metadata_file",bakedJson);mock::ss(bag(changed),kOfxPropName,0,"load_metadata");
+  require(call(kOfxActionInstanceChanged,e,bag(changed),nullptr)==kOfxStatOK);
+  require(integer(s,"camera_mode",0)==2&&integer(s,"camera_on",0)==0);
+  std::string monoJson="/tmp/nss_mono_test.json";
+  {std::ofstream f(monoJson);f<<"{\"schema\":\"nss.scan/1\",\"encoding\":\"linear\",\"film_base\":[0.501,0.501,0.5007],\"film_base_space\":\"after_profile\",\"camera_profile\":\"MV-CS240-90UM\",\"camera_applied\":false}";}
+  setI(s,"camera_mode",1);mock::ss(bag(changed),kOfxPropName,0,"camera_mode");
+  require(call(kOfxActionInstanceChanged,e,bag(changed),nullptr)==kOfxStatOK);
+  setS(s,"metadata_file",monoJson);mock::ss(bag(changed),kOfxPropName,0,"load_metadata");
+  require(call(kOfxActionInstanceChanged,e,bag(changed),nullptr)==kOfxStatOK);
+  require(integer(s,"camera_mode",0)==1&&integer(s,"camera_on",0)==1);
+  require(std::abs(number(s,"camera_0",0)-0.942661)<1e-6&&std::abs(number(s,"reference_base_r",0)-0.501)<1e-5);
+ }
+ // Stock selection does not silently zero visible RGB balance sliders.
+ setD(s,"positive_bal_r",1.07);setD(s,"positive_bal_g",0.0);setD(s,"positive_bal_b",0.67);
+ setI(s,"stock",7);mock::ss(bag(changed),kOfxPropName,0,"stock");require(call(kOfxActionInstanceChanged,e,bag(changed),nullptr)==kOfxStatOK);
+ require(std::abs(number(s,"positive_bal_r",0)-1.07)<1e-6&&number(s,"positive_bal_g",0)==0&&std::abs(number(s,"positive_bal_b",0)-.67)<1e-6);
+}
 require(call(kOfxActionDestroyInstance,e,nullptr,nullptr)==kOfxStatOK);std::cout<<"PASS: exported entrypoints, describe/create, RGBA render, negative stride, nonzero origin, Resolve source auto-read, load snapshot/manual override, immediate gamma/base, noncompounding WB/sign, viewer point neutralization/ROI\n";return 0;
 }
