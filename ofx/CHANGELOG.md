@@ -1,8 +1,15 @@
 # NegativeScan Studio OFX — Changelog
 
-Current local test plugin: **0.90.9** (not pushed/released) · Last published tag: **0.90.6** ([Plugin release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/ofx-v0.90.6)) · [Scanning app changelog](../docs/CHANGELOG.md) · [Versioning policy](../docs/VERSIONING.md)
+Current local test plugin: **0.90.10** (not pushed/released) · Last published tag: **0.90.6** ([Plugin release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/ofx-v0.90.6)) · [Scanning app changelog](../docs/CHANGELOG.md) · [Versioning policy](../docs/VERSIONING.md)
 
 Plugin releases are independent from the Windows scanning app.
+
+## 0.90.10 — User-saved Color balance presets (local test build)
+
+- UI only in **Color balance**: add `Balance preset` (fixed `None | Slot 1..8`), `Preset name`, `Save`, `Delete`, and a read-only `Preset status` line under the Red/Green/Blue balance sliders. Saving stores the current visible `positive_bal_r/g/b` values under that English (ASCII) name; the same name overwrites. Delete removes the selected slot. Selecting a slot writes only those three sliders; core render math, kernels, and performance are unchanged. Existing parameter IDs and defaults are preserved; new parameters are appended.
+- Presets persist in `%APPDATA%\NegativeScanStudio\balance_presets.json` on Windows (directory is created as needed), so they are shared across all Resolve projects. `NSS_BALANCE_PRESETS` overrides the path (used by tests). A missing or corrupt file is treated as empty and does not fail the plugin.
+- Resolve / OFX hosts do not reliably rebuild `kOfxParamTypeChoice` menus after describe, and the specification treats post-describe gaps as an error, so this build uses eight fixed slots instead of a dynamic list. The plugin still tries to update slot labels (`Slot N: name`) on the instance; if the host keeps the original `Slot N` labels, `Preset status` lists the saved names.
+- Plugin label is **NegativeScan Studio OFX 0.90.10**; version minor is 9010. Gamma scale default remains 1.0, Exposure 0.90, balances 1.07 / 0 / 0.67.
 
 ## 0.90.9 — Gamma scale default 1.0 (local test build)
 

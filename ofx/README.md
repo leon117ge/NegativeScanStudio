@@ -1,7 +1,7 @@
-# NegativeScan Studio OFX 0.90.9 - Windows x64 (local test build)
+# NegativeScan Studio OFX 0.90.10 - Windows x64 (local test build)
 
 ## Installation
-Quit Resolve, back up your project, and remove the previous bundle. Copy the entire `NegativeScanStudio.ofx.bundle` into `C:\Program Files\Common Files\OFX\Plugins\` (administrator access may be needed). Restart Resolve and find **NegativeScan Studio OFX 0.90.9** under OpenFX > NegativeScan Studio. Do not install duplicate bundles.
+Quit Resolve, back up your project, and remove the previous bundle. Copy the entire `NegativeScanStudio.ofx.bundle` into `C:\Program Files\Common Files\OFX\Plugins\` (administrator access may be needed). Restart Resolve and find **NegativeScan Studio OFX 0.90.10** under OpenFX > NegativeScan Studio. Do not install duplicate bundles.
 
 Auto uses CUDA or OpenCL buffers when offered by the host. CPU fallback is available. No extra CUDA/OpenCL DLL is bundled or required for CPU use. Keep the whole bundle together. Scanning app binaries are unchanged.
 
@@ -23,13 +23,18 @@ All UI labels, statuses, and prompts are in English. Core rendering math, comput
    - **Film balance**: T - tungsten / D - daylight (auto-suggested by stock, manually overridable).
    - **Scene illuminant**: 3200 K – 5600 K Planck approximation.
    - **Exposure**: Default **0.90** stops (`-6.0` to `6.0`).
+   - **Gamma scale**: Default **1.0**; scales the three hidden film-stock gammas together (`0.25` to `2.0`).
    - **Contrast**: Off / Low / Medium / High (default **Off**).
    - **Output**: Rec709 / DaVinci Intermediate / Cineon / ACEScct / Linear (default **Cineon**).
 
 4. **Color balance**
    - **Red balance** (default **1.07**), **Green balance** (default **0.00**), **Blue balance** (default **0.67**) for manual channel trim. Changing film stock does not silently zero these sliders.
+   - **Balance preset**: `None` plus eight fixed slots. Choosing a filled slot writes its saved R/G/B values into the three sliders above.
+   - **Preset name**: English (ASCII) name used when saving. The same name overwrites that preset.
+   - **Save** / **Delete**: Save stores the current slider values in `%APPDATA%\NegativeScanStudio\balance_presets.json` (shared across all projects; `NSS_BALANCE_PRESETS` can override the path). Delete removes the selected slot. A missing or corrupt file is treated as empty.
+   - **Preset status**: Lists saved slot names, or a short result after Save/Delete. Use this list if the host does not refresh the dropdown labels.
 
-Technical parameters (18 matrix coefficients, camera strength, individual channel gammas, Gamma scale 1.15, Density In constants, black subtraction, white code, gray-pick handle, pipeline stage, and render engine selection) are hidden via OFX `kOfxParamPropSecret` with all parameter IDs and defaults preserved for existing project compatibility.
+Technical parameters (18 matrix coefficients, camera strength, individual channel gammas, Density In constants, black subtraction, white code, gray-pick handle, pipeline stage, and render engine selection) are hidden via OFX `kOfxParamPropSecret` with all parameter IDs and defaults preserved for existing project compatibility.
 
 ## Verification and limitations
 Native CPU math/parity, mock-host lifecycle/UI-visibility/camera-dropdown/preset/metadata/overlay, PoCL OpenCL execution, CUDA Driver contract and offline PTX assembly checks pass in `ofx/test.sh`. Real Windows Resolve, physical NVIDIA/GPU execution, host UI inspection, and real film negative scan acceptance remain untested.

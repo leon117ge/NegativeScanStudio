@@ -1,6 +1,12 @@
-# NegativeScan Studio OFX 0.90.9 (local test build)
+# NegativeScan Studio OFX 0.90.10 (local test build)
 
-Current local test build is **0.90.9** (last published tag: `ofx-v0.90.6`). Core rendering math, computation order, CPU/OpenCL/CUDA kernels, and all numeric defaults remain unchanged. Real Windows Resolve and physical GPU acceptance remain outstanding. [Installation](../ofx/README.md).
+Current local test build is **0.90.10** (last published tag: `ofx-v0.90.6`). Core rendering math, computation order, CPU/OpenCL/CUDA kernels, and all numeric defaults remain unchanged. Real Windows Resolve and physical GPU acceptance remain outstanding. [Installation](../ofx/README.md).
+
+## 0.90.10 User-saved Color balance presets
+
+Adds a Save/Delete preset workflow under **Color balance** without changing render math. The inspector gains `Balance preset` (`None` + eight fixed slots), `Preset name`, `Save`, `Delete`, and `Preset status`. Save writes the current visible `positive_bal_r/g/b` values to `%APPDATA%\NegativeScanStudio\balance_presets.json` (or `NSS_BALANCE_PRESETS`) under an ASCII name; the same name overwrites, and Delete clears the selected slot. The file is shared across Resolve projects. A missing or unreadable file is treated as an empty list.
+
+Fixed slots are used because OpenFX treats gaps in `kOfxParamTypeChoice` after describe as an error, and hosts including DaVinci Resolve do not reliably let a plugin rebuild choice options at runtime. Slot labels are updated on the instance when possible (`Slot N: name`); the status line always lists saved names. Selecting a preset only writes the three balance sliders, which then go through the existing pipeline. New parameter IDs are appended; every previous ID and default is unchanged. Plugin version minor is 9010. Mock-host tests cover save/apply/overwrite/delete and corrupt-file recovery. Real Windows Resolve UI behaviour is still untested.
 
 ## 0.90.7 Simplified English UI & Camera Calibration Dropdown
 

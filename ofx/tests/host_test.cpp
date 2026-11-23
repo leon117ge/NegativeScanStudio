@@ -3,6 +3,9 @@
 #include <cstdarg>
 #include <cassert>
 #include <iostream>
+#include <cstdlib>
+#include <fstream>
+#include <filesystem>
 static void require(bool value){if(!value){std::cerr<<"Host test assertion failed\n";std::abort();}}
 namespace mock {
 struct Bag { std::map<std::string,std::vector<int>> ints;std::map<std::string,std::vector<double>> doubles;std::map<std::string,std::vector<std::string>> strings;std::map<std::string,std::vector<void*>> pointers;std::string type; };
@@ -45,9 +48,13 @@ OfxPropertySuiteV1 props{};OfxImageEffectSuiteV1 effects{};OfxParameterSuiteV1 p
 const void *fetch(OfxPropertySetHandle,const char *name,int version){if(version!=1)return nullptr;if(std::string(name)==kOfxInteractSuite)return &interacts;if(std::string(name)==kOfxPropertySuite)return &props;if(std::string(name)==kOfxImageEffectSuite)return &effects;if(std::string(name)==kOfxParameterSuite)return &params_;return nullptr;}
 void init(){props.propSetInt=si;props.propSetDouble=sd;props.propSetString=ss;props.propSetPointer=sp;props.propGetInt=gi;props.propGetDouble=gd;props.propGetString=gs;props.propGetPointer=gp;props.propGetIntN=gin;effects.getPropertySet=ep;effects.getParamSet=es;effects.clipDefine=cd;effects.clipGetHandle=cg;effects.clipGetPropertySet=cp;effects.clipGetImage=image;effects.clipReleaseImage=release;effects.abort=abort_;params_.paramDefine=pd;params_.paramGetHandle=ph;params_.paramGetValue=pv;params_.paramGetValueAtTime=pvt;params_.paramSetValue=ps;params_.paramEditBegin=edit;params_.paramEditEnd=end;}
 }
-int main(int argc,char **argv){require(argc==3);mock::init();OfxHost h{nullptr,mock::fetch};OfxGetPlugin(0)->setHost(&h);require(OfxGetNumberOfPlugins()==1&&OfxGetPlugin(1)==nullptr);auto call=OfxGetPlugin(0)->mainEntry;mock::Effect fx;auto e=reinterpret_cast<OfxImageEffectHandle>(&fx);auto bag=[](mock::Bag &b){return reinterpret_cast<OfxPropertySetHandle>(&b);};
+int main(int argc,char **argv){require(argc==3);mock::init();
+const char *presetPath="/tmp/nss_balance_presets_host_test.json";
+setenv("NSS_BALANCE_PRESETS",presetPath,1);
+std::error_code presetErr;std::filesystem::remove(presetPath,presetErr);std::filesystem::remove(std::string(presetPath)+".tmp",presetErr);
+OfxHost h{nullptr,mock::fetch};OfxGetPlugin(0)->setHost(&h);require(OfxGetNumberOfPlugins()==1&&OfxGetPlugin(1)==nullptr);auto call=OfxGetPlugin(0)->mainEntry;mock::Effect fx;auto e=reinterpret_cast<OfxImageEffectHandle>(&fx);auto bag=[](mock::Bag &b){return reinterpret_cast<OfxPropertySetHandle>(&b);};
 require(call(kOfxActionLoad,nullptr,nullptr,nullptr)==kOfxStatOK);require(call(kOfxActionDescribe,e,nullptr,nullptr)==kOfxStatOK);require(call(kOfxImageEffectActionDescribeInContext,e,nullptr,nullptr)==kOfxStatOK);require(fx.params.values.count("cross")==0);require(fx.params.values.count("cross_strength")==0);require(fx.params.values.count("density_cast_on")==0);require(fx.params.values.count("apply_wb")==0);require(fx.params.values.count("positive_film_wb")==1);require(call(kOfxActionCreateInstance,e,nullptr,nullptr)==kOfxStatOK);
-auto s=reinterpret_cast<OfxParamSetHandle>(&fx.params);require(std::abs(number(s,"positive_bal_r",0)-1.07)<1e-9&&number(s,"positive_bal_g",0)==0&&std::abs(number(s,"positive_bal_b",0)-.67)<1e-9);require(OfxGetPlugin(0)->pluginVersionMinor==9009);require(number(s,"gamma_scale",0)==1.0);require(number(s,"positive_expo",0)==.9);require(fx.params.values["gamma_scale"].strings[kOfxParamPropParent][0]=="positive");setI(s,"auto_metadata",0);require(number(s,"positive_gam_r",0)==.55);require(number(s,"density_base_r",0)==.5);require(number(s,"density_base_g",0)==.5);require(number(s,"density_base_b",0)==.5);require(integer(s,"positive_film_wb",0)==1);
+auto s=reinterpret_cast<OfxParamSetHandle>(&fx.params);require(std::abs(number(s,"positive_bal_r",0)-1.07)<1e-9&&number(s,"positive_bal_g",0)==0&&std::abs(number(s,"positive_bal_b",0)-.67)<1e-9);require(OfxGetPlugin(0)->pluginVersionMinor==9010);require(number(s,"gamma_scale",0)==1.0);require(number(s,"positive_expo",0)==.9);require(fx.params.values["gamma_scale"].strings[kOfxParamPropParent][0]=="positive");setI(s,"auto_metadata",0);require(number(s,"positive_gam_r",0)==.55);require(number(s,"density_base_r",0)==.5);require(number(s,"density_base_g",0)==.5);require(number(s,"density_base_b",0)==.5);require(integer(s,"positive_film_wb",0)==1);
 float in[16]={.03,.04,.05,1,.1,.2,.3,1,.4,.3,.2,1,.5,.5,.5,1},out[16]{};
 for(auto *b:{&fx.source.image,&fx.output.image}){auto p=bag(*b);mock::ss(p,kOfxImageEffectPropPixelDepth,0,kOfxBitDepthFloat);mock::ss(p,kOfxImageEffectPropComponents,0,kOfxImageComponentRGBA);mock::ss(p,kOfxImageEffectPropPreMultiplication,0,kOfxImageUnPreMultiplied);mock::si(p,kOfxImagePropRowBytes,0,-32);for(int j=0;j<4;j++)mock::si(p,kOfxImagePropBounds,j,(int[]){10,20,12,22}[j]);}
 mock::sp(bag(fx.source.image),kOfxImagePropData,0,in+8);mock::sp(bag(fx.output.image),kOfxImagePropData,0,out+8);
@@ -149,7 +156,7 @@ require(roiOut.doubles["OfxImageClipPropRoI_Source"][0]<10.5);
 check(param->paramSetValue(handle(s,"pick_point"),-100.,-100.));
 require(call(kOfxImageEffectActionRender,e,bag(args),nullptr)==kOfxStatOK);
 require(instance(e)->lastRender.find("pick unavailable")!=std::string::npos);
-// Simplified UI layout: exact 13 visible controls, Exposure/Contrast/Cineon/RGB balances kept visible, technical params secret, English-only strings.
+// Simplified UI layout: visible controls, Exposure/Contrast/Cineon/RGB balances kept visible, technical params secret, English-only strings.
 {
  std::vector<std::string> visible;
  for(auto &k:fx.params.values["controls"].strings[kOfxParamPropPageChild]){
@@ -162,9 +169,13 @@ require(instance(e)->lastRender.find("pick unavailable")!=std::string::npos);
   "camera_mode",
   "metadata_file","load_metadata","metadata_status",
   "stock","film_type","temperature","positive_expo","gamma_scale","positive_contrast","positive_out_mode",
-  "positive_bal_r","positive_bal_g","positive_bal_b"
+  "positive_bal_r","positive_bal_g","positive_bal_b",
+  "balance_preset","balance_preset_name","save_balance_preset","delete_balance_preset","balance_preset_status"
  };
  require(visible==expectedVisible);
+ require(fx.params.values["balance_preset"].strings[kOfxParamPropChoiceOption]==std::vector<std::string>({"None","Slot 1","Slot 2","Slot 3","Slot 4","Slot 5","Slot 6","Slot 7","Slot 8"}));
+ require(integer(s,"balance_preset",0)==0);
+ require(stringParam(s,"balance_preset_status")=="No saved presets");
  require(integer(s,"positive_out_mode",0)==2);
  require(integer(s,"positive_contrast",0)==0);
  require(number(s,"positive_expo",0)==.9);
@@ -209,5 +220,81 @@ require(instance(e)->lastRender.find("pick unavailable")!=std::string::npos);
  setI(s,"stock",7);mock::ss(bag(changed),kOfxPropName,0,"stock");require(call(kOfxActionInstanceChanged,e,bag(changed),nullptr)==kOfxStatOK);
  require(std::abs(number(s,"positive_bal_r",0)-1.07)<1e-6&&number(s,"positive_bal_g",0)==0&&std::abs(number(s,"positive_bal_b",0)-.67)<1e-6);
 }
-require(call(kOfxActionDestroyInstance,e,nullptr,nullptr)==kOfxStatOK);std::cout<<"PASS: exported entrypoints, describe/create, RGBA render, negative stride, nonzero origin, Resolve source auto-read, load snapshot/manual override, immediate gamma/base, noncompounding WB/sign, viewer point neutralization/ROI\n";return 0;
+// Color balance presets: save/apply/overwrite/delete to NSS_BALANCE_PRESETS, corrupt file is non-fatal.
+{
+ setD(s,"positive_bal_r",1.07);setD(s,"positive_bal_g",0);setD(s,"positive_bal_b",0.67);
+ setS(s,"balance_preset_name","Tungsten");
+ mock::ss(bag(changed),kOfxPropName,0,"save_balance_preset");
+ require(call(kOfxActionInstanceChanged,e,bag(changed),nullptr)==kOfxStatOK);
+ require(integer(s,"balance_preset",0)==1);
+ require(stringParam(s,"balance_preset_status")=="Saved 'Tungsten' in slot 1");
+ require(fx.params.values["balance_preset"].strings[kOfxParamPropChoiceOption][1]=="Slot 1: Tungsten");
+ auto saved=nss::loadBalancePresets();
+ require(saved.valid&&saved.slots[0].name=="Tungsten");
+ require(std::abs(saved.slots[0].r-1.07)<1e-9&&saved.slots[0].g==0&&std::abs(saved.slots[0].b-0.67)<1e-9);
+ // Apply writes only the three visible balance sliders.
+ setD(s,"positive_bal_r",0);setD(s,"positive_bal_g",1);setD(s,"positive_bal_b",2);
+ setD(s,"positive_expo",0.5);setD(s,"gamma_scale",1);setI(s,"positive_film_wb",1);
+ double expo=number(s,"positive_expo",0),scale=number(s,"gamma_scale",0);int filmWb=integer(s,"positive_film_wb",0);
+ setI(s,"balance_preset",1);mock::ss(bag(changed),kOfxPropName,0,"balance_preset");
+ require(call(kOfxActionInstanceChanged,e,bag(changed),nullptr)==kOfxStatOK);
+ require(std::abs(number(s,"positive_bal_r",0)-1.07)<1e-9&&number(s,"positive_bal_g",0)==0&&std::abs(number(s,"positive_bal_b",0)-0.67)<1e-9);
+ require(stringParam(s,"balance_preset_name")=="Tungsten");
+ require(stringParam(s,"balance_preset_status")=="Applied 'Tungsten'");
+ require(number(s,"positive_expo",0)==expo&&number(s,"gamma_scale",0)==scale&&integer(s,"positive_film_wb",0)==filmWb);
+ // Same name overwrites the same slot.
+ setD(s,"positive_bal_r",-0.25);setD(s,"positive_bal_g",0.1);setD(s,"positive_bal_b",0.3);
+ setS(s,"balance_preset_name","Tungsten");
+ mock::ss(bag(changed),kOfxPropName,0,"save_balance_preset");
+ require(call(kOfxActionInstanceChanged,e,bag(changed),nullptr)==kOfxStatOK);
+ require(integer(s,"balance_preset",0)==1);
+ auto overwritten=nss::loadBalancePresets();
+ require(overwritten.slots[0].name=="Tungsten"&&overwritten.slots[1].empty());
+ require(std::abs(overwritten.slots[0].r+0.25)<1e-9&&std::abs(overwritten.slots[0].g-0.1)<1e-9&&std::abs(overwritten.slots[0].b-0.3)<1e-9);
+ // Second named preset uses the next empty slot.
+ setD(s,"positive_bal_r",0.2);setD(s,"positive_bal_g",0);setD(s,"positive_bal_b",-0.1);
+ setS(s,"balance_preset_name","Daylight");
+ require(call(kOfxActionInstanceChanged,e,bag(changed),nullptr)==kOfxStatOK);
+ require(integer(s,"balance_preset",0)==2);
+ require(nss::loadBalancePresets().slots[1].name=="Daylight");
+ // Empty and non-ASCII names are rejected; file unchanged.
+ auto before=nss::loadBalancePresets();
+ setS(s,"balance_preset_name","");
+ require(call(kOfxActionInstanceChanged,e,bag(changed),nullptr)==kOfxStatOK);
+ require(stringParam(s,"balance_preset_status")=="Enter a preset name");
+ setS(s,"balance_preset_name","\xE6\xB5\x8B\xE8\xAF\x95");
+ require(call(kOfxActionInstanceChanged,e,bag(changed),nullptr)==kOfxStatOK);
+ require(stringParam(s,"balance_preset_status")=="Use English (ASCII) names only");
+ auto rejected=nss::loadBalancePresets();
+ require(rejected.slots[0].name==before.slots[0].name&&rejected.slots[1].name==before.slots[1].name);
+ // Delete selected slot, leave the other, do not change sliders on empty apply.
+ setD(s,"positive_bal_r",1.5);setD(s,"positive_bal_g",1.5);setD(s,"positive_bal_b",1.5);
+ setI(s,"balance_preset",1);mock::ss(bag(changed),kOfxPropName,0,"delete_balance_preset");
+ require(call(kOfxActionInstanceChanged,e,bag(changed),nullptr)==kOfxStatOK);
+ require(integer(s,"balance_preset",0)==0);
+ require(stringParam(s,"balance_preset_status")=="Deleted 'Tungsten'");
+ require(nss::loadBalancePresets().slots[0].empty()&&nss::loadBalancePresets().slots[1].name=="Daylight");
+ require(number(s,"positive_bal_r",0)==1.5);
+ setI(s,"balance_preset",1);mock::ss(bag(changed),kOfxPropName,0,"balance_preset");
+ require(call(kOfxActionInstanceChanged,e,bag(changed),nullptr)==kOfxStatOK);
+ require(stringParam(s,"balance_preset_status")=="Slot 1 is empty");
+ require(number(s,"positive_bal_r",0)==1.5&&number(s,"positive_bal_g",0)==1.5&&number(s,"positive_bal_b",0)==1.5);
+ setI(s,"balance_preset",2);
+ require(call(kOfxActionInstanceChanged,e,bag(changed),nullptr)==kOfxStatOK);
+ require(std::abs(number(s,"positive_bal_r",0)-0.2)<1e-9&&std::abs(number(s,"positive_bal_b",0)+0.1)<1e-9);
+ // Corrupt file does not crash; treated as empty; a later Save replaces it.
+ {std::ofstream bad(presetPath,std::ios::binary|std::ios::trunc);bad<<"{not-json";}
+ setI(s,"balance_preset",0);mock::ss(bag(changed),kOfxPropName,0,"balance_preset");
+ require(call(kOfxActionInstanceChanged,e,bag(changed),nullptr)==kOfxStatOK);
+ require(stringParam(s,"balance_preset_status")=="Presets file was invalid; treated as empty.");
+ require(!nss::loadBalancePresets().valid);
+ setS(s,"balance_preset_name","Recovered");
+ mock::ss(bag(changed),kOfxPropName,0,"save_balance_preset");
+ require(call(kOfxActionInstanceChanged,e,bag(changed),nullptr)==kOfxStatOK);
+ auto recovered=nss::loadBalancePresets();
+ require(recovered.valid&&recovered.slots[0].name=="Recovered");
+ require(stringParam(s,"balance_preset_status")=="Saved 'Recovered' in slot 1");
 }
+require(call(kOfxActionDestroyInstance,e,nullptr,nullptr)==kOfxStatOK);std::cout<<"PASS: exported entrypoints, describe/create, RGBA render, negative stride, nonzero origin, Resolve source auto-read, load snapshot/manual override, immediate gamma/base, noncompounding WB/sign, viewer point neutralization/ROI, color balance presets\n";return 0;
+}
+

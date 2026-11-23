@@ -1,6 +1,10 @@
 # NegativeScan Studio OFX — Roadmap
 
-Current local test plugin: **0.90.9** (last published tag: **0.90.6**) · [Plugin changelog](CHANGELOG.md) · [Scanning app roadmap](../docs/ROADMAP.md) · [Versioning](../docs/VERSIONING.md)
+Current local test plugin: **0.90.10** (last published tag: **0.90.6**) · [Plugin changelog](CHANGELOG.md) · [Scanning app roadmap](../docs/ROADMAP.md) · [Versioning](../docs/VERSIONING.md)
+
+## Implemented in 0.90.10 (local test build, Resolve pending)
+
+- User-saved Color balance presets: `Save` / `Delete` with a `Preset name`, eight fixed `Slot 1..8` choices, and a status line. Values live in `%APPDATA%\NegativeScanStudio\balance_presets.json` and are shared across projects. Selecting a slot writes only the three visible balance sliders. Dynamic OFX choice menus were avoided because hosts such as Resolve do not reliably rebuild `kOfxParamPropChoiceOption` after describe.
 
 ## Implemented in 0.90.9 (local test build, Resolve pending)
 

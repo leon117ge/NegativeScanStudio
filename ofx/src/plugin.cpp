@@ -4,6 +4,7 @@
 #include "overlay_gl.hpp"
 #include "metadata.hpp"
 #include "wb_presets.hpp"
+#include "balance_presets.hpp"
 #include "ofxGPURender.h"
 #include "opencl.hpp"
 #include "cuda.hpp"
@@ -112,7 +113,7 @@ OfxPropertySetHandle choiceDef(OfxParamSetHandle s,const char *key,const char *l
 OfxPropertySetHandle boolDef(OfxParamSetHandle s,const char *key,const char *label,int d,const char *group="") {auto p=define(s,key,label,kOfxParamTypeBoolean,group);prop->propSetInt(p,kOfxParamPropDefault,0,d);return p;}
 OfxStatus describe(OfxImageEffectHandle e) {
  auto p=properties(e);if(interact){OfxPluginEntryPoint *callback=overlayEntry;void *address=nullptr;static_assert(sizeof(callback)==sizeof(address));std::memcpy(&address,&callback,sizeof(address));prop->propSetPointer(p,kOfxImageEffectPluginPropOverlayInteractV1,0,address);}
- prop->propSetString(p,kOfxPropLabel,0,"NegativeScan Studio OFX 0.90.9");prop->propSetString(p,kOfxImageEffectPluginPropGrouping,0,"NegativeScan Studio");prop->propSetString(p,kOfxImageEffectPropSupportedContexts,0,kOfxImageEffectContextFilter);prop->propSetString(p,kOfxImageEffectPropSupportedPixelDepths,0,kOfxBitDepthFloat);prop->propSetString(p,kOfxImageEffectPluginRenderThreadSafety,0,kOfxImageEffectRenderFullySafe);prop->propSetInt(p,kOfxImageEffectPropSupportsTiles,0,1);prop->propSetInt(p,kOfxImageEffectPropSupportsMultiResolution,0,1);prop->propSetInt(p,kOfxImageEffectPluginPropHostFrameThreading,0,0);
+ prop->propSetString(p,kOfxPropLabel,0,"NegativeScan Studio OFX 0.90.10");prop->propSetString(p,kOfxImageEffectPluginPropGrouping,0,"NegativeScan Studio");prop->propSetString(p,kOfxImageEffectPropSupportedContexts,0,kOfxImageEffectContextFilter);prop->propSetString(p,kOfxImageEffectPropSupportedPixelDepths,0,kOfxBitDepthFloat);prop->propSetString(p,kOfxImageEffectPluginRenderThreadSafety,0,kOfxImageEffectRenderFullySafe);prop->propSetInt(p,kOfxImageEffectPropSupportsTiles,0,1);prop->propSetInt(p,kOfxImageEffectPropSupportsMultiResolution,0,1);prop->propSetInt(p,kOfxImageEffectPluginPropHostFrameThreading,0,0);
  prop->propSetString(p,kOfxImageEffectPropOpenCLRenderSupported,0,nss::CLApi::get().available?"true":"false");
  prop->propSetString(p,kOfxImageEffectPropOpenCLSupported,0,"false");
  prop->propSetString(p,kOfxImageEffectPropCudaRenderSupported,0,nss::CudaApi::get().available?"true":"false");
@@ -183,12 +184,27 @@ OfxStatus describeContext(OfxImageEffectHandle e) {
   else dp=boolDef(s,d.key,d.label,int(d.def),grp);
   if(!isVisibleDef(d.key))hideParam(dp);
  }
+ auto balPreset=choiceDef(s,"balance_preset","Balance preset","None|Slot 1|Slot 2|Slot 3|Slot 4|Slot 5|Slot 6|Slot 7|Slot 8",0,"color_balance");
+ prop->propSetInt(balPreset,kOfxParamPropEvaluateOnChange,0,0);prop->propSetInt(balPreset,kOfxParamPropPersistant,0,0);
+ prop->propSetString(balPreset,kOfxParamPropHint,0,"Apply a saved Red/Green/Blue balance into the sliders. If the host does not refresh this menu, names still appear in Preset status.");
+ auto balName=define(s,"balance_preset_name","Preset name",kOfxParamTypeString,"color_balance");
+ prop->propSetString(balName,kOfxParamPropDefault,0,"");prop->propSetInt(balName,kOfxParamPropAnimates,0,0);prop->propSetInt(balName,kOfxParamPropEvaluateOnChange,0,0);prop->propSetInt(balName,kOfxParamPropPersistant,0,0);
+ prop->propSetString(balName,kOfxParamPropHint,0,"English (ASCII) name used by Save. Saving the same name overwrites that preset.");
+ auto saveBal=define(s,"save_balance_preset","Save",kOfxParamTypePushButton,"color_balance");
+ prop->propSetInt(saveBal,kOfxParamPropEvaluateOnChange,0,0);
+ prop->propSetString(saveBal,kOfxParamPropHint,0,"Save the current Red, Green and Blue balance values under Preset name. Same name overwrites. Shared across all projects.");
+ auto delBal=define(s,"delete_balance_preset","Delete",kOfxParamTypePushButton,"color_balance");
+ prop->propSetInt(delBal,kOfxParamPropEvaluateOnChange,0,0);
+ prop->propSetString(delBal,kOfxParamPropHint,0,"Delete the preset currently selected in Balance preset.");
+ auto balStatus=define(s,"balance_preset_status","Preset status",kOfxParamTypeString,"color_balance");
+ prop->propSetString(balStatus,kOfxParamPropDefault,0,"No saved presets");prop->propSetInt(balStatus,kOfxParamPropEnabled,0,0);prop->propSetInt(balStatus,kOfxParamPropAnimates,0,0);prop->propSetInt(balStatus,kOfxParamPropEvaluateOnChange,0,0);prop->propSetInt(balStatus,kOfxParamPropPersistant,0,0);
  auto page=define(s,"controls","Controls",kOfxParamTypePage);
  std::vector<std::string> children={
   "camera_mode",
   "metadata_file","load_metadata","metadata_status",
   "stock","film_type","temperature","positive_expo","gamma_scale","positive_contrast","positive_out_mode",
-  "positive_bal_r","positive_bal_g","positive_bal_b"
+  "positive_bal_r","positive_bal_g","positive_bal_b",
+  "balance_preset","balance_preset_name","save_balance_preset","delete_balance_preset","balance_preset_status"
  };
  for(auto key:{"pick_on_viewer","pick_auto","pick_point","pick_radius","stage","render_device","render_info","auto_metadata","camera_on","neutralise","camera_strength"})children.push_back(key);
  for(int i=0;i<9;i++)for(auto prefix:{"camera_","neutral_"})children.push_back(std::string(prefix)+std::to_string(i));
@@ -235,6 +251,58 @@ void syncReference(OfxImageEffectHandle e,OfxParamSetHandle s,double t){
  catch(const std::exception &x){setS(s,"metadata_status",shortError(x));}
 }
 void clearPickedBalance(OfxParamSetHandle s){setI(s,"positive_film_wb",0);setD(s,"positive_bal_r",0);setD(s,"positive_bal_g",0);setD(s,"positive_bal_b",0);}
+OfxPropertySetHandle paramProps(OfxParamSetHandle s,const char *k){OfxParamHandle h;OfxPropertySetHandle p=nullptr;check(param->paramGetHandle(s,k,&h,&p));return p;}
+void refreshBalancePresetUi(OfxParamSetHandle s,const nss::BalancePresetsFile &file,const std::string &status){
+ auto p=paramProps(s,"balance_preset");
+ prop->propSetString(p,kOfxParamPropChoiceOption,0,"None");
+ for(int i=0;i<nss::kBalancePresetSlots;i++)prop->propSetString(p,kOfxParamPropChoiceOption,i+1,nss::slotLabel(i+1,file.slots[i]).c_str());
+ setS(s,"balance_preset_status",status);
+}
+void showBalancePresets(OfxParamSetHandle s,const nss::BalancePresetsFile &file,const std::string &status=""){
+ refreshBalancePresetUi(s,file,status.empty()?nss::presetsListStatus(file):status);
+}
+void applyBalancePreset(OfxParamSetHandle s,double time){
+ auto file=nss::loadBalancePresets();
+ int selected=integer(s,"balance_preset",time);
+ if(selected<=0){showBalancePresets(s,file);return;}
+ if(selected>nss::kBalancePresetSlots)throw kOfxStatErrValue;
+ auto &preset=file.slots[selected-1];
+ if(preset.empty()){showBalancePresets(s,file,"Slot "+std::to_string(selected)+" is empty");return;}
+ Edit edit(s,"Load color balance preset");
+ setD(s,"positive_bal_r",preset.r);setD(s,"positive_bal_g",preset.g);setD(s,"positive_bal_b",preset.b);
+ setS(s,"balance_preset_name",preset.name);
+ showBalancePresets(s,file,std::string("Applied '")+preset.name+"'");
+}
+void saveBalancePreset(OfxParamSetHandle s,double time){
+ auto name=nss::trimAscii(stringParam(s,"balance_preset_name"));
+ std::string why;
+ if(!nss::validPresetName(name,&why)){auto file=nss::loadBalancePresets();showBalancePresets(s,file,why);return;}
+ auto file=nss::loadBalancePresets();
+ int existing=nss::findPresetName(file,name);
+ int selected=integer(s,"balance_preset",time)-1;
+ int slot=existing;
+ if(slot<0){
+  if(selected>=0&&selected<nss::kBalancePresetSlots&&file.slots[selected].empty())slot=selected;
+  else slot=nss::firstEmptySlot(file);
+ }
+ if(slot<0){showBalancePresets(s,file,"All 8 slots are full");return;}
+ file.slots[slot]={name,number(s,"positive_bal_r",time),number(s,"positive_bal_g",time),number(s,"positive_bal_b",time)};
+ file.valid=true;
+ if(!nss::saveBalancePresets(file)){showBalancePresets(s,file,"Could not save presets file");return;}
+ setI(s,"balance_preset",slot+1);
+ showBalancePresets(s,file,std::string("Saved '")+name+"' in slot "+std::to_string(slot+1));
+}
+void deleteBalancePreset(OfxParamSetHandle s,double time){
+ auto file=nss::loadBalancePresets();
+ int selected=integer(s,"balance_preset",time)-1;
+ if(selected<0||selected>=nss::kBalancePresetSlots||file.slots[selected].empty()){showBalancePresets(s,file,"Select a saved preset to delete");return;}
+ auto name=file.slots[selected].name;
+ file.slots[selected]={};
+ file.valid=true;
+ if(!nss::saveBalancePresets(file)){showBalancePresets(s,file,"Could not save presets file");return;}
+ setI(s,"balance_preset",0);
+ showBalancePresets(s,file,std::string("Deleted '")+name+"'");
+}
 OfxStatus changed(OfxImageEffectHandle e,OfxPropertySetHandle a) {
  if(str(a,kOfxPropChangeReason)!=kOfxChangeUserEdited)return kOfxStatReplyDefault;
  auto s=params(e);auto key=str(a,kOfxPropName);double time=0;prop->propGetDouble(a,kOfxPropTime,0,&time);
@@ -242,6 +310,12 @@ OfxStatus changed(OfxImageEffectHandle e,OfxPropertySetHandle a) {
   try{auto i=instance(e);auto path=stringParam(s,"metadata_file");if(path.empty())path=sourcePath(e,i,a);auto m=load(i,path,true);Edit edit(s,"Load scan metadata");fillMetadata(s,m,time);}
   catch(const std::exception &x){setS(s,"metadata_status",shortError(x));return kOfxStatOK;}
   catch(...){setS(s,"metadata_status","Cannot read file path");return kOfxStatOK;}
+ }else if(key=="balance_preset"){
+  applyBalancePreset(s,time);
+ }else if(key=="save_balance_preset"){
+  saveBalancePreset(s,time);
+ }else if(key=="delete_balance_preset"){
+  deleteBalancePreset(s,time);
  }else if(key=="positive_film_wb"){
   int selected=integer(s,"positive_film_wb",time);
   if(selected<0||selected>=int(sizeof(nss::filmBases)/sizeof(nss::filmBases[0])))throw kOfxStatErrValue;
@@ -402,7 +476,9 @@ OfxStatus entry(const char *action,const void *handle_,OfxPropertySetHandle in,O
   if(!std::strcmp(action,kOfxActionDescribe))return describe(e);
   if(!std::strcmp(action,kOfxImageEffectActionDescribeInContext))return describeContext(e);
   if(!std::strcmp(action,kOfxActionCreateInstance)) {
-   auto i=std::make_unique<Instance>();check(effect->clipGetHandle(e,kOfxImageEffectSimpleSourceClipName,&i->src,nullptr));check(effect->clipGetHandle(e,kOfxImageEffectOutputClipName,&i->dst,nullptr));check(prop->propSetPointer(properties(e),kOfxPropInstanceData,0,i.get()));i.release();return kOfxStatOK;
+   auto i=std::make_unique<Instance>();check(effect->clipGetHandle(e,kOfxImageEffectSimpleSourceClipName,&i->src,nullptr));check(effect->clipGetHandle(e,kOfxImageEffectOutputClipName,&i->dst,nullptr));check(prop->propSetPointer(properties(e),kOfxPropInstanceData,0,i.get()));i.release();
+   try{auto s=params(e);showBalancePresets(s,nss::loadBalancePresets());}catch(...){}
+   return kOfxStatOK;
   }
   if(!std::strcmp(action,kOfxActionDestroyInstance)){delete instance(e);prop->propSetPointer(properties(e),kOfxPropInstanceData,0,nullptr);return kOfxStatOK;}
   if(!std::strcmp(action,kOfxImageEffectActionGetRegionsOfInterest))return regionsOfInterest(e,in,out);
@@ -412,7 +488,7 @@ OfxStatus entry(const char *action,const void *handle_,OfxPropertySetHandle in,O
   return kOfxStatReplyDefault;
  }catch(OfxStatus s){return s;}catch(const std::bad_alloc &){return kOfxStatErrMemory;}catch(...){return kOfxStatFailed;}
 }
-OfxPlugin plugin={kOfxImageEffectPluginApi,1,"org.negativescanstudio.complete",0,9009,setHost,entry};
+OfxPlugin plugin={kOfxImageEffectPluginApi,1,"org.negativescanstudio.complete",0,9010,setHost,entry};
 }
 extern "C" {
 #ifdef _WIN32
