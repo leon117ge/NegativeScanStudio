@@ -18,11 +18,14 @@ type MonoTriOptions struct {
 	OutPath   string
 	LZW       bool
 	CorrectCA bool
-	Software  string
-	Make      string
-	Model     string
-	Metadata  scanmeta.Metadata
-	Progress  func(string)
+	// CheckMovement measures the global R/B vs G translation before CA
+	// correction and warns (never corrects) above MovementLimitPx.
+	CheckMovement bool
+	Software      string
+	Make          string
+	Model         string
+	Metadata      scanmeta.Metadata
+	Progress      func(string)
 	// MeasureLevelingBase is only for the Light-page calibration check.
 	MeasureLevelingBase bool
 	BaseNorm            Rect // empty = centre 50 %
@@ -32,6 +35,7 @@ type MonoTriOptions struct {
 type MonoTriResult struct {
 	Out      string
 	Report   FocusShiftReport
+	Movement MovementReport
 	Elapsed  time.Duration
 	Software string
 	Base     [3]float64
@@ -61,6 +65,16 @@ func ProcessMonoTrichrome(r, g, b MonoPlane, o MonoTriOptions) (*MonoTriResult, 
 	rf := u16ToF64(r.Pix)
 	gf := u16ToF64(g.Pix)
 	bf := u16ToF64(b.Pix)
+	var move MovementReport
+	if o.CheckMovement {
+		if o.Progress != nil {
+			o.Progress("Checking R/G/B film movement ...")
+		}
+		move = MeasureMovement(rf, gf, bf, w, h)
+		if o.Progress != nil {
+			o.Progress(move.String())
+		}
+	}
 	report := FocusShiftReport{Enabled: o.CorrectCA}
 	if o.CorrectCA {
 		if o.Progress != nil {
@@ -92,11 +106,21 @@ func ProcessMonoTrichrome(r, g, b MonoPlane, o MonoTriOptions) (*MonoTriResult, 
 	meta := o.Metadata.ForCapture()
 	meta.Mode = "mono-trichrome"
 	meta.Encoding = "linear"
-	if report.Enabled {
-		if meta.Processing != "" {
-			meta.Processing += "; "
+	// v1.10: Processing stays empty (the OFX plugin only loads linear scans
+	// with an empty Processing field). Alignment, CA and movement results
+	// go into the non-blocking mono_capture record instead.
+	if report.Enabled || o.CheckMovement {
+		mc := scanmeta.MonoCapture{}
+		if meta.Mono != nil {
+			mc = *meta.Mono
 		}
-		meta.Processing += report.String()
+		if report.Enabled {
+			mc.CA = report.String()
+		}
+		if o.CheckMovement {
+			mc.Movement = move.String()
+		}
+		meta.Mono = &mc
 	}
 	path := o.OutPath
 	if path == "" {
@@ -117,7 +141,7 @@ func ProcessMonoTrichrome(r, g, b MonoPlane, o MonoTriOptions) (*MonoTriResult, 
 	if err := writeScanTIFF(path, w, h, out, o.LZW, make_, model, sw, meta); err != nil {
 		return nil, err
 	}
-	res := &MonoTriResult{Out: path, Report: report, Elapsed: time.Since(start), Software: sw}
+	res := &MonoTriResult{Out: path, Report: report, Movement: move, Elapsed: time.Since(start), Software: sw}
 	if o.MeasureLevelingBase {
 		res.Base, res.BaseN, res.BaseErr = measurePackedBase(out, w, h, o.BaseNorm)
 	}

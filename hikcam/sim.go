@@ -23,6 +23,22 @@ type Sim struct {
 	// Film-base leveling uses this so the measure-area median is stable
 	// and stays linear as exposure changes.
 	FlatField bool
+	// dark renders an unlit sensor (pedestal only), for dark-frame capture.
+	dark bool
+}
+
+// SetDark switches the simulated light off (true) or on (false).
+func (s *Sim) SetDark(off bool) {
+	s.mu.Lock()
+	s.dark = off
+	s.mu.Unlock()
+}
+
+// SetFlatField selects the even empty-gate / film-base image.
+func (s *Sim) SetFlatField(on bool) {
+	s.mu.Lock()
+	s.FlatField = on
+	s.mu.Unlock()
 }
 
 // OpenSim returns a simulated CS240. It never fails.
@@ -133,6 +149,15 @@ func (s *Sim) Grab(timeout time.Duration) (*Frame, error) {
 	}
 	s.frame++
 	pix := renderSimFrame(w, h, s.set, s.frame, ch, s.FlatField)
+	if s.dark {
+		for i := range pix {
+			pix[i] = 0
+		}
+	}
+	black := Black16For(s.set.BlackLevel, "Mono12")
+	if black > 0 {
+		addSimPedestal(pix, black)
+	}
 	return &Frame{
 		W:           w,
 		H:           h,
@@ -140,6 +165,7 @@ func (s *Sim) Grab(timeout time.Duration) (*Frame, error) {
 		PixelFormat: "Mono12",
 		ExposureUS:  s.set.ExposureUS,
 		GainDB:      s.set.GainDB,
+		Black16:     black,
 	}, nil
 }
 
@@ -227,6 +253,20 @@ func gridPattern(x, y float64, w, h int) float64 {
 	}
 	bg := 0.35 + 0.15*math.Sin(x/40)*math.Cos(y/35)
 	return clamp01(0.25*spoke + 0.45*line + 0.15*disk + 0.15*bg)
+}
+
+// addSimPedestal mimics a real Mono12 readout with a BlackLevel pedestal:
+// signal + pedestal, clipped at the 12-bit white level and quantised to
+// 12-bit codes left-justified in 16 bits.
+func addSimPedestal(pix []uint16, black float64) {
+	white := White16("Mono12")
+	for i, p := range pix {
+		v := float64(p)*(white-black)/65535 + black
+		if v > white {
+			v = white
+		}
+		pix[i] = uint16(math.Round(v/16)) * 16
+	}
 }
 
 func clamp01(v float64) float64 {

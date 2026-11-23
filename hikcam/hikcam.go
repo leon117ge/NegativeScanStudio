@@ -319,6 +319,57 @@ type Frame struct {
 	PixelFormat string
 	ExposureUS  float64
 	GainDB      float64
+	// Black16 is the camera BlackLevel pedestal in the same left-justified
+	// 16-bit units as Pix (BlackLevel x Scale16). Pix still contains it;
+	// processing subtracts it (v1.10).
+	Black16 float64
+}
+
+// PixelBits is the native bit depth of a Hikrobot mono pixel format name
+// ("Mono8", "Mono10Packed", "Mono12", ...). Unknown names are 16.
+func PixelBits(format string) int {
+	f := strings.ToLower(format)
+	switch {
+	case strings.HasPrefix(f, "mono8"):
+		return 8
+	case strings.HasPrefix(f, "mono10"):
+		return 10
+	case strings.HasPrefix(f, "mono12"):
+		return 12
+	}
+	return 16
+}
+
+// Scale16 is the number of 16-bit units per native DN after unpackMono
+// (16 for Mono12, 64 for Mono10, 257 for Mono8, 1 for Mono16).
+func Scale16(format string) float64 {
+	switch PixelBits(format) {
+	case 8:
+		return 257
+	case 10:
+		return 64
+	case 12:
+		return 16
+	}
+	return 1
+}
+
+// White16 is the largest value unpackMono can produce for the format
+// (65520 for Mono12): the raw clipping level.
+func White16(format string) float64 {
+	b := PixelBits(format)
+	if b == 8 {
+		return 65535
+	}
+	return float64(int(1)<<b-1) * Scale16(format)
+}
+
+// Black16For converts a BlackLevel in native DN to 16-bit units.
+func Black16For(blackDN float64, format string) float64 {
+	if blackDN <= 0 {
+		return 0
+	}
+	return blackDN * Scale16(format)
 }
 
 // Device is an opened monochrome camera (real MVS body or the simulator).

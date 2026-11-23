@@ -1,8 +1,21 @@
 # NegativeScan Studio app — Changelog / 扫描软件更新日志
 
-Current local test app: **v0.96**, not published. Latest published app: **v0.91** · [App release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/v0.91) · [OFX plugin changelog](../ofx/CHANGELOG.md) · [Versioning policy](VERSIONING.md)
+Current local test app: **v1.10**, not published. Latest published app: **v1.08** · [App release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/v1.08) · [OFX plugin changelog](../ofx/CHANGELOG.md) · [Versioning policy](VERSIONING.md)
 
 This file tracks the scanning app, not plugin-only releases. / 本文件只记录扫描软件。
+
+## v1.10 local test build
+
+Monochrome camera (Hikrobot MV-CS240-90UM) image-quality release. OFX plugin unchanged (0.90.6).
+
+- **OFX metadata fix.** Mono-trichrome scans with CA correction no longer write the CA report into `processing` (the plugin rejected those files as "Not a linear NSS scan"). `processing` stays empty; the CA, HDR, settle and movement reports go into a new non-blocking `mono_capture` object together with pixel format, BlackLevel, black subtracted, frames per exposure and the dark / flat calibration ids. Verified with the plugin's own `metadata.hpp` parser (`ofx/tests/math_runner.cpp`).
+- **Black level subtracted.** The BlackLevel pedestal (32 DN at 12-bit = 512 in 16-bit) is removed from every mono frame before merging, before the film-base leveling measurement and in the leveling TIFF check. Leveled bases and scans now agree on a black-free scale; output values are ~512 lower than v1.09 in 16-bit.
+- **Native mono HDR merge.** The bracket is merged on the single mono plane (no grey-to-RGB TIFFs, no `mergeRGB`): measured exposure ratios, inverse-variance weights from a shot + read + quantisation noise model (`HIK_FULL_WELL_E`, `HIK_READ_NOISE_E` in the config; defaults 9000 e-, 2.0 e-), a saturation hat driven by the predicted value, raw clip at the white code with no dilation, and 5-7 sigma ghost rejection.
+- **Frames per exposure** (default 1): averages N same-exposure grabs per bracket step.
+- **Light settle check.** After the fixed settle wait, frames are grabbed until two consecutive means agree within 0.3 % (timeout 3 s or 4x settle); a light that never settles is logged as a warning.
+- **R/G/B movement check.** Global R vs G and B vs G translation is measured at quarter resolution before CA correction; above 1.5 px an English warning is logged, shown on the page and stored in the metadata. Nothing is corrected.
+- **Dark frames and flat field.** New Mono page tools capture averaged darks (light off, per exposure) and empty-gate R/G/B flats into `<config>/NegativeScanStudio/hikcal`. "Apply dark frames" / "Apply flat field" use them only when present; otherwise the scan is unchanged and the report says which calibration was missing.
+- Local only; no tag/push/release.
 
 ## v0.96 local test build
 

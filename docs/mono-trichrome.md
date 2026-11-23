@@ -41,39 +41,29 @@ metadata, `mode=mono-trichrome`. Film-base leveling is copied from the
 Light page when the saved values match, exactly as white-light and
 trichrome captures do.
 
-## Chromatic-aberration focus-shift correction
+## Chromatic-aberration correction (v1.09)
 
-A lens focused in green light typically leaves red and blue both
-laterally magnified (or reduced) and axially defocused.
+Green is the geometric reference. R and B are measured against green on a
+full-resolution 19 x 13 tile grid (band-pass, NCC search, Lucas-Kanade),
+a robust radial lateral-CA model (r and r^3 terms, separate x / y) plus a
+smooth local refinement is fitted, and the channel is resampled with a
+Kaiser-windowed sinc that never boosts any frequency. Pixels needing less
+than 0.12 px are copied unchanged. No sharpening is applied. A centre and
+corner guard falls back to identity per channel.
 
-1. **Translation.** Coarse-to-fine search of the normalized
-   cross-correlation between the channel and green, then a 3-point
-   parabola for a sub-pixel peak. Reported as `dx`, `dy` in full-resolution
-   pixels (positive `dx` means the channel's features sit to the right of
-   green).
-2. **Scale (lateral CA).** After the translation is known, a search of
-   magnification about the image centre in roughly ±0.8 % finds the scale
-   `s` that maximises NCC. `s = 1` is no lateral CA.
-3. **Blur (longitudinal CA).** After a rough alignment, each plane's PSF
-   width is estimated as `1 / sqrt(Tenengrad)`. `BlurRatio` is that width
-   over green's. A value above 1 means the channel is softer.
-4. **Correction.** Red and blue are resampled (bilinear) with the inverse
-   transform: scale about the centre, then the measured translation.
-   Green is never warped. If `BlurRatio > 1.05`, a Gaussian unsharp of
-   width `sqrt(ratio^2 - 1)` is applied and the amount `k` is raised only
-   while Tenengrad keeps increasing, capped at 1.5. Green is never
-   sharpened.
-5. **Report.** The UI and the TIFF `Processing` field list each channel's
-   shift, scale, blur ratio and whether sharpness matching ran.
+Since v1.10 the report is shown on the page and stored in the TIFF
+metadata as `mono_capture.ca_correction`. The `processing` field stays
+empty: the OFX plugin only loads scans whose `processing` is empty.
 
-The estimator downsamples to a long edge of 800 px so a 24 MP frame stays
-interactive; shifts are converted back to full-resolution pixels before
-the warp.
+## R/G/B movement check (v1.10)
 
-Synthetic tests (`hdrscan/focusshift_test.go`) build a sharp green pattern,
-then a red/blue plane with a known shift, scale and Gaussian blur, and
-check that the estimator recovers those parameters and that correcting
-them raises NCC substantially without changing green.
+Before CA correction the global translation of R and B against G is
+measured at quarter resolution on a 3 x 3 grid of large tiles in the
+centre 60 % of the frame (median of the confident tiles). Above 1.5 px
+the page and log show a WARNING and `mono_capture.movement_check` records
+it. The scan is not corrected for movement. The lens alone puts a small
+constant offset between channels (about 1.0 px B vs G in scan 0281), so
+the limit sits above that.
 
 ## Focus check
 
@@ -122,15 +112,49 @@ Air changes). Capture metering is a separate safety/primary step so a
 scan does not clip if the light or the film changed after leveling. The
 saved 0.5 film-base metadata comes from the last accepted leveling run.
 
-## HDR (v1.01)
+## Black level, HDR and calibration (v1.10)
 
-Mono trichrome can capture an HDR bracket per channel, using the same
-bracket list (0 / +2 EV or 0 / +2 / +3 EV), merge method, alignment and
-LZW options as White light scan and Trichrome. For each of R, G and B
-the monochrome camera captures the bracket, the frames are written as
-16-bit RGB TIFFs (gray replicated) and merged with the existing
-`ProcessN` path, then chromatic-aberration focus-shift correction (green
-reference) and the trichrome merge run as before.
+Every frame still contains the camera BlackLevel pedestal (Best scan
+quality: 32 DN at 12-bit = 512 in left-justified 16-bit). v1.10 subtracts
+it (or the matching dark frame) from every frame before merging, and the
+Light-page leveling measures the same black-subtracted values, so the
+leveled 0.5 film base and the scan agree. Clipping is still judged on the
+raw code.
+
+**HDR.** Each channel's bracket (0 / +2 or 0 / +2 / +3 EV) is merged on
+the mono plane in memory (`hdrscan.MergeMonoNative`):
+
+- exposure ratio of each brighter frame to frame 0 measured on 16 x 16
+  blocks in the linear range (fallback: exposure-time ratio);
+- inverse-variance weights from a shot + read + quantisation noise model
+  (config `HIK_FULL_WELL_E`, `HIK_READ_NOISE_E`; defaults 9000 e- and
+  2.0 e-, to be replaced by measured values);
+- a saturation hat on the value predicted from frame 0 and zero weight at
+  the raw white code; no clip-mask dilation (no demosaic halo);
+- 5-7 sigma ghost rejection against the darker estimate, with the noise
+  scale re-measured from the frames.
+
+The result is linear, black-subtracted and in frame-0 units.
+
+**Frames per exposure** averages N same-exposure grabs per bracket step.
+
+**Light settle check.** After switching the light and the fixed settle
+wait, frames are grabbed until two consecutive means agree within 0.3 %
+(timeout 3 s or 4 x settle). A light that does not settle is logged as a
+warning and the capture continues.
+
+**Dark frames and flat field.** "Capture dark frames..." switches the
+light off and averages 16 grabs at the shared exposure and every bracket
+exposure. "Capture flat field..." shoots the empty gate under R, G and B
+at the scan light values (exposure set to about 45 % of full scale),
+subtracts the dark or pedestal and stores a gain map normalised to 1.0 at
+the centre median. Files live in `%AppData%/NegativeScanStudio/hikcal`
+(`.nsscal`: header JSON + 16-bit pixels). They are used only when "Apply
+dark frames" / "Apply flat field" are checked and a frame with the same
+exposure (darks), pixel format and size exists; ids go into
+`mono_capture.dark_frames` / `flat_field`. Darks do not match a scan made
+with per-channel auto-metering (different exposures); the pedestal is then
+subtracted and the report says so.
 
 ## Light leveling with the monochrome camera (v1.01)
 

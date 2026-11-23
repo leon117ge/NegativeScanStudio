@@ -3,8 +3,6 @@ package hdrscan
 import (
 	"fmt"
 	"math"
-	"os"
-	"path/filepath"
 
 	"basetool/lightlevel"
 )
@@ -13,6 +11,10 @@ import (
 // lattice LevelingImage uses for Bayer frames, so the leveling solver and
 // the TIFF check share one statistic.
 func LevelingImageMono(pix []uint16, w, h int) *lightlevel.Image {
+	return levelingImageMono(pix, w, h, 0)
+}
+
+func levelingImageMono(pix []uint16, w, h int, black16 float64) *lightlevel.Image {
 	if w <= 0 || h <= 0 || len(pix) < w*h {
 		return &lightlevel.Image{}
 	}
@@ -22,7 +24,7 @@ func LevelingImageMono(pix []uint16, w, h int) *lightlevel.Image {
 	for y := 0; y < hh; y++ {
 		for x := 0; x < ww; x++ {
 			v := pix[(y*step+step/2)*w+(x*step+step/2)]
-			im.V[y*ww+x] = float32(v) / 65535
+			im.V[y*ww+x] = float32(math.Max(0, float64(v)-black16) / 65535)
 			im.Clip[y*ww+x] = v >= 65207
 		}
 	}
@@ -42,6 +44,13 @@ func ScaleMonoForSimLight(pix []uint16, ch int, on [3]bool, v [3]int) []uint16 {
 // gains (tests use a dim-green set; the default orange-mask gains stay in
 // ScaleMonoForSimLight).
 func ScaleMonoForSimLightGain(pix []uint16, ch int, on [3]bool, v [3]int, gain [3]float64) []uint16 {
+	return ScaleMonoForSimLightBlack(pix, 0, ch, on, v, gain)
+}
+
+// ScaleMonoForSimLightBlack scales only the signal above the BlackLevel
+// pedestal (black16, 16-bit units), as a real sensor does: the pedestal
+// does not change with the light.
+func ScaleMonoForSimLightBlack(pix []uint16, black16 float64, ch int, on [3]bool, v [3]int, gain [3]float64) []uint16 {
 	if ch < 0 || ch > 2 {
 		ch = 0
 	}
@@ -59,7 +68,7 @@ func ScaleMonoForSimLightGain(pix []uint16, ch int, on [3]bool, v [3]int, gain [
 	}
 	out := make([]uint16, len(pix))
 	for i, p := range pix {
-		n := float64(p) * scale
+		n := (float64(p)-black16)*scale + black16
 		if n < 0 {
 			n = 0
 		}
@@ -69,96 +78,6 @@ func ScaleMonoForSimLightGain(pix []uint16, ch int, on [3]bool, v [3]int, gain [
 		out[i] = uint16(n + 0.5)
 	}
 	return out
-}
-
-// GrayToRGB replicates a monochrome plane as R=G=B so ProcessN / Load can
-// reuse the existing HDR merge path.
-func GrayToRGB(p MonoPlane) []uint16 {
-	out := make([]uint16, 3*p.W*p.H)
-	for i := 0; i < p.W*p.H && i < len(p.Pix); i++ {
-		v := p.Pix[i]
-		out[3*i+0], out[3*i+1], out[3*i+2] = v, v, v
-	}
-	return out
-}
-
-// MergeMonoBracket merges a per-channel exposure bracket the same way
-// white-light and trichrome HDR do: write each mono frame as a 16-bit RGB
-// TIFF (gray replicated) and call ProcessN with the bracket exposure
-// ratios. The merged HDR is read back as one linear MonoPlane.
-func MergeMonoBracket(frames []MonoPlane, evs []int, o ProcessOptions) (MonoPlane, error) {
-	if len(frames) == 0 {
-		return MonoPlane{}, fmt.Errorf("no bracket frames")
-	}
-	if len(frames) == 1 {
-		return frames[0], nil
-	}
-	for i, fr := range frames {
-		if err := checkMono(fr, fmt.Sprintf("bracket %d", i)); err != nil {
-			return MonoPlane{}, err
-		}
-		if fr.W != frames[0].W || fr.H != frames[0].H {
-			return MonoPlane{}, fmt.Errorf("bracket sizes differ: 0 is %dx%d, %d is %dx%d", frames[0].W, frames[0].H, i, fr.W, fr.H)
-		}
-	}
-	work, err := os.MkdirTemp("", "nss-mono-hdr-*")
-	if err != nil {
-		return MonoPlane{}, err
-	}
-	defer os.RemoveAll(work)
-	keepDir := ""
-	if o.KeepTIFF && o.OutDir != "" {
-		keepDir = o.OutDir
-	}
-	paths := make([]string, len(frames))
-	exps := make([]float64, len(frames))
-	meta := o.Metadata
-	meta.Mode = "mono-bracket-component"
-	meta.Encoding = "linear"
-	for i, fr := range frames {
-		ev := 0
-		if i < len(evs) {
-			ev = evs[i]
-		}
-		name := fmt.Sprintf("mono_br_%d_%s.tiff", i, StepTag(ev))
-		path := filepath.Join(work, name)
-		if keepDir != "" {
-			path = uniqueFile(filepath.Join(keepDir, name))
-		}
-		sw := o.Software
-		if sw == "" {
-			sw = "NegativeScan Studio"
-		}
-		if err := writeScanTIFF(path, fr.W, fr.H, GrayToRGB(fr), false, "Hikrobot", "mono", sw+" mono HDR bracket frame", meta); err != nil {
-			return MonoPlane{}, err
-		}
-		paths[i] = path
-		exps[i] = math.Pow(2, float64(ev))
-	}
-	co := o
-	co.OutDir = work
-	co.KeepTIFF = false
-	co.DeleteRAW = false
-	co.Merge.Exposure = exps
-	co.Metadata = meta
-	if o.Progress != nil {
-		o.Progress(fmt.Sprintf("Merging mono HDR bracket (%d frames) ...", len(frames)))
-	}
-	res, err := ProcessN(paths, co)
-	if err != nil {
-		return MonoPlane{}, err
-	}
-	p, err := Load(res.HDR)
-	if err != nil {
-		return MonoPlane{}, err
-	}
-	defer p.Free()
-	n := p.W * p.H
-	gray := make([]uint16, n)
-	for i := 0; i < n; i++ {
-		gray[i] = p.Pix[3*i+1]
-	}
-	return MonoPlane{W: p.W, H: p.H, Pix: gray}, nil
 }
 
 // measurePackedBase reads the film-base median of a packed RGB plane using

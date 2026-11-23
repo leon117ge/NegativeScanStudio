@@ -34,6 +34,25 @@ type Metadata struct {
 	ExposureMode   string      `json:"exposure_mode,omitempty"` // "shared" or "metered"
 	BaseLeveled    *bool       `json:"base_leveled,omitempty"`
 	BaseLeveledAt  string      `json:"base_leveled_at,omitempty"`
+	// Mono is the monochrome-camera capture record (v1.10). It never sets
+	// Processing: a scan whose Processing is non-empty is rejected by the
+	// OFX plugin as not linear, and CA correction / HDR / dark / flat keep
+	// the data linear.
+	Mono *MonoCapture `json:"mono_capture,omitempty"`
+}
+
+// MonoCapture records how a Hikrobot mono-trichrome scan was made.
+type MonoCapture struct {
+	PixelFormat       string  `json:"pixel_format,omitempty"`
+	BlackLevelDN      float64 `json:"black_level_dn"`         // camera BlackLevel, native DN
+	BlackSubtracted16 float64 `json:"black_subtracted_16bit"` // pedestal removed from every plane, 16-bit units
+	FramesPerExposure int     `json:"frames_per_exposure,omitempty"`
+	HDR               string  `json:"hdr_merge,omitempty"`
+	Dark              string  `json:"dark_frames,omitempty"` // calibration id, or "off" / "none"
+	Flat              string  `json:"flat_field,omitempty"`  // calibration id, or "off" / "none"
+	Settle            string  `json:"light_settle,omitempty"`
+	Movement          string  `json:"movement_check,omitempty"`
+	CA                string  `json:"ca_correction,omitempty"`
 }
 
 func (m Metadata) JSON(software string) (string, error) {

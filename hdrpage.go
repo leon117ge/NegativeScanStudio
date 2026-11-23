@@ -32,7 +32,7 @@ import (
 )
 
 const appName = "NegativeScan Studio"
-const appVersion = appName + " v1.09"
+const appVersion = appName + " v1.10"
 
 // legacyAppName: the program was called Film Base Meter up to v0.67; its
 // settings folder is still read (copied once, never changed) by migrateLegacyConfig.
@@ -69,6 +69,12 @@ type HDRConfig struct {
 	HikLeveledUS  float64 // exposure recorded at the last successful hik leveling
 	HikLeveledRGB [3]int
 	HikLeveledAt  string // RFC3339; empty if never leveled
+	// v1.10 mono capture options.
+	HikFramesPerExp int     // same-exposure grabs averaged per bracket step (1 = off)
+	HikApplyDark    bool    // subtract stored dark frames when present
+	HikApplyFlat    bool    // divide by stored flat fields when present
+	HikFullWellE    float64 // noise model: electrons at white, 0 dB (0 = default)
+	HikReadNoiseE   float64 // noise model: read noise in electrons (0 = default)
 }
 
 // Bracket presets (display order). Config: BRACKET_EV=0,2 (v0.62+);
@@ -291,6 +297,22 @@ func loadHDRConfig() HDRConfig {
 			}
 		case "HIK_METER_EACH":
 			c.HikMeterEach = v != "0"
+		case "HIK_FRAMES_PER_EXP":
+			if n >= 1 && n <= 16 {
+				c.HikFramesPerExp = n
+			}
+		case "HIK_APPLY_DARK":
+			c.HikApplyDark = v != "0"
+		case "HIK_APPLY_FLAT":
+			c.HikApplyFlat = v != "0"
+		case "HIK_FULL_WELL_E":
+			if f, err := strconv.ParseFloat(v, 64); err == nil && f >= 100 && f <= 1e6 {
+				c.HikFullWellE = f
+			}
+		case "HIK_READ_NOISE_E":
+			if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 && f <= 100 {
+				c.HikReadNoiseE = f
+			}
 		case "HIK_LEVELED_US":
 			if f, err := strconv.ParseFloat(v, 64); err == nil && f >= hikbase.ExpMinUS {
 				c.HikLeveledUS = hikbase.ClampExposureUS(f)
@@ -357,6 +379,9 @@ func saveHDRConfig(c HDRConfig) {
 		hikUS = hikbase.DefaultExposureUS
 	}
 	s += fmt.Sprintf("HIK_EXPOSURE=%.0f\r\nHIK_METER_EACH=%s\r\n", hikbase.ClampExposureUS(hikUS), b(c.HikMeterEach))
+	nz := c.monoNoise()
+	s += fmt.Sprintf("HIK_FRAMES_PER_EXP=%d\r\nHIK_APPLY_DARK=%s\r\nHIK_APPLY_FLAT=%s\r\nHIK_FULL_WELL_E=%.0f\r\nHIK_READ_NOISE_E=%.2f\r\n",
+		max(1, c.HikFramesPerExp), b(c.HikApplyDark), b(c.HikApplyFlat), nz.FullWellE, nz.ReadE)
 	if c.HikLeveledAt != "" {
 		s += fmt.Sprintf("HIK_LEVELED_US=%.0f\r\nHIK_LEVELED_RGB=%s\r\nHIK_LEVELED_AT=%s\r\n", hikbase.ClampExposureUS(c.HikLeveledUS), hikbase.FormatRGB(c.HikLeveledRGB), c.HikLeveledAt)
 	}

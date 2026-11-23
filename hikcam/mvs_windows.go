@@ -461,6 +461,7 @@ func (d *realDev) Grab(timeout time.Duration) (*Frame, error) {
 		PixelFormat: pixelTypeName(uint32(pixfmt)),
 		ExposureUS:  d.set.ExposureUS,
 		GainDB:      d.set.GainDB,
+		Black16:     Black16For(d.set.BlackLevel, pixelTypeName(uint32(pixfmt))),
 	}, nil
 }
 

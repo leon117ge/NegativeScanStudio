@@ -223,15 +223,16 @@ func (h *hikLevelCamera) Shoot(ctx context.Context, ch int, prefix string) (*lig
 	pix := append([]uint16(nil), fr.Pix...)
 	if h.dev.Info().Simulated && h.lights != nil {
 		on, v := h.lights()
+		gain := [3]float64{1.35, 0.85, 0.55}
 		if h.simGain != nil {
-			pix = hdrscan.ScaleMonoForSimLightGain(pix, ch, on, v, *h.simGain)
-		} else {
-			pix = hdrscan.ScaleMonoForSimLight(pix, ch, on, v)
+			gain = *h.simGain
 		}
+		pix = hdrscan.ScaleMonoForSimLightBlack(pix, fr.Black16, ch, on, v, gain)
 	}
-	plane := hdrscan.MonoPlane{W: fr.W, H: fr.H, Pix: pix}
-	h.last[ch] = plane
-	im := hdrscan.LevelingImageMono(pix, fr.W, fr.H)
+	// v1.10: the BlackLevel pedestal is subtracted here exactly as in the
+	// mono-trichrome scan, so the leveled base matches the scan TIFF.
+	h.last[ch] = hdrscan.SubtractBlack(hdrscan.MonoFrame{W: fr.W, H: fr.H, Pix: pix, Black16: fr.Black16})
+	im := hdrscan.LevelingImageMonoBlack(pix, fr.W, fr.H, fr.Black16)
 	im.Path = prefix
 	return im, nil
 }

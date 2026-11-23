@@ -17,6 +17,7 @@ type hikSimCam struct {
 	gain        [3]float64
 	appliedUS   float64
 	appliedGain float64
+	last        [3]MonoPlane
 }
 
 func (h *hikSimCam) Name() string {
@@ -61,8 +62,12 @@ func (h *hikSimCam) Shoot(ctx context.Context, ch int, prefix string) (*lightlev
 		return nil, err
 	}
 	on, v := h.lights()
-	pix := ScaleMonoForSimLightGain(append([]uint16(nil), fr.Pix...), ch, on, v, h.gain)
-	im := LevelingImageMono(pix, fr.W, fr.H)
+	if fr.Black16 != 512 {
+		return nil, fmt.Errorf("sim BestScan frame pedestal %.0f, want 512", fr.Black16)
+	}
+	pix := ScaleMonoForSimLightBlack(append([]uint16(nil), fr.Pix...), fr.Black16, ch, on, v, h.gain)
+	h.last[ch] = SubtractBlack(MonoFrame{W: fr.W, H: fr.H, Pix: pix, Black16: fr.Black16})
+	im := LevelingImageMonoBlack(pix, fr.W, fr.H, fr.Black16)
 	im.Path = prefix
 	return im, nil
 }
@@ -108,5 +113,21 @@ func TestSimHikrobotDimGreenRaisesExposureAndLevels(t *testing.T) {
 	}
 	if res.Values[1] > 95 {
 		t.Fatalf("green should have headroom below 100, got %d at %.0f us", res.Values[1], res.Fit.FinalUS)
+	}
+	// v1.10: leveling and the scan both subtract the BlackLevel pedestal,
+	// so the TIFF check of the black-subtracted planes reads the leveled base.
+	tr, err := ProcessMonoTrichrome(cam.last[0], cam.last[1], cam.last[2], MonoTriOptions{
+		OutPath: t.TempDir() + "/lv_RGB.tiff", Software: "test", MeasureLevelingBase: true, BaseNorm: Rect{X0: 0, Y0: 0, X1: 1, Y1: 1},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for c := 0; c < 3; c++ {
+		if d := tr.Base[c] - res.Post[c]; d > 0.01 || d < -0.01 || tr.BaseErr != "" {
+			t.Fatalf("TIFF check %v vs leveling %v (%s)", tr.Base, res.Post, tr.BaseErr)
+		}
+		if tr.Base[c] < 0.48 || tr.Base[c] > 0.52 {
+			t.Fatalf("black-subtracted base %v not at the 0.50 target", tr.Base)
+		}
 	}
 }
