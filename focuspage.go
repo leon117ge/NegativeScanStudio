@@ -65,8 +65,9 @@ type FocusUI struct {
 	visW, visH   int
 	score        hdrscan.FocusScore
 	peak         hdrscan.PeakHold
-	aeWhy        string
-	aeState      hdrscan.ExposureState
+	ae           hdrscan.LiveAE
+	lastMeterVal int
+	meterRangeOK bool
 	lastPix      []uint16
 	lastW, lastH int
 
@@ -135,7 +136,7 @@ func (u *FocusUI) enter() {
 	u.mu.Lock()
 	u.cx, u.cy = 0.5, 0.5
 	u.peak.Reset()
-	u.aeWhy = ""
+	u.ae.Reset(hdrscan.ExposureState{}, hdrscan.LiveAutoExp())
 	u.mu.Unlock()
 	if u.zoomCB != nil {
 		u.zoomIdx.Store(int32(max(0, u.zoomCB.CurrentIndex())))
@@ -153,6 +154,9 @@ func (u *FocusUI) enter() {
 	if cam := u.hikCam(); cam != nil && u.mono != nil && !u.mono.running.Load() {
 		savedHik = u.mono.readSettings()
 		haveHik = true
+		u.mu.Lock()
+		u.ae.Reset(hdrscan.ExposureState{ExposureUS: savedHik.ExposureUS, GainDB: savedHik.GainDB}, hdrscan.LiveAutoExp())
+		u.mu.Unlock()
 	}
 
 	gen := u.loopGen.Add(1)
@@ -179,12 +183,6 @@ func (u *FocusUI) enter() {
 			if cam := u.hikCam(); cam != nil {
 				ae := hdrscan.ExposureState{ExposureUS: savedHik.ExposureUS, GainDB: savedHik.GainDB}
 				ae, _ = hdrscan.AdjustExposure(nil, ae, hdrscan.LiveAutoExp())
-				u.mu.Lock()
-				u.savedHik = savedHik
-				u.haveSavedHik = true
-				u.aeState = ae
-				u.aeWhy = ""
-				u.mu.Unlock()
 				summary, err := applyLiveSettings(cam, savedHik, true)
 				if err != nil {
 					msg := "Live settings: " + err.Error()
@@ -197,6 +195,12 @@ func (u *FocusUI) enter() {
 					}
 					u.ui(func() { u.say(s) })
 				}
+				cur := cam.Settings()
+				u.mu.Lock()
+				u.savedHik = savedHik
+				u.haveSavedHik = true
+				u.ae.Reset(hdrscan.ExposureState{ExposureUS: cur.ExposureUS, GainDB: cur.GainDB}, hdrscan.LiveAutoExp())
+				u.mu.Unlock()
 			}
 		} else {
 			u.mu.Lock()
@@ -212,7 +216,7 @@ func (u *FocusUI) enter() {
 					u.mu.Lock()
 					u.savedFuji = e
 					u.haveSavedFuji = true
-					u.aeState = hdrscan.ExposureState{ExposureUS: float64(e.Shutter), GainDB: 0}
+					u.ae.Reset(hdrscan.ExposureState{ExposureUS: float64(e.Shutter), GainDB: 0}, hdrscan.LiveAutoExp())
 					u.mu.Unlock()
 				} else {
 					u.mu.Lock()
@@ -371,6 +375,7 @@ func (u *FocusUI) applyLightMode(mode int) {
 		err = sw.White()
 		okMsg = "Light: white (all channels) for white-light scanning."
 	}
+	u.unlockAE()
 	cs := u.light.cl.CachedState()
 	u.ui(func() {
 		if err != nil {
@@ -385,9 +390,16 @@ func (u *FocusUI) applyLightMode(mode int) {
 	})
 }
 
+func (u *FocusUI) unlockAE() {
+	u.mu.Lock()
+	u.ae.Unlock()
+	u.mu.Unlock()
+}
+
 func (u *FocusUI) setLight(mode int) {
 	u.mu.Lock()
 	u.lightMode = mode
+	u.ae.Unlock()
 	u.mu.Unlock()
 	u.updateLabels()
 	if u.light != nil && u.light.lw != nil {
@@ -400,8 +412,8 @@ func (u *FocusUI) setLight(mode int) {
 func (u *FocusUI) updateLabels() {
 	u.mu.Lock()
 	lightMode := u.lightMode
-	aeState := u.aeState
-	aeWhy := u.aeWhy
+	aeState := u.ae.State
+	aeWhy := u.ae.Why
 	score := u.score
 	peak := u.peak
 	u.mu.Unlock()
@@ -428,14 +440,19 @@ func (u *FocusUI) updateLabels() {
 	}
 	if u.expLbl != nil {
 		if aeWhy == "" {
-			setFocusStatus(u.expLbl, fmt.Sprintf("Auto exposure: %.0f us, %.2f dB", aeState.ExposureUS, aeState.GainDB))
+			setFocusStatusTip(u.expLbl,
+				fmt.Sprintf("Auto exposure: %.0f us, %.2f dB\n", aeState.ExposureUS, aeState.GainDB),
+				fmt.Sprintf("Auto exposure: %.0f us, %.2f dB", aeState.ExposureUS, aeState.GainDB))
 		} else {
-			setFocusStatusTip(u.expLbl, fmt.Sprintf("Auto exposure: %.0f us, %.2f dB (%s)", aeState.ExposureUS, aeState.GainDB, aeWhy),
+			setFocusStatusTip(u.expLbl,
+				fmt.Sprintf("Auto exposure: %.0f us, %.2f dB\n(%s)", aeState.ExposureUS, aeState.GainDB, aeWhy),
 				fmt.Sprintf("Auto exposure: %.0f us, %.2f dB (%s)", aeState.ExposureUS, aeState.GainDB, aeWhy))
 		}
 	}
 	if u.sharpLbl != nil {
-		setFocusStatus(u.sharpLbl, fmt.Sprintf("Sharpness: %.4f  (Lap %.4f, grain %.4f)", score.Combined, score.Laplacian, score.Grain))
+		setFocusStatusTip(u.sharpLbl,
+			fmt.Sprintf("Sharpness: %.4f\nLap %.4f, grain %.4f", score.Combined, score.Laplacian, score.Grain),
+			fmt.Sprintf("Sharpness: %.4f (Lap %.4f, grain %.4f)", score.Combined, score.Laplacian, score.Grain))
 	}
 	if u.peakLbl != nil {
 		if peak.Have {
@@ -452,12 +469,24 @@ func (u *FocusUI) updateLabels() {
 		if v > 1000 {
 			v = 1000
 		}
-		u.meter.SetRange(0, 1000)
-		u.meter.SetValue(v)
+		if !u.meterRangeOK {
+			u.meter.SetRange(0, 1000)
+			u.meterRangeOK = true
+			u.lastMeterVal = -1
+		}
+		if v != u.lastMeterVal {
+			u.meter.SetValue(v)
+			u.lastMeterVal = v
+		}
 	}
 	if u.greenBtn != nil {
-		u.greenBtn.SetEnabled(u.light != nil && u.light.connected())
-		u.whiteBtn.SetEnabled(u.light != nil && u.light.connected())
+		en := u.light != nil && u.light.connected()
+		if u.greenBtn.Enabled() != en {
+			u.greenBtn.SetEnabled(en)
+		}
+		if u.whiteBtn != nil && u.whiteBtn.Enabled() != en {
+			u.whiteBtn.SetEnabled(en)
+		}
 	}
 }
 
@@ -522,7 +551,7 @@ func (u *FocusUI) loopBody(stillValid func() bool) {
 			misses++
 			msg, log := liveGrabMessage(err, misses)
 			u.mu.Lock()
-			u.aeWhy = "waiting for a frame"
+			u.ae.Why = "waiting for a frame"
 			u.mu.Unlock()
 			if log {
 				m := msg
@@ -564,17 +593,18 @@ func (u *FocusUI) loopBody(stillValid func() bool) {
 		crop, cw, ch := hdrscan.CropGray16ToFloat64(pix, w, h, x0, y0, x1, y1)
 		score := hdrscan.MeasureFocus(crop, cw, ch)
 		u.mu.Lock()
-		prevAE := u.aeState
+		next, why, epoch, needApply := u.ae.Prepare(samples, cfg)
 		u.mu.Unlock()
-		state, why := hdrscan.AdjustExposure(samples, prevAE, cfg)
-		if err := u.applyAE(state); err != nil {
-			msg := "Live exposure: " + err.Error()
-			u.ui(func() { u.say(msg) })
-		} else {
-			u.mu.Lock()
-			u.aeWhy = why
-			u.aeState = state
-			u.mu.Unlock()
+		if needApply {
+			applied, changed, err := u.applyAE(next)
+			if err != nil {
+				msg := "Live exposure: " + err.Error()
+				u.ui(func() { u.say(msg) })
+			} else {
+				u.mu.Lock()
+				u.ae.Record(samples, cfg, why, epoch, applied, changed)
+				u.mu.Unlock()
+			}
 		}
 		u.mu.Lock()
 		u.samples = samples
@@ -670,16 +700,21 @@ func (u *FocusUI) meterRect(w, h int) (x0, y0, x1, y1 int) {
 	return u.visibleRectAt(w, h, 640, 400, z)
 }
 
-func (u *FocusUI) applyAE(st hdrscan.ExposureState) error {
+func (u *FocusUI) applyAE(st hdrscan.ExposureState) (hdrscan.ExposureState, bool, error) {
 	if cam := u.hikCam(); cam != nil {
 		cur := cam.Settings()
-		if math.Abs(cur.ExposureUS-st.ExposureUS)/math.Max(cur.ExposureUS, 1) < 0.04 && math.Abs(cur.GainDB-st.GainDB) < 0.15 {
-			return nil
+		if math.Abs(cur.ExposureUS-st.ExposureUS)/math.Max(cur.ExposureUS, 1) < 0.01 && math.Abs(cur.GainDB-st.GainDB) < 0.05 {
+			return hdrscan.ExposureState{ExposureUS: cur.ExposureUS, GainDB: cur.GainDB}, false, nil
 		}
-		return cam.SetExposureGain(st.ExposureUS, st.GainDB)
+		if err := cam.SetExposureGain(st.ExposureUS, st.GainDB); err != nil {
+			return hdrscan.ExposureState{ExposureUS: cur.ExposureUS, GainDB: cur.GainDB}, false, err
+		}
+		after := cam.Settings()
+		changed := math.Abs(after.ExposureUS-cur.ExposureUS) > 0.5 || math.Abs(after.GainDB-cur.GainDB) > 0.005
+		return hdrscan.ExposureState{ExposureUS: after.ExposureUS, GainDB: after.GainDB}, changed, nil
 	}
 	if u.hdr == nil || u.hdr.dev == nil || u.hdr.worker == nil {
-		return nil
+		return st, false, nil
 	}
 	us := uint32(math.Max(1, st.ExposureUS))
 	i := camera.ShutterIndex(us)
@@ -691,16 +726,33 @@ func (u *FocusUI) applyAE(st hdrscan.ExposureState) error {
 	u.mu.Unlock()
 	done := make(chan struct{})
 	var err error
+	var applied camera.Exposure
+	var changed bool
 	u.hdr.worker.do(func() {
 		defer close(done)
 		cur, e := u.hdr.dev.Exposure()
 		if e == nil && cur.Shutter == next.Shutter && cur.ISO == next.ISO {
+			applied = cur
 			return
 		}
-		_, err = u.hdr.dev.SetExposure(next)
+		got, se := u.hdr.dev.SetExposure(next)
+		err = se
+		if se != nil {
+			if e == nil {
+				applied = cur
+			} else {
+				applied = got
+			}
+			return
+		}
+		applied = got
+		changed = e != nil || got.Shutter != cur.Shutter || got.ISO != cur.ISO
 	})
 	<-done
-	return err
+	if applied.Shutter == 0 {
+		return st, false, err
+	}
+	return hdrscan.ExposureState{ExposureUS: float64(applied.Shutter), GainDB: 0}, changed, err
 }
 
 func (u *FocusUI) ui(f func()) {
@@ -892,6 +944,7 @@ func (u *FocusUI) click(x, y int, b walk.MouseButton) {
 	}
 	u.mu.Lock()
 	u.cx, u.cy = ix, iy
+	u.ae.Unlock()
 	u.mu.Unlock()
 	u.drag = true
 	u.dragX, u.dragY = x, y
@@ -918,6 +971,7 @@ func (u *FocusUI) move(x, y int, b walk.MouseButton) {
 	if u.cy > 1 {
 		u.cy = 1
 	}
+	u.ae.Unlock()
 	u.mu.Unlock()
 	u.dragX, u.dragY = x, y
 	u.refreshDisplay()
@@ -985,13 +1039,14 @@ func (u *FocusUI) Page() TabPage {
 					Children: []Widget{
 						Label{AssignTo: &u.srcLbl, Text: "Camera: -", Font: bold, MinSize: Size{Height: 16}},
 						Label{AssignTo: &u.lightLbl, Text: "Light: -", MinSize: Size{Height: 16}},
-						Label{AssignTo: &u.expLbl, Text: "Auto exposure: -", MinSize: Size{Height: 30}},
+						Label{AssignTo: &u.expLbl, Text: "Auto exposure: -", MinSize: Size{Height: 34}},
 						Composite{Layout: Grid{Columns: 2, MarginsZero: true, Spacing: 4}, Children: []Widget{
 							Label{Text: "Zoom", MinSize: Size{Width: 80}},
 							ComboBox{AssignTo: &u.zoomCB, Model: zoomItems, CurrentIndex: 0, OnCurrentIndexChanged: func() {
 								if u.zoomCB != nil {
 									u.zoomIdx.Store(int32(max(0, u.zoomCB.CurrentIndex())))
 								}
+								u.unlockAE()
 								u.refreshDisplay()
 							}},
 						}},
@@ -1003,7 +1058,7 @@ func (u *FocusUI) Page() TabPage {
 						}},
 						Label{Text: "Sharpness (zoomed region)", Font: bold},
 						ProgressBar{AssignTo: &u.meter, MaxSize: Size{Height: 14}},
-						Label{AssignTo: &u.sharpLbl, Text: "Sharpness: -", MinSize: Size{Height: 30}},
+						Label{AssignTo: &u.sharpLbl, Text: "Sharpness: -", MinSize: Size{Height: 34}},
 						Composite{Layout: HBox{MarginsZero: true, Spacing: 6}, Children: []Widget{
 							Label{AssignTo: &u.peakLbl, Text: "Peak hold: -", StretchFactor: 1},
 							PushButton{AssignTo: &u.resetPeakBtn, Text: "Reset peak", OnClicked: func() {

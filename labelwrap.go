@@ -48,8 +48,13 @@ func setStatusCols(l *walk.Label, text, tip string, cols int) {
 	if tip == "" {
 		tip = text
 	}
-	l.SetText(wrapLines(text, cols))
-	l.SetToolTipText(tip)
+	wrapped := wrapLines(text, cols)
+	if l.Text() != wrapped {
+		l.SetText(wrapped)
+	}
+	if l.ToolTipText() != tip {
+		l.SetToolTipText(tip)
+	}
 }
 
 // setStatus shows s wrapped to the HDR right-hand panel width and keeps the

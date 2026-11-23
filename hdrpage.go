@@ -32,7 +32,7 @@ import (
 )
 
 const appName = "NegativeScan Studio"
-const appVersion = appName + " v1.12"
+const appVersion = appName + " v1.13"
 
 // legacyAppName: the program was called Film Base Meter up to v0.67; its
 // settings folder is still read (copied once, never changed) by migrateLegacyConfig.

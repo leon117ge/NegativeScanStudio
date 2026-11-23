@@ -85,6 +85,11 @@ func AdjustExposure(samples []float64, cur ExposureState, cfg AutoExpConfig) (Ex
 	switch {
 	case pC > cfg.ClipLimit:
 		ratio = cfg.ClipLimit / math.Max(pC, 1e-6)
+		if pT > cfg.TargetLevel {
+			if tr := cfg.TargetLevel / pT; tr < ratio {
+				ratio = tr
+			}
+		}
 		reason = "reduce (highlight clip)"
 	case pT < 1e-4:
 		ratio = cfg.MaxStep
@@ -244,4 +249,114 @@ func RegionSamples(pix []uint16, w, h, x0, y0, x1, y1, stride int) []float64 {
 		}
 	}
 	return out
+}
+
+// LiveAE tracks Focus Check's closed-loop auto-exposure across grabbed frames.
+// It skips settle frames after a hardware exposure/gain write so in-flight
+// frames from the previous exposure cannot cause feedback oscillation, syncs
+// State to what hardware actually holds, and locks once converged until the
+// user zooms/pans, changes the light, or scene brightness shifts substantially.
+type LiveAE struct {
+	State      ExposureState
+	Why        string
+	Locked     bool
+	SkipFrames int
+	settled    int
+	epoch      int64
+}
+
+// Reset initializes LiveAE from the current camera exposure/gain.
+func (a *LiveAE) Reset(cur ExposureState, cfg AutoExpConfig) {
+	a.State = clampState(cur, cfg.norm())
+	a.Why = ""
+	a.Locked = false
+	a.SkipFrames = 0
+	a.settled = 0
+	a.epoch++
+}
+
+// Unlock clears any convergence lock (e.g. after zoom, pan, or light change).
+func (a *LiveAE) Unlock() {
+	a.Locked = false
+	a.settled = 0
+	a.SkipFrames = 0
+	a.epoch++
+}
+
+// Prepare inspects samples under the current state and decides whether an
+// exposure/gain change should be applied. Call Record after applying.
+// When skip is true, caller should not call the camera and should not overwrite State.
+func (a *LiveAE) Prepare(samples []float64, cfg AutoExpConfig) (next ExposureState, why string, epoch int64, needApply bool) {
+	cfg = cfg.norm()
+	a.State = clampState(a.State, cfg)
+	epoch = a.epoch
+	if a.SkipFrames > 0 {
+		a.SkipFrames--
+		return a.State, a.Why, epoch, false
+	}
+	if len(samples) == 0 {
+		a.Why = "no samples"
+		return a.State, a.Why, epoch, false
+	}
+	pT := percentile(samples, cfg.TargetPercentile)
+	pC := percentile(samples, cfg.ClipPercentile)
+	if a.Locked {
+		clipOut := pC > cfg.ClipLimit+0.03
+		darkOut := pT < cfg.TargetLevel*0.72
+		brightOut := pT > cfg.TargetLevel*1.32
+		if !clipOut && !darkOut && !brightOut {
+			a.Why = "locked"
+			return a.State, a.Why, epoch, false
+		}
+		a.Locked = false
+		a.settled = 0
+	}
+	next, why = AdjustExposure(samples, a.State, cfg)
+	if next == a.State {
+		a.advanceSettled(pT, pC, cfg, why)
+		return a.State, a.Why, epoch, false
+	}
+	return next, why, epoch, true
+}
+
+// Record commits the result of applying the proposed exposure to hardware.
+// applied must reflect what the camera actually holds (even when changed is false).
+func (a *LiveAE) Record(samples []float64, cfg AutoExpConfig, why string, epoch int64, applied ExposureState, changed bool) {
+	cfg = cfg.norm()
+	applied = clampState(applied, cfg)
+	a.State = applied
+	if a.epoch != epoch {
+		a.Locked = false
+		a.settled = 0
+		a.SkipFrames = 0
+		a.Why = why
+		return
+	}
+	if changed {
+		a.SkipFrames = 2
+		a.settled = 0
+		a.Locked = false
+		a.Why = why
+		return
+	}
+	pT := percentile(samples, cfg.TargetPercentile)
+	pC := percentile(samples, cfg.ClipPercentile)
+	a.advanceSettled(pT, pC, cfg, why)
+}
+
+func (a *LiveAE) advanceSettled(pT, pC float64, cfg AutoExpConfig, why string) {
+	a.settled++
+	nearTarget := pC <= cfg.ClipLimit && math.Abs(pT-cfg.TargetLevel) <= cfg.TargetLevel*0.08
+	atRail := (a.State.ExposureUS <= cfg.MinExposureUS*1.01 && a.State.GainDB <= cfg.MinGainDB+0.01 && pC > cfg.ClipLimit) ||
+		(a.State.ExposureUS >= cfg.MaxExposureUS*0.99 && a.State.GainDB >= cfg.MaxGainDB-0.01 && pT < cfg.TargetLevel)
+	needLockFrames := 3
+	if why == "on target" || nearTarget || atRail {
+		needLockFrames = 2
+	}
+	if a.settled >= needLockFrames {
+		a.Locked = true
+		a.Why = "locked"
+		return
+	}
+	a.Why = why
 }

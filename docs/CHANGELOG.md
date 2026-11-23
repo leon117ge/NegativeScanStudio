@@ -1,8 +1,17 @@
 # NegativeScan Studio app — Changelog / 扫描软件更新日志
 
-Current local test app: **v1.12**, not published. Latest published app: **v1.08** · [App release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/v1.08) · [OFX plugin changelog](../ofx/CHANGELOG.md) · [Versioning policy](VERSIONING.md)
+Current local test app: **v1.13**, not published. Latest published app: **v1.08** · [App release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/v1.08) · [OFX plugin changelog](../ofx/CHANGELOG.md) · [Versioning policy](VERSIONING.md)
 
 This file tracks the scanning app, not plugin-only releases. / 本文件只记录扫描软件。
+
+## v1.13 local test build
+
+Focus Check auto-exposure stabilization (regression fix from v1.12). Capture sequence, light settling, HDR merge, CA correction, and image-quality algorithms are unchanged (OFX plugin untouched).
+
+- **Settled Focus Check auto-exposure (`hdrscan.LiveAE`).** Added `LiveAE` to skip two settle frames after any hardware exposure/gain write so in-flight frames from the previous exposure no longer trigger feedback oscillation in the faster v1.12 preview loop, sync `State` to actual hardware exposure/gain (eliminating deadband and quantized-shutter sawtoothing), and lock exposure once converged (`locked`) until the user zooms, pans, switches the light, or scene brightness shifts substantially.
+- **Tighter clip reduction and deadband alignment.** When highlights clip and the 90th percentile is also above target, `AdjustExposure` steps toward the darker ratio instead of taking slow 7% steps, and `applyAE` lowers its Hikrobot skip threshold from 4% / 0.15 dB to 1% / 0.05 dB so small valid adjustments are applied rather than blocked.
+- **Stable Focus Check label layout.** Kept `Auto exposure` and `Sharpness` labels at a consistent two-line height, skipped redundant `SetText`/`SetToolTipText` layout passes when text/tooltip have not changed, and only updated the sharpness progress bar when its value changes.
+- Local only; no tag/push/release.
 
 ## v1.12 local test build
 
