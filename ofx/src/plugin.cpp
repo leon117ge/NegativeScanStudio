@@ -112,7 +112,7 @@ OfxPropertySetHandle choiceDef(OfxParamSetHandle s,const char *key,const char *l
 OfxPropertySetHandle boolDef(OfxParamSetHandle s,const char *key,const char *label,int d,const char *group="") {auto p=define(s,key,label,kOfxParamTypeBoolean,group);prop->propSetInt(p,kOfxParamPropDefault,0,d);return p;}
 OfxStatus describe(OfxImageEffectHandle e) {
  auto p=properties(e);if(interact){OfxPluginEntryPoint *callback=overlayEntry;void *address=nullptr;static_assert(sizeof(callback)==sizeof(address));std::memcpy(&address,&callback,sizeof(address));prop->propSetPointer(p,kOfxImageEffectPluginPropOverlayInteractV1,0,address);}
- prop->propSetString(p,kOfxPropLabel,0,"NegativeScan Studio OFX 0.90.7");prop->propSetString(p,kOfxImageEffectPluginPropGrouping,0,"NegativeScan Studio");prop->propSetString(p,kOfxImageEffectPropSupportedContexts,0,kOfxImageEffectContextFilter);prop->propSetString(p,kOfxImageEffectPropSupportedPixelDepths,0,kOfxBitDepthFloat);prop->propSetString(p,kOfxImageEffectPluginRenderThreadSafety,0,kOfxImageEffectRenderFullySafe);prop->propSetInt(p,kOfxImageEffectPropSupportsTiles,0,1);prop->propSetInt(p,kOfxImageEffectPropSupportsMultiResolution,0,1);prop->propSetInt(p,kOfxImageEffectPluginPropHostFrameThreading,0,0);
+ prop->propSetString(p,kOfxPropLabel,0,"NegativeScan Studio OFX 0.90.8");prop->propSetString(p,kOfxImageEffectPluginPropGrouping,0,"NegativeScan Studio");prop->propSetString(p,kOfxImageEffectPropSupportedContexts,0,kOfxImageEffectContextFilter);prop->propSetString(p,kOfxImageEffectPropSupportedPixelDepths,0,kOfxBitDepthFloat);prop->propSetString(p,kOfxImageEffectPluginRenderThreadSafety,0,kOfxImageEffectRenderFullySafe);prop->propSetInt(p,kOfxImageEffectPropSupportsTiles,0,1);prop->propSetInt(p,kOfxImageEffectPropSupportsMultiResolution,0,1);prop->propSetInt(p,kOfxImageEffectPluginPropHostFrameThreading,0,0);
  prop->propSetString(p,kOfxImageEffectPropOpenCLRenderSupported,0,nss::CLApi::get().available?"true":"false");
  prop->propSetString(p,kOfxImageEffectPropOpenCLSupported,0,"false");
  prop->propSetString(p,kOfxImageEffectPropCudaRenderSupported,0,nss::CudaApi::get().available?"true":"false");
@@ -173,7 +173,7 @@ OfxStatus describeContext(OfxImageEffectHandle e) {
   auto hidden=define(s,key,key,kOfxParamTypeDouble,"balance");prop->propSetDouble(hidden,kOfxParamPropDefault,0,.5);hideParam(hidden);prop->propSetInt(hidden,kOfxParamPropAnimates,0,0);
  }
  auto isVisibleDef=[](const char *key){
-  return std::strcmp(key,"positive_out_mode")==0||std::strcmp(key,"positive_contrast")==0||std::strcmp(key,"positive_expo")==0||std::strncmp(key,"positive_bal_",13)==0;
+  return std::strcmp(key,"positive_out_mode")==0||std::strcmp(key,"positive_contrast")==0||std::strcmp(key,"positive_expo")==0||std::strcmp(key,"gamma_scale")==0||std::strncmp(key,"positive_bal_",13)==0;
  };
  for(auto &d:defs) {
   const char *grp=std::strncmp(d.key,"positive_bal_",13)==0?"color_balance":d.group;
@@ -187,7 +187,7 @@ OfxStatus describeContext(OfxImageEffectHandle e) {
  std::vector<std::string> children={
   "camera_mode",
   "metadata_file","load_metadata","metadata_status",
-  "stock","film_type","temperature","positive_expo","positive_contrast","positive_out_mode",
+  "stock","film_type","temperature","positive_expo","gamma_scale","positive_contrast","positive_out_mode",
   "positive_bal_r","positive_bal_g","positive_bal_b"
  };
  for(auto key:{"pick_on_viewer","pick_auto","pick_point","pick_radius","stage","render_device","render_info","auto_metadata","camera_on","neutralise","camera_strength"})children.push_back(key);

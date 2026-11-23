@@ -1,8 +1,12 @@
 # NegativeScan Studio OFX — Changelog
 
-Current local test plugin: **0.90.7** (not pushed/released) · Last published tag: **0.90.6** ([Plugin release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/ofx-v0.90.6)) · [Scanning app changelog](../docs/CHANGELOG.md) · [Versioning policy](../docs/VERSIONING.md)
+Current local test plugin: **0.90.8** (not pushed/released) · Last published tag: **0.90.6** ([Plugin release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/ofx-v0.90.6)) · [Scanning app changelog](../docs/CHANGELOG.md) · [Versioning policy](../docs/VERSIONING.md)
 
 Plugin releases are independent from the Windows scanning app.
+
+## 0.90.8 — Gamma scale visible again (local test build)
+
+- UI only: `Gamma scale` (default `1.15`) is visible again under `Exposure` in **Film & Gamma**; it scales all three channel gammas together and works with Exposure. Individual R/G/B gammas stay hidden and are still set by the Film stock preset. 14 visible controls. Core math and performance unchanged.
 
 ## 0.90.7 — Simplified English UI and Camera calibration dropdown (local test build)
 

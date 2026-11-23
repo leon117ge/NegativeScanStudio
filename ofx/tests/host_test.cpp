@@ -161,7 +161,7 @@ require(instance(e)->lastRender.find("pick unavailable")!=std::string::npos);
  std::vector<std::string> expectedVisible={
   "camera_mode",
   "metadata_file","load_metadata","metadata_status",
-  "stock","film_type","temperature","positive_expo","positive_contrast","positive_out_mode",
+  "stock","film_type","temperature","positive_expo","gamma_scale","positive_contrast","positive_out_mode",
   "positive_bal_r","positive_bal_g","positive_bal_b"
  };
  require(visible==expectedVisible);
