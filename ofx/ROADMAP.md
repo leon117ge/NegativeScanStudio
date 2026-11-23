@@ -1,8 +1,8 @@
 # NegativeScan Studio OFX — Roadmap
 
-Current local test plugin: **0.90.8** (last published tag: **0.90.6**) · [Plugin changelog](CHANGELOG.md) · [Scanning app roadmap](../docs/ROADMAP.md) · [Versioning](../docs/VERSIONING.md)
+Current local test plugin: **0.90.9** (last published tag: **0.90.6**) · [Plugin changelog](CHANGELOG.md) · [Scanning app roadmap](../docs/ROADMAP.md) · [Versioning](../docs/VERSIONING.md)
 
-## Implemented in 0.90.8 (local test build, Resolve pending)
+## Implemented in 0.90.9 (local test build, Resolve pending)
 
 - Simplified English-only OFX UI (13 visible controls across Camera calibration, Film base, Film & Gamma including Exposure/Contrast/Cineon Output, and Color balance RGB sliders); 42 technical parameters hidden via `kOfxParamPropSecret` with full saved-project compatibility and unchanged core math/performance.
 - Camera calibration dropdown (`X-T3 | Monochrome (MV-CS240-90UM) | Off`) with neutral-preserving `chart_hik2` SoftLoaf No. 000004 matrix (`mean dE ~2.16`, unit row sums) and true bypass. Positive-chart mapping is not universal negative dye correction and awaits real negative scan validation.

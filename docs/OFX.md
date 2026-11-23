@@ -1,6 +1,6 @@
-# NegativeScan Studio OFX 0.90.8 (local test build)
+# NegativeScan Studio OFX 0.90.9 (local test build)
 
-Current local test build is **0.90.8** (last published tag: `ofx-v0.90.6`). Core rendering math, computation order, CPU/OpenCL/CUDA kernels, and all numeric defaults remain unchanged. Real Windows Resolve and physical GPU acceptance remain outstanding. [Installation](../ofx/README.md).
+Current local test build is **0.90.9** (last published tag: `ofx-v0.90.6`). Core rendering math, computation order, CPU/OpenCL/CUDA kernels, and all numeric defaults remain unchanged. Real Windows Resolve and physical GPU acceptance remain outstanding. [Installation](../ofx/README.md).
 
 ## 0.90.7 Simplified English UI & Camera Calibration Dropdown
 

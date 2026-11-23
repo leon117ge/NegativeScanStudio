@@ -1,8 +1,12 @@
 # NegativeScan Studio OFX — Changelog
 
-Current local test plugin: **0.90.8** (not pushed/released) · Last published tag: **0.90.6** ([Plugin release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/ofx-v0.90.6)) · [Scanning app changelog](../docs/CHANGELOG.md) · [Versioning policy](../docs/VERSIONING.md)
+Current local test plugin: **0.90.9** (not pushed/released) · Last published tag: **0.90.6** ([Plugin release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/ofx-v0.90.6)) · [Scanning app changelog](../docs/CHANGELOG.md) · [Versioning policy](../docs/VERSIONING.md)
 
 Plugin releases are independent from the Windows scanning app.
+
+## 0.90.9 — Gamma scale default 1.0 (local test build)
+
+- Change the `Gamma scale` default from `1.15` to **1.0** at the user's request, so new instances use the raw Film stock preset gammas (Kodak curve fits). Exposure stays `0.90`; balances stay `1.07 / 0 / 0.67` (eye-tuned earlier under scale 1.15, so they may need re-tuning). Existing Resolve projects keep their saved slider value. Plugin version minor is now 9009 (0.90.7 and 0.90.8 still reported 9007). Core math unchanged.
 
 ## 0.90.8 — Gamma scale visible again (local test build)
 
