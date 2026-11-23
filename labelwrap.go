@@ -6,12 +6,24 @@ import (
 	"github.com/lxn/walk"
 )
 
-// statusWrapCols is how many characters fit on one line of the narrow HDR
-// right-hand panel; longer status lines are wrapped at word boundaries.
-const statusWrapCols = 58
+// Column budgets for wrapped labels inside fixed-width right-hand panels
+// (at 9 pt Segoe UI):
+//   - statusWrapCols (58): ~450-480 px panels (HDR Camera / White light / Light)
+//   - monoStatusWrapCols (50): ~380-490 px panels (Mono trichrome / Trichrome)
+//   - focusStatusWrapCols (42): ~340-420 px panel (Focus check)
+//   - triWrapCols (150): wide/unconstrained pages
+const (
+	statusWrapCols      = 58
+	monoStatusWrapCols  = 50
+	focusStatusWrapCols = 42
+	triWrapCols         = 150
+)
 
 // wrapLines word-wraps every line of s to at most cols characters.
 func wrapLines(s string, cols int) string {
+	if cols <= 0 {
+		return s
+	}
 	var out []string
 	for _, line := range strings.Split(s, "\n") {
 		for len(line) > cols {
@@ -27,24 +39,42 @@ func wrapLines(s string, cols int) string {
 	return strings.Join(out, "\n")
 }
 
-// setStatus shows s wrapped to the panel width and keeps the full text as the
-// tooltip, so long status lines are never cut off.
-func setStatus(l *walk.Label, s string) {
+// setStatusCols shows text wrapped to cols and puts tip (or text if tip is
+// empty) in the tooltip, so narrow panels never clip or expand past MaxSize.
+func setStatusCols(l *walk.Label, text, tip string, cols int) {
 	if l == nil {
 		return
 	}
-	l.SetText(wrapLines(s, statusWrapCols))
-	l.SetToolTipText(s)
+	if tip == "" {
+		tip = text
+	}
+	l.SetText(wrapLines(text, cols))
+	l.SetToolTipText(tip)
 }
 
-// triWrapCols (v0.82): the Trichrome page uses the full window width.
-const triWrapCols = 150
+// setStatus shows s wrapped to the HDR right-hand panel width and keeps the
+// full text as the tooltip, so long status lines are never cut off.
+func setStatus(l *walk.Label, s string) {
+	setStatusCols(l, s, s, statusWrapCols)
+}
 
-// setStatusWide is setStatus for full-width pages (Trichrome).
+func setMonoStatus(l *walk.Label, s string) {
+	setStatusCols(l, s, s, monoStatusWrapCols)
+}
+
+func setMonoStatusTip(l *walk.Label, text, tip string) {
+	setStatusCols(l, text, tip, monoStatusWrapCols)
+}
+
+func setFocusStatus(l *walk.Label, s string) {
+	setStatusCols(l, s, s, focusStatusWrapCols)
+}
+
+func setFocusStatusTip(l *walk.Label, text, tip string) {
+	setStatusCols(l, text, tip, focusStatusWrapCols)
+}
+
+// setStatusWide is setStatus for full-width pages.
 func setStatusWide(l *walk.Label, s string) {
-	if l == nil {
-		return
-	}
-	l.SetText(wrapLines(s, triWrapCols))
-	l.SetToolTipText(s)
+	setStatusCols(l, s, s, triWrapCols)
 }

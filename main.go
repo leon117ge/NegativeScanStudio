@@ -139,7 +139,7 @@ func main() {
 		k := -1
 		switch tabs.CurrentIndex() {
 		case 0:
-			if focusui.active {
+			if focusui.isActive() {
 				focusui.leave()
 			}
 			if camTabs.CurrentIndex() == 1 {
@@ -170,7 +170,7 @@ func main() {
 			if scanTabs.CurrentIndex() == 3 {
 				focusui.enter()
 			} else {
-				if focusui.active {
+				if focusui.isActive() {
 					focusui.leave()
 				}
 				if scanTabs.CurrentIndex() == 2 {
@@ -181,7 +181,7 @@ func main() {
 			}
 		default:
 			lightui.stopHikPreview()
-			if focusui.active {
+			if focusui.isActive() {
 				focusui.leave()
 			}
 			monoui.stopPreview()

@@ -28,32 +28,11 @@ func paintCenterMarks(c *walk.Canvas, src, dst walk.Rectangle, imgW, imgH int) {
 		SrcX: src.X, SrcY: src.Y, SrcW: src.Width, SrcH: src.Height,
 		DstX: dst.X, DstY: dst.Y, DstW: dst.Width, DstH: dst.Height,
 	}
-	ink, _ := walk.NewSolidColorBrush(walk.RGB(255, 255, 255))
-	edge, _ := walk.NewSolidColorBrush(walk.RGB(0, 0, 0))
-	if ink == nil || edge == nil {
-		if ink != nil {
-			ink.Dispose()
-		}
-		if edge != nil {
-			edge.Dispose()
-		}
+	inner := cachedPen(walk.RGB(255, 255, 255), 1)
+	outer := cachedPen(walk.RGB(0, 0, 0), 1)
+	if inner == nil || outer == nil {
 		return
 	}
-	defer ink.Dispose()
-	defer edge.Dispose()
-	inner, err1 := walk.NewGeometricPen(walk.PenSolid, 1, ink)
-	outer, err2 := walk.NewGeometricPen(walk.PenSolid, 1, edge)
-	if err1 != nil || err2 != nil || inner == nil || outer == nil {
-		if inner != nil {
-			inner.Dispose()
-		}
-		if outer != nil {
-			outer.Dispose()
-		}
-		return
-	}
-	defer inner.Dispose()
-	defer outer.Dispose()
 
 	clip := dst
 	for _, m := range focusmark.Marks(imgW, imgH) {

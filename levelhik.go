@@ -10,6 +10,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/lxn/walk"
+
 	"basetool/hdrscan"
 	"basetool/hikbase"
 	"basetool/hikcam"
@@ -30,6 +32,8 @@ var camSrcItems = []string{
 }
 
 const camProfileMonoNote = "Apply camera profile: for a Bayer camera this aims at the film base AFTER the CameraCal matrix, so the saved reference can stay at 0.5/0.5/0.5. A monochrome camera has no CFA and no CameraCal matrix, so the option is disabled and each raw film-base channel is leveled independently to the 0.5 target."
+const camProfileBayerShort = "Bayer camera: aims at the film base after CameraCal matrix (when Apply camera profile is checked)."
+const camProfileMonoShort = "Monochrome camera: no Bayer CFA or CameraCal matrix; each raw channel levels directly to 0.5."
 
 func (u *LightUI) camSource() int {
 	if u.camSrcCB == nil {
@@ -61,9 +65,9 @@ func (u *LightUI) onCamSourceChanged() {
 	}
 	if u.camNoteLbl != nil {
 		if hik {
-			u.camNoteLbl.SetText("Monochrome camera: camera profile is disabled (no Bayer CFA, no CameraCal matrix). Each raw film-base channel is leveled to the 0.5 target.")
+			setStatusCols(u.camNoteLbl, camProfileMonoShort, camProfileMonoNote, 60)
 		} else {
-			u.camNoteLbl.SetText(camProfileMonoNote)
+			setStatusCols(u.camNoteLbl, camProfileBayerShort, camProfileMonoNote, 60)
 		}
 	}
 	if u.isoLbl != nil {
@@ -134,6 +138,9 @@ type hikLevelCamera struct {
 }
 
 func (h *hikLevelCamera) Name() string {
+	if h.dev == nil {
+		return "Hikrobot monochrome"
+	}
 	info := h.dev.Info()
 	us, gain := h.GetExposure()
 	st := h.dev.Settings()
@@ -277,20 +284,23 @@ func hikTiffBase(ctx context.Context, hk *hikLevelCamera, dir string, box hdrsca
 
 func (u *MonoUI) ensureHik(wantSim bool) (hikcam.Device, error) {
 	if wantSim {
-		if u.cam != nil && u.cam.Info().Simulated {
-			return u.cam, nil
+		if cur := u.getCam(); cur != nil && cur.Info().Simulated {
+			return cur, nil
 		}
+		u.camMu.Lock()
 		if u.levelSim == nil {
 			u.levelSim = hikcam.OpenSim()
 			_ = u.levelSim.Apply(hikcam.BestScanQuality())
 		}
-		return u.levelSim, nil
+		sim := u.levelSim
+		u.camMu.Unlock()
+		return sim, nil
 	}
-	if u.cam != nil && !u.cam.Info().Simulated {
-		return u.cam, nil
+	if cur := u.getCam(); cur != nil && !cur.Info().Simulated {
+		return cur, nil
 	}
 	list := hikcam.Enumerate()
-	u.sdkMsg = list.Message()
+	u.setSDK(list.Message(), list.Cameras)
 	if list.Err != nil {
 		return nil, list.Err
 	}
@@ -302,10 +312,8 @@ func (u *MonoUI) ensureHik(wantSim bool) (hikcam.Device, error) {
 		return nil, err
 	}
 	_ = d.Apply(hikcam.BestScanQuality())
-	u.devices = list.Cameras
-	if u.cam == nil {
-		u.cam = d
-	}
+	u.setCamIfNil(d)
+	u.ui(func() { u.updateButtons() })
 	return d, nil
 }
 
@@ -324,15 +332,24 @@ func (u *LightUI) hikLights() func() ([3]bool, [3]int) {
 }
 
 func (u *LightUI) startHikPreview() {
-	if u.hdr == nil || u.hdr.mono == nil {
+	if u.hdr == nil || u.hdr.mono == nil || u.hdr.mono.running.Load() || u.busy {
 		return
 	}
-	gen := u.hikPrevGen.Add(1)
+	m := u.hdr.mono
+	gen := m.worker().Bump()
+	u.hikPrevGen.Store(gen)
 	wantSim := u.camSource() == camSrcHikSim
-	go func(gen int64) {
-		d, err := u.hdr.mono.ensureHik(wantSim)
+	m.worker().Do(func() {
+		m.worker().StopSyncIfNeeded()
+		if m.worker().Gen() != gen || m.running.Load() || u.busy {
+			return
+		}
+		d, err := m.ensureHik(wantSim)
 		if err != nil {
 			u.log("Hikrobot preview: %v", err)
+			return
+		}
+		if m.worker().Gen() != gen {
 			return
 		}
 		if sim, ok := d.(*hikcam.Sim); ok {
@@ -347,42 +364,56 @@ func (u *LightUI) startHikPreview() {
 			u.log("Hikrobot preview grab: %v", err)
 			return
 		}
-		var posting atomic.Bool
-		misses := 0
-		for u.hikPrevGen.Load() == gen {
-			fr, err := d.Grab(hikcam.GrabTimeout(d.Settings().ExposureUS))
-			if err != nil {
-				if u.hikPrevGen.Load() != gen {
-					return
-				}
-				misses++
-				if msg, log := liveGrabMessage(err, misses); log {
-					u.log("%s", msg)
-				}
-				time.Sleep(50 * time.Millisecond)
-				continue
-			}
-			misses = 0
-			img := hikcam.PreviewGray(fr.Pix, fr.W, fr.H, hikcam.LivePreviewMaxEdge)
-			what := fmt.Sprintf("Hikrobot live  %dx%d  %s  %.0f us", fr.W, fr.H, fr.PixelFormat, fr.ExposureUS)
-			if posting.CompareAndSwap(false, true) {
-				u.ui(func() {
-					defer posting.Store(false)
-					if u.hikPrevGen.Load() != gen || u.hdr == nil {
+		if !m.worker().StartLoop(gen, func(valid func() bool) {
+			defer func() { _ = d.StopGrab() }()
+			var posting atomic.Bool
+			misses := 0
+			for valid() && u.hikPrevGen.Load() == gen {
+				fr, err := d.Grab(hikcam.GrabTimeout(d.Settings().ExposureUS))
+				if err != nil {
+					if !valid() || u.hikPrevGen.Load() != gen {
 						return
 					}
-					u.hdr.setImage(img, what)
-				})
+					misses++
+					if msg, log := liveGrabMessage(err, misses); log {
+						u.log("%s", msg)
+					}
+					time.Sleep(50 * time.Millisecond)
+					continue
+				}
+				misses = 0
+				if posting.CompareAndSwap(false, true) {
+					img := hikcam.PreviewGray(fr.Pix, fr.W, fr.H, hikcam.LivePreviewMaxEdge)
+					bmp, be := walk.NewBitmapFromImage(img)
+					if be != nil {
+						posting.Store(false)
+					} else {
+						what := fmt.Sprintf("Hikrobot live  %dx%d  %s  %.0f us", fr.W, fr.H, fr.PixelFormat, fr.ExposureUS)
+						u.ui(func() {
+							defer posting.Store(false)
+							if !valid() || u.hikPrevGen.Load() != gen || u.hdr == nil {
+								bmp.Dispose()
+								return
+							}
+							u.hdr.setBitmap(bmp, what)
+						})
+					}
+				}
+				if d.Info().Simulated {
+					time.Sleep(40 * time.Millisecond)
+				}
 			}
-			if d.Info().Simulated {
-				time.Sleep(40 * time.Millisecond)
-			}
+		}) {
+			_ = d.StopGrab()
 		}
-	}(gen)
+	})
 }
 
 func (u *LightUI) stopHikPreview() {
 	u.hikPrevGen.Add(1)
+	if u.hdr != nil && u.hdr.mono != nil {
+		u.hdr.mono.stopPreviewAsync()
+	}
 }
 
 func previewGray(fr *hikcam.Frame, maxEdge int) *image.Gray {

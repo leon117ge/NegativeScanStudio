@@ -1,6 +1,7 @@
 package monocap
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math"
@@ -90,6 +91,7 @@ type Options struct {
 	// FramesPerExposure same-exposure grabs averaged per bracket step (>=1).
 	FramesPerExposure int
 	Noise             hdrscan.MonoNoise // zero value: the MV-CS240-90UM sensor model
+	Ctx               context.Context   // optional cancellation checked between steps
 	Log               func(string)
 	Status            func(string)
 }
@@ -131,6 +133,31 @@ func (o *Options) norm() {
 	}
 	if len(o.EVs) == 0 {
 		o.EVs = []int{0}
+	}
+}
+
+func (o *Options) cancelled() error {
+	if o.Ctx != nil {
+		return o.Ctx.Err()
+	}
+	return nil
+}
+
+func (o *Options) sleep(d time.Duration) error {
+	if d <= 0 {
+		return o.cancelled()
+	}
+	if o.Ctx == nil {
+		time.Sleep(d)
+		return nil
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-o.Ctx.Done():
+		return o.Ctx.Err()
+	case <-t.C:
+		return nil
 	}
 }
 
@@ -185,6 +212,9 @@ func (o *Options) waitSettled(ch int) (string, error) {
 	st := SettleState{Tol: o.SettleTol}
 	deadline := time.Now().Add(o.SettleTimeout)
 	for i := 0; ; i++ {
+		if err := o.cancelled(); err != nil {
+			return "", err
+		}
 		fr, err := o.Cam.Grab(grabTimeout(o.Cam.Settings().ExposureUS))
 		if err != nil {
 			return "", fmt.Errorf("%s settle grab: %w", tags[ch], err)
@@ -211,6 +241,9 @@ func (o *Options) grabAveraged(n int) (*hikcam.Frame, error) {
 	var first *hikcam.Frame
 	stack := make([][]uint16, 0, n)
 	for i := 0; i < n; i++ {
+		if err := o.cancelled(); err != nil {
+			return nil, err
+		}
 		fr, err := o.Cam.Grab(grabTimeout(o.Cam.Settings().ExposureUS))
 		if err != nil {
 			return nil, err
@@ -242,12 +275,17 @@ func Capture(o Options) (*Result, error) {
 	res.Mono.NoiseModel = fmt.Sprintf("full well %.0f e-, read noise %.2f e- at 0 dB", nz.FullWellE, nz.ReadE)
 	var hdrNotes []string
 	for ch := 0; ch < 3; ch++ {
+		if err := o.cancelled(); err != nil {
+			return nil, err
+		}
 		if o.Light != nil {
 			if err := o.Light.Only(ch); err != nil {
 				return nil, fmt.Errorf("light %s only: %w", tags[ch], err)
 			}
 		}
-		time.Sleep(o.Settle)
+		if err := o.sleep(o.Settle); err != nil {
+			return nil, err
+		}
 		st := cam.Settings()
 		if !o.MeterEach {
 			st.ExposureUS = o.BaseUS
@@ -268,6 +306,9 @@ func Capture(o Options) (*Result, error) {
 		if o.MeterEach {
 			cfg := hdrscan.ScanMeterConfig()
 			for attempt := 0; attempt < 4; attempt++ {
+				if err := o.cancelled(); err != nil {
+					return nil, err
+				}
 				fr, err := cam.Grab(grabTimeout(st.ExposureUS))
 				if err != nil {
 					return nil, fmt.Errorf("%s meter grab: %w", tags[ch], err)
@@ -289,6 +330,9 @@ func Capture(o Options) (*Result, error) {
 		var frames []hdrscan.MonoFrame
 		evs := append([]int{0}, nonZero(o.EVs)...)
 		for _, ev := range evs {
+			if err := o.cancelled(); err != nil {
+				return nil, err
+			}
 			evSt := st
 			if ev != 0 {
 				evSt.ExposureUS = math.Min(hikcam.CS240ExpMaxUS, st.ExposureUS*hdrscan.EVScale(ev))
@@ -312,6 +356,9 @@ func Capture(o Options) (*Result, error) {
 			o.status("Captured %s %+d EV (%.0f us) ...", tags[ch], ev, fr.ExposureUS)
 		}
 		_ = cam.Apply(st)
+		if err := o.cancelled(); err != nil {
+			return nil, err
+		}
 		if len(frames) > 1 {
 			o.status("Merging %s HDR ...", tags[ch])
 		}

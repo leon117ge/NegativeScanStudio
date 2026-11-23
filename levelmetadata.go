@@ -64,7 +64,7 @@ func (u *HDRUI) refreshLevelingUI() {
 	}
 	values := u.levelingValues()
 	if u.levelMetaLbl != nil {
-		setStatusWide(u.levelMetaLbl, u.lastLevelingText(values))
+		setStatus(u.levelMetaLbl, u.lastLevelingText(values))
 	}
 	if !on {
 		return

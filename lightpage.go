@@ -787,17 +787,14 @@ func (u *LightUI) startLevel() {
 		walk.MsgBox(u.win(), "Auto film-base leveling", "A real Hikrobot camera cannot see the simulated RGB light.\n\nPick Simulated Hikrobot MV-CS240-90UM as the leveling camera, or connect the real light.", walk.MsgBoxIconInformation)
 		return
 	}
+	var hikSetup *hikLevelCamera
+	wantHikSim := src == camSrcHikSim
 	if src == camSrcHik || src == camSrcHikSim {
 		if h.mono == nil {
 			walk.MsgBox(u.win(), "Auto film-base leveling", "The Mono trichrome page is not ready.", walk.MsgBoxIconWarning)
 			return
 		}
-		d, herr := h.mono.ensureHik(src == camSrcHikSim)
-		if herr != nil {
-			walk.MsgBox(u.win(), "Auto film-base leveling", "Cannot open the Hikrobot monochrome camera:\n\n"+herr.Error()+"\n\nConnect it on HDR Scan > Mono trichrome, or pick Simulated Hikrobot MV-CS240-90UM.", walk.MsgBoxIconWarning)
-			return
-		}
-		h.mono.stopPreview()
+		h.mono.stopPreviewAsync()
 		u.stopHikPreview()
 		td, terr := os.MkdirTemp("", "nss_leveling_*")
 		if terr != nil {
@@ -805,7 +802,8 @@ func (u *LightUI) startLevel() {
 			return
 		}
 		tmpDir = td
-		cam = &hikLevelCamera{dev: d, lights: u.hikLights(), wantUS: u.hikExposureUS()}
+		hikSetup = &hikLevelCamera{lights: u.hikLights(), wantUS: u.hikExposureUS()}
+		cam = hikSetup
 	} else if u.sim != nil {
 		sd := u.sim
 		syn := lightlevel.NewSynth(sd.Lights)
@@ -847,10 +845,6 @@ func (u *LightUI) startLevel() {
 	setLightResultText(u.resTE, "Leveling ...")
 	u.log("==== Auto film-base leveling: target %.2f FS, tolerance ±%.1f%%, max %d rounds, settle %v, start R %d G %d B %d ====",
 		p.Target, p.Tol*100, p.MaxIter, p.Settle, p.Start[0], p.Start[1], p.Start[2])
-	u.log("Camera: %s", cam.Name())
-	if src == camSrcHik || src == camSrcHikSim {
-		u.log("Hikrobot leveling uses a single common exposure (gain 0 dB, Mono12, full frame) from the Exposure field / Mono Trichrome scan settings; ISO and shutter are not used.")
-	}
 	if !baseNorm.Empty() {
 		u.log("Film base: manual rectangle %.0f-%.0f%% x %.0f-%.0f%% (fixed samples and median for control and TIFF check).",
 			baseNorm.X0*100, baseNorm.X1*100, baseNorm.Y0*100, baseNorm.Y1*100)
@@ -879,6 +873,22 @@ func (u *LightUI) startLevel() {
 				}
 			}()
 		}
+		if hikSetup != nil {
+			h.mono.worker().StopSync()
+			d, herr := h.mono.ensureHik(wantHikSim)
+			if herr != nil {
+				u.ui(func() {
+					u.busy, u.level, u.cancel = false, false, nil
+					setLightResultText(u.resTE, "Leveling failed: "+herr.Error())
+					u.updateButtons()
+					walk.MsgBox(u.win(), "Auto film-base leveling", "Cannot open the Hikrobot monochrome camera:\n\n"+herr.Error()+"\n\nConnect it on HDR Scan > Mono trichrome, or pick Simulated Hikrobot MV-CS240-90UM.", walk.MsgBoxIconWarning)
+				})
+				return
+			}
+			hikSetup.dev = d
+			u.log("Hikrobot leveling uses a single common exposure (gain 0 dB, Mono12, full frame) from the Exposure field / Mono Trichrome scan settings; ISO and shutter are not used.")
+		}
+		u.log("Camera: %s", cam.Name())
 		res, err := lightlevel.Run(ctx, busyOnceLight{c}, cam, p, restore, func(s string) { u.log("%s", s) })
 		// v0.85: check in the real trichrome TIFF (same converter and
 		// clear-base box as Density_In's auto base), one corrective pass
@@ -1219,15 +1229,10 @@ func (u *LightUI) boxes() (comp walk.Rectangle, th [3]walk.Rectangle) {
 
 func (u *LightUI) paint(c *walk.Canvas, _ walk.Rectangle) error {
 	cb := u.view.ClientBoundsPixels()
-	bg, _ := walk.NewSolidColorBrush(walk.RGB(22, 22, 25))
-	if bg != nil {
-		defer bg.Dispose()
+	if bg := cachedBrush(walk.RGB(22, 22, 25)); bg != nil {
 		c.FillRectanglePixels(bg, cb)
 	}
-	f, _ := walk.NewFont("Segoe UI", 9, 0)
-	if f != nil {
-		defer f.Dispose()
-	}
+	f := cachedFont("Segoe UI", 9, 0)
 	cr, th := u.boxes()
 	area := u.cfg.Area
 	showArea := false
@@ -1236,18 +1241,7 @@ func (u *LightUI) paint(c *walk.Canvas, _ walk.Rectangle) error {
 	} else if box, ok := u.manualBase(); ok {
 		area, showArea = box, true
 	}
-	pen := func(col walk.Color) *walk.GeometricPen {
-		br, _ := walk.NewSolidColorBrush(col)
-		if br == nil {
-			return nil
-		}
-		p, _ := walk.NewGeometricPen(walk.PenSolid, 2, br)
-		return p
-	}
-	orange := pen(walk.RGB(255, 170, 40))
-	if orange != nil {
-		defer orange.Dispose()
-	}
+	orange := cachedPen(walk.RGB(255, 170, 40), 2)
 	drawArea := func(ir walk.Rectangle) {
 		if orange == nil || !showArea || area.Empty() {
 			return
@@ -1274,9 +1268,8 @@ func (u *LightUI) paint(c *walk.Canvas, _ walk.Rectangle) error {
 			ir := lightFit(u.thumbs[k], r)
 			c.DrawImageStretchedPixels(u.thumbs[k], ir)
 			drawArea(ir)
-		} else if p := pen(walk.RGB(60, 60, 66)); p != nil {
+		} else if p := cachedPen(walk.RGB(60, 60, 66), 2); p != nil {
 			c.DrawRectanglePixels(p, r)
-			p.Dispose()
 		}
 		if f != nil {
 			t := u.thumbTxt[k]
@@ -1430,7 +1423,7 @@ func (u *LightUI) Page() TabPage {
 							ComboBox{AssignTo: &u.camSrcCB, Model: camSrcItems, CurrentIndex: clampIdx(u.cfg.CamSrc, len(camSrcItems)),
 								ToolTipText:           "Which camera measures the film base while the RGB Light Air is adjusted.\nExisting camera is the Fujifilm X-T3 on the Camera page.\nHikrobot monochrome uses the MV-CS240-90UM (shared with Mono trichrome).\nThe simulator needs no MVS SDK.",
 								OnCurrentIndexChanged: u.onCamSourceChanged},
-							Label{AssignTo: &u.camNoteLbl, ColumnSpan: 2, Text: camProfileMonoNote},
+							Label{AssignTo: &u.camNoteLbl, ColumnSpan: 2, Text: wrapLines(camProfileBayerShort, 60), ToolTipText: camProfileMonoNote, MinSize: Size{Height: 34}},
 							Label{AssignTo: &u.isoLbl, Text: "ISO", MinSize: Size{Width: 96}},
 							Composite{AssignTo: &u.isoRow, Layout: HBox{MarginsZero: true, Spacing: 4}, Children: []Widget{
 								ComboBox{AssignTo: &u.isoCB, Model: isoItems, CurrentIndex: u.cfg.ISO, MaxSize: Size{Width: 80}, OnCurrentIndexChanged: u.isoChanged,
@@ -1473,7 +1466,7 @@ func (u *LightUI) Page() TabPage {
 							ComboBox{AssignTo: &u.areaCB, Model: []string{"Auto: find the base (rebate, gaps, sprocket area)", "Rectangle drawn on the image"}, CurrentIndex: u.cfg.AreaMode, OnCurrentIndexChanged: u.areaModeChanged,
 								ToolTipText: "Auto detects a base region once from the initial RGB captures, then locks it.\nRectangle: drag a small patch of clear film base on the preview or Camera live view.\nControl and the final TIFF check use the same sampled pixels and median."},
 							Label{Text: "Camera profile", MinSize: Size{Width: 96}},
-							CheckBox{AssignTo: &u.camCB, Text: "Apply camera profile (base after the matrix)", Checked: !u.cfg.NoCam,
+							CheckBox{AssignTo: &u.camCB, Text: "Apply camera profile", Checked: !u.cfg.NoCam,
 								ToolTipText: "v0.85: with a camera profile enabled (Chart calibration), leveling aims at the film base AFTER the CameraCal matrix,\nso the film-base reference can stay at 0.5/0.5/0.5. Measured slopes and an integer neighbour search use that matrix.\nFresh R/G/B captures and a TIFF check must both pass; failed runs never replace the saved base."},
 							Composite{ColumnSpan: 2, Layout: HBox{MarginsZero: true, Spacing: 4}, Children: []Widget{
 								PushButton{AssignTo: &u.startBtn, Text: "Start leveling", Enabled: false, Font: bold, MinSize: Size{Height: 26}, OnClicked: u.startLevel,

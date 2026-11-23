@@ -100,7 +100,7 @@ func (u *HDRUI) calibrateChart() {
 			Composite{Layout: HBox{MarginsZero: true, Spacing: 6}, Children: []Widget{
 				Label{Text: "Active camera profile"},
 				ComboBox{AssignTo: &k.profCB, MinSize: Size{Width: 220}, OnCurrentIndexChanged: k.settingsChanged},
-				CheckBox{AssignTo: &k.enCB, Text: "Enable (apply to trichrome film-base measurement)", OnCheckedChanged: k.settingsChanged},
+				CheckBox{AssignTo: &k.enCB, Text: "Enable", ToolTipText: "Apply the active camera profile to trichrome film-base measurement.", OnCheckedChanged: k.settingsChanged},
 				Label{Text: "Strength"},
 				NumberEdit{AssignTo: &k.strNE, Decimals: 2, MinValue: 0, MaxValue: 1, Increment: 0.05, Value: 1.0, MinSize: Size{Width: 70}, OnValueChanged: k.settingsChanged},
 				PushButton{Text: "Delete profile", OnClicked: k.deleteProfile},

@@ -1,8 +1,18 @@
 # NegativeScan Studio app — Changelog / 扫描软件更新日志
 
-Current local test app: **v1.11**, not published. Latest published app: **v1.08** · [App release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/v1.08) · [OFX plugin changelog](../ofx/CHANGELOG.md) · [Versioning policy](VERSIONING.md)
+Current local test app: **v1.12**, not published. Latest published app: **v1.08** · [App release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/v1.08) · [OFX plugin changelog](../ofx/CHANGELOG.md) · [Versioning policy](VERSIONING.md)
 
 This file tracks the scanning app, not plugin-only releases. / 本文件只记录扫描软件。
+
+## v1.12 local test build
+
+UI responsiveness, preview paint smoothness, and layout/text cleanup. Capture sequence, settling, exposure, HDR merge, CA correction, and image-quality algorithms are unchanged (OFX plugin untouched).
+
+- **Non-blocking camera & light lifecycle.** Added `hikcam.Controller` so Hikrobot enumeration, connect/disconnect, settings apply, capture setup, Light Hikrobot leveling/preview, and Focus Check enter/leave/light-switch run off the UI thread. Tab switches, Connect, Apply, and Stop no longer freeze the UI thread, and preview start/stop is serialized so a new grab never starts before the previous loop exits `StopGrab`.
+- **Smoother preview painting.** Cached GDI brushes, pens, and shared fonts across Mono, Focus Check, Light, and White Light previews (including center/flatness overlay marks), and moved `walk.NewBitmapFromImage` pixel conversion off the UI thread onto background preview goroutines while keeping frame-drop coalescing and `LivePreviewMaxEdge`.
+- **Safe Mono Stop button.** Wired the Mono Trichrome Stop button to cancel cleanly between capture steps (`monocap.Options.Ctx`), restoring the RGB light and camera grab state without changing capture timing or output when Stop is not pressed.
+- **UI text & clipping fixes.** Replaced `setStatusWide` on narrow panels with column-aware wrapping (`setMonoStatus` / `setFocusStatus`) and reserved heights; removed redundant parentheticals from Capture buttons (`Capture mono trichrome HDR` / `Capture mono trichrome`, `Capture trichrome HDR` / `Capture trichrome`, `Capture HDR`) and checkboxes (moved details into tooltips); removed the on-page `presetTip` paragraph on Mono; wrapped `camNoteLbl` on Light; shortened default Output boxes; fixed the Frames-per-exposure tooltip and ready-time wording to clarify that light settling is not included.
+- Local only; no tag/push/release.
 
 ## v1.11 local test build
 

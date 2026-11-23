@@ -1234,7 +1234,7 @@ func (u *DevUI) Page() TabPage {
 					GroupBox{Title: "Node", StretchFactor: 1, Layout: VBox{Spacing: 4, Margins: Margins{Left: 8, Top: 2, Right: 8, Bottom: 6}}, Children: []Widget{
 						Label{AssignTo: &u.nodeTitle, Text: "Node 1", Font: Font{Family: "Segoe UI", PointSize: 10, Bold: true}, TextColor: cAccent},
 						Label{AssignTo: &u.nodeNote, Text: "", TextColor: grey, MinSize: Size{Height: 44}, MaxSize: Size{Width: 380}},
-						CheckBox{AssignTo: &u.enableChk, Text: "Node enabled (off = bypass)", Checked: true, OnCheckedChanged: func() {
+						CheckBox{AssignTo: &u.enableChk, Text: "Node enabled", ToolTipText: "When unchecked, this node is bypassed.", Checked: true, OnCheckedChanged: func() {
 							if u.syncing {
 								return
 							}
@@ -1263,9 +1263,9 @@ func (u *DevUI) Page() TabPage {
 								u.changed()
 							}},
 						}},
-						CheckBox{AssignTo: &u.autoBaseChk, Text: "Film base from the film base DB when a roll has no preset", Checked: true},
+						CheckBox{AssignTo: &u.autoBaseChk, Text: "Auto film base from DB", ToolTipText: "Use film base from the film base DB when a roll has no preset.", Checked: true},
 					}},
-					GroupBox{Title: "Export (16-bit TIFF, new _POS file next to the source)", Layout: Grid{Columns: 2, Spacing: 4, Margins: Margins{Left: 8, Top: 2, Right: 8, Bottom: 6}}, Children: []Widget{
+					GroupBox{Title: "Export", Layout: Grid{Columns: 2, Spacing: 4, Margins: Margins{Left: 8, Top: 2, Right: 8, Bottom: 6}}, Children: []Widget{
 						Label{Text: "Folder files"},
 						ComboBox{AssignTo: &u.filterCB, Model: []string{"HDR TIFFs only (*_HDR.tiff)", "All TIFFs"}, CurrentIndex: 0},
 						Label{Text: "Compression"},

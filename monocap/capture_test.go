@@ -1,7 +1,10 @@
 package monocap
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"math"
 	"os"
 	"os/exec"
@@ -173,5 +176,78 @@ func TestEstimateCapture(t *testing.T) {
 	}
 	if got := EstimateCapture(400000, DefaultEVs, 1).Seconds(); got > 3*(0.4*(1+4+8)+10+4*0.135)+0.01 {
 		t.Errorf("+5 EV not capped at 10 s: %.1f", got)
+	}
+}
+
+func TestCaptureCancelBetweenSteps(t *testing.T) {
+	sim := openSim(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	light := SimLight{S: sim}
+	steps := 0
+	res, err := Capture(Options{
+		Cam:     sim,
+		Light:   light,
+		Settle:  time.Millisecond,
+		BaseUS:  4000,
+		EVs:     DefaultEVs,
+		Ctx:     ctx,
+		Status:  func(string) { steps++; if steps == 2 { cancel() } },
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got res=%v err=%v", res != nil, err)
+	}
+	if res != nil {
+		t.Fatalf("expected nil result on cancellation")
+	}
+}
+
+func TestCaptureOutputByteIdenticalWithContext(t *testing.T) {
+	runOne := func(ctx context.Context, name string) ([3]hdrscan.MonoPlane, []byte) {
+		sim := openSim(t)
+		res, err := Capture(Options{
+			Cam:    sim,
+			Light:  SimLight{S: sim},
+			Settle: time.Millisecond,
+			BaseUS: 4000,
+			EVs:    DefaultEVs,
+			Ctx:    ctx,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		outPath := filepath.Join(t.TempDir(), name)
+		tr, err := hdrscan.ProcessMonoTrichrome(res.Planes[0], res.Planes[1], res.Planes[2], hdrscan.MonoTriOptions{
+			OutPath:       outPath,
+			LZW:           true,
+			CorrectCA:     true,
+			CheckMovement: true,
+			Software:      "test",
+			Metadata:      scanmeta.Metadata{Created: "2026-11-23T12:00:00+08:00", Encoding: "linear"},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, err := os.ReadFile(tr.Out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res.Planes, b
+	}
+
+	pNil, tiffNil := runOne(nil, "nil.tiff")
+	pCtx, tiffCtx := runOne(context.Background(), "ctx.tiff")
+	for ch := 0; ch < 3; ch++ {
+		if len(pNil[ch].Pix) != len(pCtx[ch].Pix) {
+			t.Fatalf("ch %d plane len mismatch", ch)
+		}
+		for i := range pNil[ch].Pix {
+			if pNil[ch].Pix[i] != pCtx[ch].Pix[i] {
+				t.Fatalf("ch %d plane pixel %d differs: %v vs %v", ch, i, pNil[ch].Pix[i], pCtx[ch].Pix[i])
+			}
+		}
+	}
+	if !bytes.Equal(tiffNil, tiffCtx) {
+		t.Fatalf("TIFF outputs differ (%d vs %d bytes)", len(tiffNil), len(tiffCtx))
 	}
 }

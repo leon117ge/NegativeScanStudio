@@ -32,7 +32,7 @@ type FocusUI struct {
 	light *LightUI
 	mono  *MonoUI
 
-	active bool
+	active atomic.Bool
 
 	view                                        *walk.CustomWidget
 	bmp                                         *walk.Bitmap
@@ -40,6 +40,7 @@ type FocusUI struct {
 	bmpX, bmpY                                  int  // origin of bmp in source pixels when it is a 1:1 crop
 	bmpFit                                      bool // bmp is a downsampled full frame
 	dispUI                                      atomic.Bool
+	labelsUI                                    atomic.Bool
 	zoomCB                                      *walk.ComboBox
 	markCB                                      *walk.CheckBox
 	greenBtn, whiteBtn, liveBtn, resetPeakBtn   *walk.PushButton
@@ -47,15 +48,19 @@ type FocusUI struct {
 	logTE                                       *walk.TextEdit
 	meter                                       *walk.ProgressBar
 
-	zoom         int     // 0 = fit, else 1/2/4
-	cx, cy       float64 // pan centre, 0..1
+	zoomIdx      atomic.Int32 // 0 = fit, else index into zoomVals
+	viewW, viewH atomic.Int32
 	drag         bool
 	dragX, dragY int
 
 	loopOn  atomic.Bool
-	loopRun atomic.Bool
+	loopGen atomic.Int64
+
+	fujiMu   sync.Mutex
+	fujiDone chan struct{}
 
 	mu           sync.Mutex
+	cx, cy       float64 // pan centre, 0..1
 	samples      []float64
 	visW, visH   int
 	score        hdrscan.FocusScore
@@ -77,6 +82,10 @@ type FocusUI struct {
 var zoomItems = []string{"Fit", "100 %", "200 %", "400 %"}
 var zoomVals = []int{0, 1, 2, 4}
 
+func (u *FocusUI) isActive() bool {
+	return u.active.Load()
+}
+
 func (u *FocusUI) say(s string) {
 	if u.hdr != nil && u.hdr.log != nil {
 		u.hdr.log.Printf("Focus check: %s", s)
@@ -91,9 +100,16 @@ func (u *FocusUI) say(s string) {
 	}
 }
 
+func (u *FocusUI) hikCam() hikcam.Device {
+	if u.mono == nil {
+		return nil
+	}
+	return u.mono.getCam()
+}
+
 func (u *FocusUI) sourceName() string {
-	if u.mono != nil && u.mono.cam != nil {
-		return u.mono.cam.Info().Label()
+	if cam := u.hikCam(); cam != nil {
+		return cam.Info().Label()
 	}
 	if u.hdr != nil && u.hdr.dev != nil {
 		inf := u.hdr.dev.Info()
@@ -102,102 +118,239 @@ func (u *FocusUI) sourceName() string {
 	return ""
 }
 
+func (u *FocusUI) waitFujiLoopSync() {
+	u.fujiMu.Lock()
+	ch := u.fujiDone
+	u.fujiDone = nil
+	u.fujiMu.Unlock()
+	if ch != nil {
+		<-ch
+	}
+}
+
 func (u *FocusUI) enter() {
-	if u.active {
+	if !u.active.CompareAndSwap(false, true) {
 		return
 	}
-	u.active = true
+	u.mu.Lock()
 	u.cx, u.cy = 0.5, 0.5
 	u.peak.Reset()
-	// Snapshot exposures we may overwrite, then drive the light to green.
-	if u.mono != nil && u.mono.cam != nil {
-		// Snapshot the scan (UI) settings, not whatever live-view mode
-		// the Mono page last applied, so leaving this page restores
-		// Mono12 / software trigger for capture.
-		u.savedHik = u.mono.readSettings()
-		u.haveSavedHik = true
-		u.aeState = hdrscan.ExposureState{ExposureUS: u.savedHik.ExposureUS, GainDB: u.savedHik.GainDB}
-		// Clamp to the live shutter/gain cap so a leftover multi-second
-		// still exposure cannot be applied to the stream.
-		u.aeState, _ = hdrscan.AdjustExposure(nil, u.aeState, hdrscan.LiveAutoExp())
-		u.aeWhy = ""
-		u.mono.stopPreview()
-		if err := u.mono.applyLive(true); err != nil {
-			u.say("Live settings: " + err.Error())
-		} else if u.mono.cam != nil {
-			_ = u.mono.cam.SetExposureGain(u.aeState.ExposureUS, u.aeState.GainDB)
-			u.say("Live view: " + u.mono.cam.Settings().LiveSummary())
-		}
-	} else {
-		u.haveSavedHik = false
+	u.aeWhy = ""
+	u.mu.Unlock()
+	if u.zoomCB != nil {
+		u.zoomIdx.Store(int32(max(0, u.zoomCB.CurrentIndex())))
 	}
-	if u.hdr != nil && u.hdr.dev != nil {
-		if e, err := u.hdr.dev.Exposure(); err == nil {
-			u.savedFuji = e
-			u.haveSavedFuji = true
-			u.aeState = hdrscan.ExposureState{ExposureUS: float64(e.Shutter), GainDB: 0}
+	if u.view != nil {
+		cb := u.view.ClientBoundsPixels()
+		if cb.Width > 8 && cb.Height > 8 {
+			u.viewW.Store(int32(cb.Width))
+			u.viewH.Store(int32(cb.Height))
 		}
-	} else {
-		u.haveSavedFuji = false
 	}
-	if u.light != nil && u.light.connected() {
-		if st, err := u.light.cl.ReadState(); err == nil {
-			u.savedLight = st
-			u.haveSavedLight = true
-		}
-		u.setLight(0)
-	} else {
-		u.haveSavedLight = false
+
+	var savedHik hikcam.Settings
+	var haveHik bool
+	if cam := u.hikCam(); cam != nil && u.mono != nil && !u.mono.running.Load() {
+		savedHik = u.mono.readSettings()
+		haveHik = true
 	}
-	u.say("Entered Focus check: exposure will be adjusted temporarily so the visible region (including a zoomed crop) is readable. The previous capture exposure is restored when you leave this page.")
+
+	gen := u.loopGen.Add(1)
+	var hikGen int64
+	if u.mono != nil {
+		hikGen = u.mono.worker().Bump()
+	}
+	u.loopOn.Store(true)
 	u.updateLabels()
-	u.startLoop()
+
+	runSetup := func() {
+		if u.mono != nil {
+			u.mono.worker().StopSyncIfNeeded()
+		}
+		u.waitFujiLoopSync()
+		if !u.active.Load() || u.loopGen.Load() != gen {
+			return
+		}
+		if u.mono != nil && u.mono.worker().Gen() != hikGen {
+			return
+		}
+
+		if haveHik && u.mono != nil && !u.mono.running.Load() {
+			if cam := u.hikCam(); cam != nil {
+				ae := hdrscan.ExposureState{ExposureUS: savedHik.ExposureUS, GainDB: savedHik.GainDB}
+				ae, _ = hdrscan.AdjustExposure(nil, ae, hdrscan.LiveAutoExp())
+				u.mu.Lock()
+				u.savedHik = savedHik
+				u.haveSavedHik = true
+				u.aeState = ae
+				u.aeWhy = ""
+				u.mu.Unlock()
+				summary, err := applyLiveSettings(cam, savedHik, true)
+				if err != nil {
+					msg := "Live settings: " + err.Error()
+					u.ui(func() { u.say(msg) })
+				} else {
+					_ = cam.SetExposureGain(ae.ExposureUS, ae.GainDB)
+					s := "Live view: " + cam.Settings().LiveSummary()
+					if summary != "" {
+						s = summary
+					}
+					u.ui(func() { u.say(s) })
+				}
+			}
+		} else {
+			u.mu.Lock()
+			u.haveSavedHik = false
+			u.mu.Unlock()
+		}
+
+		if !haveHik && u.hdr != nil && u.hdr.dev != nil && u.hdr.worker != nil {
+			done := make(chan struct{})
+			u.hdr.worker.do(func() {
+				defer close(done)
+				if e, err := u.hdr.dev.Exposure(); err == nil {
+					u.mu.Lock()
+					u.savedFuji = e
+					u.haveSavedFuji = true
+					u.aeState = hdrscan.ExposureState{ExposureUS: float64(e.Shutter), GainDB: 0}
+					u.mu.Unlock()
+				} else {
+					u.mu.Lock()
+					u.haveSavedFuji = false
+					u.mu.Unlock()
+				}
+			})
+			<-done
+		} else {
+			u.mu.Lock()
+			u.haveSavedFuji = false
+			u.mu.Unlock()
+		}
+
+		if u.light != nil && u.light.connected() {
+			if st, err := u.light.cl.ReadState(); err == nil {
+				u.mu.Lock()
+				u.savedLight = st
+				u.haveSavedLight = true
+				u.mu.Unlock()
+			} else {
+				u.mu.Lock()
+				u.haveSavedLight = false
+				u.mu.Unlock()
+			}
+			u.applyLightMode(0)
+		} else {
+			u.mu.Lock()
+			u.haveSavedLight = false
+			u.mu.Unlock()
+		}
+
+		if !u.active.Load() || u.loopGen.Load() != gen {
+			return
+		}
+		u.ui(func() {
+			u.say("Entered Focus check: exposure adjusts automatically for the visible region; capture exposure is restored when you leave.")
+			u.updateLabels()
+		})
+		u.startLoop(gen, hikGen)
+	}
+
+	if u.mono != nil {
+		u.mono.worker().Do(runSetup)
+	} else {
+		go runSetup()
+	}
 }
 
 func (u *FocusUI) leave() {
-	if !u.active {
+	if !u.active.Swap(false) {
 		return
 	}
-	u.active = false
-	u.stopLoop()
-	u.restoreExposure()
-	u.restoreLight()
-	u.say("Left Focus check: previous capture exposure restored.")
+	u.loopOn.Store(false)
+	u.loopGen.Add(1)
+	if u.mono != nil {
+		u.mono.stopPreviewAsync()
+	}
+
+	runRestore := func() {
+		if u.mono != nil {
+			u.mono.worker().StopSync()
+		}
+		u.waitFujiLoopSync()
+		u.restoreExposure()
+		u.restoreLight()
+		u.ui(func() {
+			u.say("Left Focus check: previous capture exposure restored.")
+		})
+	}
+
+	if u.mono != nil {
+		u.mono.worker().Do(runRestore)
+	} else {
+		go runRestore()
+	}
 }
 
 func (u *FocusUI) restoreExposure() {
-	if u.haveSavedHik && u.mono != nil && u.mono.cam != nil {
-		if err := u.mono.cam.Apply(u.savedHik); err != nil {
-			u.say("Could not restore Hikrobot exposure: " + err.Error())
-		} else {
-			u.say(fmt.Sprintf("Restored Hikrobot exposure: %.0f us, %.2f dB", u.savedHik.ExposureUS, u.savedHik.GainDB))
+	u.mu.Lock()
+	haveHik, savedHik := u.haveSavedHik, u.savedHik
+	haveFuji, savedFuji := u.haveSavedFuji, u.savedFuji
+	u.haveSavedHik = false
+	u.haveSavedFuji = false
+	u.mu.Unlock()
+
+	if haveHik {
+		if cam := u.hikCam(); cam != nil && (u.mono == nil || !u.mono.running.Load()) {
+			if err := cam.Apply(savedHik); err != nil {
+				msg := "Could not restore Hikrobot exposure: " + err.Error()
+				u.ui(func() { u.say(msg) })
+			} else {
+				msg := fmt.Sprintf("Restored Hikrobot exposure: %.0f us, %.2f dB", savedHik.ExposureUS, savedHik.GainDB)
+				u.ui(func() { u.say(msg) })
+			}
 		}
 	}
-	if u.haveSavedFuji && u.hdr != nil && u.hdr.dev != nil {
-		if _, err := u.hdr.dev.SetExposure(u.savedFuji); err != nil {
-			u.say("Could not restore camera exposure: " + err.Error())
-		} else {
-			u.say("Restored camera exposure: " + u.savedFuji.String())
-		}
+	if haveFuji && u.hdr != nil && u.hdr.dev != nil && u.hdr.worker != nil {
+		done := make(chan struct{})
+		u.hdr.worker.do(func() {
+			defer close(done)
+			if _, err := u.hdr.dev.SetExposure(savedFuji); err != nil {
+				msg := "Could not restore camera exposure: " + err.Error()
+				u.ui(func() { u.say(msg) })
+			} else {
+				msg := "Restored camera exposure: " + savedFuji.String()
+				u.ui(func() { u.say(msg) })
+			}
+		})
+		<-done
 	}
 }
 
 func (u *FocusUI) restoreLight() {
-	if !u.haveSavedLight || u.light == nil || !u.light.connected() {
+	u.mu.Lock()
+	haveLight, saved := u.haveSavedLight, u.savedLight
+	u.haveSavedLight = false
+	u.mu.Unlock()
+	if !haveLight || u.light == nil || !u.light.connected() {
 		return
 	}
-	if _, err := u.light.cl.SetAllConfirmed(u.savedLight.On, u.savedLight.Value); err != nil {
-		u.say("Could not restore the light: " + err.Error())
+	if _, err := u.light.cl.SetAllConfirmed(saved.On, saved.Value); err != nil {
+		msg := "Could not restore the light: " + err.Error()
+		u.ui(func() { u.say(msg) })
 		return
 	}
-	u.light.showState(u.savedLight, false)
+	u.ui(func() { u.light.showState(saved, false) })
 }
 
-func (u *FocusUI) setLight(mode int) {
+func (u *FocusUI) applyLightMode(mode int) {
+	u.mu.Lock()
 	u.lightMode = mode
+	u.mu.Unlock()
 	if u.light == nil || !u.light.connected() {
-		u.say("RGB light not connected - cannot switch green/white.")
-		u.updateLabels()
+		u.ui(func() {
+			u.say("RGB light not connected - cannot switch green/white.")
+			u.updateLabels()
+		})
 		return
 	}
 	vals, _, ok := scanLightValues(u.hdr, u.light)
@@ -210,58 +363,89 @@ func (u *FocusUI) setLight(mode int) {
 	}
 	sw := &rgblight.ChannelSwitch{C: u.light.cl, Values: vals}
 	var err error
+	var okMsg string
 	if mode == 0 {
 		err = sw.Green()
-		u.say("Light: green only (trichrome focus baseline).")
+		okMsg = "Light: green only (trichrome focus baseline)."
 	} else {
 		err = sw.White()
-		u.say("Light: white (all channels) for white-light scanning.")
+		okMsg = "Light: white (all channels) for white-light scanning."
 	}
-	if err != nil {
-		u.say("Light switch failed: " + err.Error())
-	} else if cs := u.light.cl.CachedState(); cs != nil {
-		u.light.showState(*cs, false)
-	}
+	cs := u.light.cl.CachedState()
+	u.ui(func() {
+		if err != nil {
+			u.say("Light switch failed: " + err.Error())
+		} else {
+			u.say(okMsg)
+			if cs != nil {
+				u.light.showState(*cs, false)
+			}
+		}
+		u.updateLabels()
+	})
+}
+
+func (u *FocusUI) setLight(mode int) {
+	u.mu.Lock()
+	u.lightMode = mode
+	u.mu.Unlock()
 	u.updateLabels()
+	if u.light != nil && u.light.lw != nil {
+		u.light.lw.do(func() { u.applyLightMode(mode) })
+		return
+	}
+	go u.applyLightMode(mode)
 }
 
 func (u *FocusUI) updateLabels() {
+	u.mu.Lock()
+	lightMode := u.lightMode
+	aeState := u.aeState
+	aeWhy := u.aeWhy
+	score := u.score
+	peak := u.peak
+	u.mu.Unlock()
+
 	if u.srcLbl != nil {
 		n := u.sourceName()
 		if n == "" {
-			setStatusWide(u.srcLbl, "Camera: none connected (open the Hikrobot camera on Mono trichrome, or the Fuji body on Camera)")
+			setFocusStatusTip(u.srcLbl, "Camera: none connected",
+				"Open the Hikrobot camera on Mono trichrome, or the Fuji body on Camera.")
 		} else {
-			setStatusWide(u.srcLbl, "Camera: "+n)
+			setFocusStatus(u.srcLbl, "Camera: "+n)
 		}
 	}
 	if u.lightLbl != nil {
 		mode := "green only"
-		if u.lightMode != 0 {
+		if lightMode != 0 {
 			mode = "white"
 		}
 		if u.light == nil || !u.light.connected() {
-			setStatusWide(u.lightLbl, "Light: not connected  (wanted: "+mode+")")
+			setFocusStatus(u.lightLbl, "Light: not connected (wanted: "+mode+")")
 		} else {
-			setStatusWide(u.lightLbl, "Light: "+mode)
+			setFocusStatus(u.lightLbl, "Light: "+mode)
 		}
 	}
 	if u.expLbl != nil {
-		setStatusWide(u.expLbl, fmt.Sprintf("Auto exposure: %.0f us, %.2f dB  (%s)", u.aeState.ExposureUS, u.aeState.GainDB, u.aeWhy))
+		if aeWhy == "" {
+			setFocusStatus(u.expLbl, fmt.Sprintf("Auto exposure: %.0f us, %.2f dB", aeState.ExposureUS, aeState.GainDB))
+		} else {
+			setFocusStatusTip(u.expLbl, fmt.Sprintf("Auto exposure: %.0f us, %.2f dB (%s)", aeState.ExposureUS, aeState.GainDB, aeWhy),
+				fmt.Sprintf("Auto exposure: %.0f us, %.2f dB (%s)", aeState.ExposureUS, aeState.GainDB, aeWhy))
+		}
 	}
 	if u.sharpLbl != nil {
-		setStatusWide(u.sharpLbl, fmt.Sprintf("Sharpness: %.4f   Laplacian %.4f   grain %.4f", u.score.Combined, u.score.Laplacian, u.score.Grain))
+		setFocusStatus(u.sharpLbl, fmt.Sprintf("Sharpness: %.4f  (Lap %.4f, grain %.4f)", score.Combined, score.Laplacian, score.Grain))
 	}
 	if u.peakLbl != nil {
-		if u.peak.Have {
-			setStatusWide(u.peakLbl, fmt.Sprintf("Peak hold: %.4f", u.peak.Peak))
+		if peak.Have {
+			setFocusStatus(u.peakLbl, fmt.Sprintf("Peak hold: %.4f", peak.Peak))
 		} else {
-			setStatusWide(u.peakLbl, "Peak hold: -")
+			setFocusStatus(u.peakLbl, "Peak hold: -")
 		}
 	}
 	if u.meter != nil {
-		// Map a typical score range onto 0..1000. The absolute scale is
-		// arbitrary; the peak line is what the user watches while focusing.
-		v := int(u.score.Combined * 20000)
+		v := int(score.Combined * 20000)
 		if v < 0 {
 			v = 0
 		}
@@ -277,34 +461,60 @@ func (u *FocusUI) updateLabels() {
 	}
 }
 
-func (u *FocusUI) startLoop() {
-	if u.loopRun.Load() {
-		u.loopOn.Store(true)
+func (u *FocusUI) startLoop(gen, hikGen int64) {
+	if !u.active.Load() || u.loopGen.Load() != gen {
 		return
 	}
-	if u.sourceName() == "" {
+	if cam := u.hikCam(); cam != nil && u.mono != nil {
+		if u.mono.running.Load() {
+			return
+		}
+		if err := cam.StartGrab(); err != nil {
+			msg := "Focus grab: " + err.Error()
+			u.ui(func() { u.say(msg) })
+			return
+		}
+		if !u.mono.worker().StartLoop(hikGen, func(valid func() bool) {
+			defer func() { _ = cam.StopGrab() }()
+			u.loopBody(func() bool {
+				return valid() && u.loopOn.Load() && u.active.Load() && u.loopGen.Load() == gen
+			})
+		}) {
+			_ = cam.StopGrab()
+		}
+		return
+	}
+	if u.hdr != nil && u.hdr.dev != nil {
+		u.fujiMu.Lock()
+		if u.fujiDone != nil || u.loopGen.Load() != gen {
+			u.fujiMu.Unlock()
+			return
+		}
+		done := make(chan struct{})
+		u.fujiDone = done
+		u.fujiMu.Unlock()
+		go func() {
+			defer close(done)
+			u.loopBody(func() bool {
+				return u.loopOn.Load() && u.active.Load() && u.loopGen.Load() == gen
+			})
+		}()
+		return
+	}
+	u.ui(func() {
 		u.say("No camera to preview.")
 		u.updateLabels()
-		return
-	}
-	u.loopOn.Store(true)
-	u.loopRun.Store(true)
-	go u.loop()
+	})
 }
 
-func (u *FocusUI) stopLoop() {
-	u.loopOn.Store(false)
-	for i := 0; i < 80 && u.loopRun.Load(); i++ {
-		time.Sleep(50 * time.Millisecond)
-	}
-}
-
-func (u *FocusUI) loop() {
-	defer u.loopRun.Store(false)
+func (u *FocusUI) loopBody(stillValid func() bool) {
 	cfg := hdrscan.LiveAutoExp()
 	misses := 0
-	for u.loopOn.Load() && u.active {
+	for stillValid() {
 		pix, w, h, err := u.grabFrame()
+		if !stillValid() {
+			return
+		}
 		if err != nil || pix == nil || w <= 0 || h <= 0 || len(pix) < w*h {
 			if err == nil {
 				err = fmt.Errorf("empty frame")
@@ -320,8 +530,11 @@ func (u *FocusUI) loop() {
 					u.say(m)
 					u.updateLabels()
 				})
-			} else {
-				u.ui(func() { u.updateLabels() })
+			} else if u.labelsUI.CompareAndSwap(false, true) {
+				u.ui(func() {
+					defer u.labelsUI.Store(false)
+					u.updateLabels()
+				})
 			}
 			time.Sleep(50 * time.Millisecond)
 			continue
@@ -330,20 +543,33 @@ func (u *FocusUI) loop() {
 		u.mu.Lock()
 		u.lastPix, u.lastW, u.lastH = pix, w, h
 		u.mu.Unlock()
-		img, ox, oy, fit := u.makeDisplay(pix, w, h)
 		if u.dispUI.CompareAndSwap(false, true) {
-			u.ui(func() {
-				defer u.dispUI.Store(false)
-				u.showDisplay(img, w, h, ox, oy, fit)
-			})
+			img, ox, oy, fit := u.makeDisplay(pix, w, h)
+			bmp, be := walk.NewBitmapFromImage(img)
+			if be != nil {
+				u.dispUI.Store(false)
+			} else {
+				u.ui(func() {
+					defer u.dispUI.Store(false)
+					if !stillValid() {
+						bmp.Dispose()
+						return
+					}
+					u.showBitmap(bmp, w, h, ox, oy, fit)
+				})
+			}
 		}
 		x0, y0, x1, y1 := u.meterRect(w, h)
 		samples := hdrscan.RegionSamples(pix, w, h, x0, y0, x1, y1, 2)
 		crop, cw, ch := hdrscan.CropGray16ToFloat64(pix, w, h, x0, y0, x1, y1)
 		score := hdrscan.MeasureFocus(crop, cw, ch)
-		state, why := hdrscan.AdjustExposure(samples, u.aeState, cfg)
+		u.mu.Lock()
+		prevAE := u.aeState
+		u.mu.Unlock()
+		state, why := hdrscan.AdjustExposure(samples, prevAE, cfg)
 		if err := u.applyAE(state); err != nil {
-			u.ui(func() { u.say("Live exposure: " + err.Error()) })
+			msg := "Live exposure: " + err.Error()
+			u.ui(func() { u.say(msg) })
 		} else {
 			u.mu.Lock()
 			u.aeWhy = why
@@ -356,10 +582,14 @@ func (u *FocusUI) loop() {
 		u.score = score
 		u.peak.Update(score.Combined)
 		u.mu.Unlock()
-		u.ui(func() { u.updateLabels() })
-		if u.mono != nil && u.mono.cam != nil && u.mono.cam.Info().Simulated {
-			time.Sleep(40 * time.Millisecond)
-		} else if u.mono == nil || u.mono.cam == nil {
+		if u.labelsUI.CompareAndSwap(false, true) {
+			u.ui(func() {
+				defer u.labelsUI.Store(false)
+				u.updateLabels()
+			})
+		}
+		cam := u.hikCam()
+		if cam == nil || cam.Info().Simulated {
 			time.Sleep(40 * time.Millisecond)
 		}
 	}
@@ -379,19 +609,22 @@ func liveGrabMessage(err error, misses int) (string, bool) {
 }
 
 func (u *FocusUI) grabFrame() ([]uint16, int, int, error) {
-	if u.mono != nil && u.mono.cam != nil {
-		cam := u.mono.cam
-		if err := cam.StartGrab(); err != nil {
-			return nil, 0, 0, err
-		}
+	if cam := u.hikCam(); cam != nil {
 		fr, err := cam.Grab(hikcam.GrabTimeout(cam.Settings().ExposureUS))
 		if err != nil {
 			return nil, 0, 0, err
 		}
 		return fr.Pix, fr.W, fr.H, nil
 	}
-	if u.hdr != nil && u.hdr.dev != nil {
-		jpg, err := u.hdr.dev.LiveView()
+	if u.hdr != nil && u.hdr.dev != nil && u.hdr.worker != nil {
+		done := make(chan struct{})
+		var jpg []byte
+		var err error
+		u.hdr.worker.do(func() {
+			defer close(done)
+			jpg, err = u.hdr.dev.LiveView()
+		})
+		<-done
 		if err != nil {
 			return nil, 0, 0, err
 		}
@@ -430,8 +663,6 @@ func (u *FocusUI) refreshDisplay() {
 }
 
 func (u *FocusUI) meterRect(w, h int) (x0, y0, x1, y1 int) {
-	// Even in Fit view, score the centre (pan) region at 100 % so the
-	// Laplacian stays on full-res data and does not scan all 24 MP.
 	z := u.zoomFactor()
 	if z < 1 {
 		z = 1
@@ -440,28 +671,35 @@ func (u *FocusUI) meterRect(w, h int) (x0, y0, x1, y1 int) {
 }
 
 func (u *FocusUI) applyAE(st hdrscan.ExposureState) error {
-	if u.mono != nil && u.mono.cam != nil {
-		cur := u.mono.cam.Settings()
+	if cam := u.hikCam(); cam != nil {
+		cur := cam.Settings()
 		if math.Abs(cur.ExposureUS-st.ExposureUS)/math.Max(cur.ExposureUS, 1) < 0.04 && math.Abs(cur.GainDB-st.GainDB) < 0.15 {
 			return nil
 		}
-		return u.mono.cam.SetExposureGain(st.ExposureUS, st.GainDB)
+		return cam.SetExposureGain(st.ExposureUS, st.GainDB)
 	}
-	if u.hdr == nil || u.hdr.dev == nil {
+	if u.hdr == nil || u.hdr.dev == nil || u.hdr.worker == nil {
 		return nil
 	}
-	// Map the suggested microseconds onto the nearest Fujifilm shutter step.
 	us := uint32(math.Max(1, st.ExposureUS))
 	i := camera.ShutterIndex(us)
 	next := camera.Exposure{ISO: 160, Shutter: camera.Shutters[i].Value}
+	u.mu.Lock()
 	if u.haveSavedFuji {
 		next.ISO = u.savedFuji.ISO
 	}
-	cur, err := u.hdr.dev.Exposure()
-	if err == nil && cur.Shutter == next.Shutter && cur.ISO == next.ISO {
-		return nil
-	}
-	_, err = u.hdr.dev.SetExposure(next)
+	u.mu.Unlock()
+	done := make(chan struct{})
+	var err error
+	u.hdr.worker.do(func() {
+		defer close(done)
+		cur, e := u.hdr.dev.Exposure()
+		if e == nil && cur.Shutter == next.Shutter && cur.ISO == next.ISO {
+			return
+		}
+		_, err = u.hdr.dev.SetExposure(next)
+	})
+	<-done
 	return err
 }
 
@@ -475,13 +713,23 @@ func (u *FocusUI) showDisplay(img image.Image, fullW, fullH, ox, oy int, fit boo
 	if img == nil || u.view == nil {
 		return
 	}
-	u.srcW, u.srcH = fullW, fullH
-	u.bmpX, u.bmpY = ox, oy
-	u.bmpFit = fit
 	bmp, err := walk.NewBitmapFromImage(img)
 	if err != nil {
 		return
 	}
+	u.showBitmap(bmp, fullW, fullH, ox, oy, fit)
+}
+
+func (u *FocusUI) showBitmap(bmp *walk.Bitmap, fullW, fullH, ox, oy int, fit bool) {
+	if bmp == nil || u.view == nil {
+		if bmp != nil {
+			bmp.Dispose()
+		}
+		return
+	}
+	u.srcW, u.srcH = fullW, fullH
+	u.bmpX, u.bmpY = ox, oy
+	u.bmpFit = fit
 	if u.bmp != nil {
 		u.bmp.Dispose()
 	}
@@ -490,10 +738,7 @@ func (u *FocusUI) showDisplay(img image.Image, fullW, fullH, ox, oy int, fit boo
 }
 
 func (u *FocusUI) zoomFactor() int {
-	i := 0
-	if u.zoomCB != nil {
-		i = u.zoomCB.CurrentIndex()
-	}
+	i := int(u.zoomIdx.Load())
 	if i < 0 || i >= len(zoomVals) {
 		return 0
 	}
@@ -511,13 +756,9 @@ func (u *FocusUI) visibleRectAt(imgW, imgH, widgetW, widgetH, z int) (x0, y0, x1
 	if z == 0 {
 		return 0, 0, imgW, imgH
 	}
-	// At N00 %, N image pixels cover one widget pixel, so the visible
-	// source size is widget/N. We use a stand-in widget size when called
-	// from the grab loop (the real widget size is used when painting).
-	if u.view != nil {
-		cb := u.view.ClientBoundsPixels()
-		if cb.Width > 8 && cb.Height > 8 {
-			widgetW, widgetH = cb.Width, cb.Height
+	if vwStored := int(u.viewW.Load()); vwStored > 8 {
+		if vhStored := int(u.viewH.Load()); vhStored > 8 {
+			widgetW, widgetH = vwStored, vhStored
 		}
 	}
 	vw := widgetW / z
@@ -534,8 +775,11 @@ func (u *FocusUI) visibleRectAt(imgW, imgH, widgetW, widgetH, z int) (x0, y0, x1
 	if vh > imgH {
 		vh = imgH
 	}
-	cx := int(u.cx * float64(imgW))
-	cy := int(u.cy * float64(imgH))
+	u.mu.Lock()
+	fcx, fcy := u.cx, u.cy
+	u.mu.Unlock()
+	cx := int(fcx * float64(imgW))
+	cy := int(fcy * float64(imgH))
 	x0 = cx - vw/2
 	y0 = cy - vh/2
 	if x0 < 0 {
@@ -558,15 +802,15 @@ func (u *FocusUI) paint(c *walk.Canvas, _ walk.Rectangle) error {
 		return nil
 	}
 	cb := u.view.ClientBoundsPixels()
-	bg, _ := walk.NewSolidColorBrush(walk.RGB(16, 16, 18))
-	if bg != nil {
-		defer bg.Dispose()
+	if cb.Width > 8 && cb.Height > 8 {
+		u.viewW.Store(int32(cb.Width))
+		u.viewH.Store(int32(cb.Height))
+	}
+	if bg := cachedBrush(walk.RGB(16, 16, 18)); bg != nil {
 		c.FillRectanglePixels(bg, cb)
 	}
 	if u.bmp == nil {
-		f, _ := walk.NewFont("Segoe UI", 10, 0)
-		if f != nil {
-			defer f.Dispose()
+		if f := cachedFont("Segoe UI", 10, 0); f != nil {
 			c.DrawTextPixels("No live image.\r\nConnect the Hikrobot camera on Mono trichrome, or the scan camera on Camera, then open this page.",
 				f, walk.RGB(128, 128, 136), cb, walk.TextCenter|walk.TextWordbreak)
 		}
@@ -593,24 +837,14 @@ func (u *FocusUI) paint(c *walk.Canvas, _ walk.Rectangle) error {
 		dst = walk.Rectangle{X: cb.X + (cb.Width-dw)/2, Y: cb.Y + (cb.Height-dh)/2, Width: dw, Height: dh}
 		c.DrawImageStretchedPixels(u.bmp, dst)
 	}
-	// Optical-centre / flatness overlay, mapped through zoom and pan.
-	// Drawn before the green meter mark so the short solid plus stays
-	// visible when the two coincide (fit, pan at the sensor centre).
 	if centerMarkOn(u.hdr) {
 		paintCenterMarks(c, src, dst, markW, markH)
 	}
-	// Crosshair at the centre to mark the focus sample.
-	penB, _ := walk.NewSolidColorBrush(walk.RGB(80, 220, 120))
-	if penB != nil {
-		defer penB.Dispose()
-		pen, _ := walk.NewGeometricPen(walk.PenSolid, 1, penB)
-		if pen != nil {
-			defer pen.Dispose()
-			cx := cb.X + cb.Width/2
-			cy := cb.Y + cb.Height/2
-			c.DrawLinePixels(pen, walk.Point{X: cx - 18, Y: cy}, walk.Point{X: cx + 18, Y: cy})
-			c.DrawLinePixels(pen, walk.Point{X: cx, Y: cy - 18}, walk.Point{X: cx, Y: cy + 18})
-		}
+	if pen := cachedPen(walk.RGB(80, 220, 120), 1); pen != nil {
+		cx := cb.X + cb.Width/2
+		cy := cb.Y + cb.Height/2
+		c.DrawLinePixels(pen, walk.Point{X: cx - 18, Y: cy}, walk.Point{X: cx + 18, Y: cy})
+		c.DrawLinePixels(pen, walk.Point{X: cx, Y: cy - 18}, walk.Point{X: cx, Y: cy + 18})
 	}
 	return nil
 }
@@ -620,6 +854,10 @@ func (u *FocusUI) click(x, y int, b walk.MouseButton) {
 		return
 	}
 	cb := u.view.ClientBoundsPixels()
+	if cb.Width > 8 && cb.Height > 8 {
+		u.viewW.Store(int32(cb.Width))
+		u.viewH.Store(int32(cb.Height))
+	}
 	z := u.zoomFactor()
 	var ix, iy float64
 	if z == 0 {
@@ -630,6 +868,7 @@ func (u *FocusUI) click(x, y int, b walk.MouseButton) {
 		ix = float64(x-ir.X) / float64(ir.Width)
 		iy = float64(y-ir.Y) / float64(ir.Height)
 		if u.zoomCB != nil {
+			u.zoomIdx.Store(2)
 			u.zoomCB.SetCurrentIndex(2) // 200 %
 		}
 	} else {
@@ -651,7 +890,9 @@ func (u *FocusUI) click(x, y int, b walk.MouseButton) {
 	if iy > 1 {
 		iy = 1
 	}
+	u.mu.Lock()
 	u.cx, u.cy = ix, iy
+	u.mu.Unlock()
 	u.drag = true
 	u.dragX, u.dragY = x, y
 	u.refreshDisplay()
@@ -662,6 +903,7 @@ func (u *FocusUI) move(x, y int, b walk.MouseButton) {
 		return
 	}
 	z := float64(u.zoomFactor())
+	u.mu.Lock()
 	u.cx -= float64(x-u.dragX) / z / float64(u.srcW)
 	u.cy -= float64(y-u.dragY) / z / float64(u.srcH)
 	if u.cx < 0 {
@@ -676,6 +918,7 @@ func (u *FocusUI) move(x, y int, b walk.MouseButton) {
 	if u.cy > 1 {
 		u.cy = 1
 	}
+	u.mu.Unlock()
 	u.dragX, u.dragY = x, y
 	u.refreshDisplay()
 }
@@ -732,7 +975,7 @@ func (u *FocusUI) Page() TabPage {
 						}},
 					HSpacer{},
 				}},
-				Label{Text: "Click to zoom on a region (jumps to 200 %). Drag to pan when zoomed. White centre and corner marks: the sensor centre and 10% inset points (field flatness). Green crosshair: the area used for exposure and the sharpness meter.", TextColor: grey},
+				Label{Text: "Click to zoom to 200%; drag to pan when zoomed.\nWhite marks = sensor centre and 10% inset; green crosshair = exposure & sharpness sample.", TextColor: grey},
 			}},
 			Composite{StretchFactor: 2, MinSize: Size{Width: 340}, MaxSize: Size{Width: 420}, Layout: VBox{MarginsZero: true, Spacing: 3}, Children: []Widget{
 				Card{
@@ -740,12 +983,15 @@ func (u *FocusUI) Page() TabPage {
 					Icon:   iconHDR,
 					Layout: VBox{Spacing: 4, Margins: Margins{Left: 8, Top: 4, Right: 8, Bottom: 6}},
 					Children: []Widget{
-						Label{AssignTo: &u.srcLbl, Text: "Camera: -", Font: bold},
-						Label{AssignTo: &u.lightLbl, Text: "Light: -"},
-						Label{AssignTo: &u.expLbl, Text: "Auto exposure: -"},
+						Label{AssignTo: &u.srcLbl, Text: "Camera: -", Font: bold, MinSize: Size{Height: 16}},
+						Label{AssignTo: &u.lightLbl, Text: "Light: -", MinSize: Size{Height: 16}},
+						Label{AssignTo: &u.expLbl, Text: "Auto exposure: -", MinSize: Size{Height: 30}},
 						Composite{Layout: Grid{Columns: 2, MarginsZero: true, Spacing: 4}, Children: []Widget{
 							Label{Text: "Zoom", MinSize: Size{Width: 80}},
 							ComboBox{AssignTo: &u.zoomCB, Model: zoomItems, CurrentIndex: 0, OnCurrentIndexChanged: func() {
+								if u.zoomCB != nil {
+									u.zoomIdx.Store(int32(max(0, u.zoomCB.CurrentIndex())))
+								}
 								u.refreshDisplay()
 							}},
 						}},
@@ -757,15 +1003,19 @@ func (u *FocusUI) Page() TabPage {
 						}},
 						Label{Text: "Sharpness (zoomed region)", Font: bold},
 						ProgressBar{AssignTo: &u.meter, MaxSize: Size{Height: 14}},
-						Label{AssignTo: &u.sharpLbl, Text: "Sharpness: -"},
+						Label{AssignTo: &u.sharpLbl, Text: "Sharpness: -", MinSize: Size{Height: 30}},
 						Composite{Layout: HBox{MarginsZero: true, Spacing: 6}, Children: []Widget{
 							Label{AssignTo: &u.peakLbl, Text: "Peak hold: -", StretchFactor: 1},
 							PushButton{AssignTo: &u.resetPeakBtn, Text: "Reset peak", OnClicked: func() {
+								u.mu.Lock()
 								u.peak.Reset()
+								u.mu.Unlock()
 								u.updateLabels()
 							}},
 						}},
-						Label{Text: "While this page is open the camera exposure is adjusted automatically so the visible (or zoomed) region is neither clipped nor too dark, and film grain can be judged. The capture exposure used on the scan pages is restored when you leave.", TextColor: grey},
+						Label{Text: "Auto exposure keeps the visible region readable.\nCapture exposure is restored when you leave.",
+							ToolTipText: "While this page is open the camera exposure is adjusted automatically so the visible (or zoomed) region is neither clipped nor too dark, and film grain can be judged. The capture exposure used on the scan pages is restored when you leave.",
+							TextColor:   grey, MinSize: Size{Height: 30}},
 						TextEdit{AssignTo: &u.logTE, ReadOnly: true, VScroll: true, MinSize: Size{Height: 120}, StretchFactor: 1},
 					},
 				},

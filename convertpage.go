@@ -535,7 +535,7 @@ func (u *ConvertUI) Page() TabPage {
 							NumberEdit{AssignTo: &u.evNE, Value: 0.0, MinValue: -5, MaxValue: 5, Decimals: 2, Increment: 0.1,
 								OnValueChanged: func() { u.ev = u.evNE.Value(); u.reprocess() }},
 						}},
-						CheckBox{AssignTo: &u.wbChk, Text: "Apply camera white balance (as-shot)", Checked: true, OnCheckedChanged: func() {
+						CheckBox{AssignTo: &u.wbChk, Text: "Apply camera white balance", Checked: true, OnCheckedChanged: func() {
 							on := u.wbChk.Checked()
 							if on == u.useWB {
 								return
@@ -550,7 +550,7 @@ func (u *ConvertUI) Page() TabPage {
 							}
 							u.reprocess()
 						}, ToolTipText: "Decodes the RAW with as-shot white-balance and the camera colour matrix into linear sRGB (LibRaw photograph path). Leave on for photographs. Turn off only if the file is already white-balanced (a scan or a linear TIFF)."},
-						CheckBox{AssignTo: &u.camChk, Text: "Apply Chart camera profile (X-T3 CamCal)", Checked: false, OnCheckedChanged: func() {
+						CheckBox{AssignTo: &u.camChk, Text: "Apply Chart camera profile", Checked: false, OnCheckedChanged: func() {
 							u.useCam = u.camChk.Checked()
 							u.reprocess()
 						}, ToolTipText: "Uses activeCam() matrix from camera_profiles.json via colorsci.ApplyCam - same as Light leveling. For scanned film only. Leave off when converting ordinary photographs."},
@@ -583,7 +583,7 @@ func (u *ConvertUI) Page() TabPage {
 								OnValueChanged: func() { u.gStrength = u.gStrNE.Value(); u.reprocess() }},
 						}},
 					}},
-					GroupBox{Title: "Export (16-bit TIFF, RAFBasename_Stock.tiff + nss.scan/1 metadata)", Layout: VBox{Spacing: 4, Margins: Margins{Left: 8, Top: 4, Right: 8, Bottom: 6}}, Children: []Widget{
+					GroupBox{Title: "Export", Layout: VBox{Spacing: 4, Margins: Margins{Left: 8, Top: 4, Right: 8, Bottom: 6}}, Children: []Widget{
 						Composite{Layout: HBox{MarginsZero: true, Spacing: 4}, Children: []Widget{
 							PushButton{Text: "Export current", StretchFactor: 1, OnClicked: u.exportOne},
 							PushButton{Text: "Export all in list", StretchFactor: 1, OnClicked: u.exportAll},

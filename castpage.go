@@ -59,7 +59,7 @@ func (u *castUI) page() Widget {
 		}
 	}
 	return Card{Title: "500T illuminant — Develop preview", Collapsed: false, Layout: VBox{MarginsZero: true, Spacing: 3}, Children: []Widget{
-		Label{Text: "500T is balanced for 3200K. Set the ORIGINAL scene light, not the scanning light. Camera WB and leveled light stay unchanged."},
+		Label{Text: "500T is balanced for 3200K. Set the ORIGINAL scene light, not the scanning light.\nCamera WB and leveled light stay unchanged."},
 		Composite{Layout: HBox{MarginsZero: true}, Children: []Widget{
 			ComboBox{AssignTo: &u.choice, Model: []string{"500T @ 5500K (Planck daylight approx.)", "500T @ 3200K (no correction)", "500T @ 4300K (Planck)", "500T @ 6500K (Planck daylight approx.)", "500T @ custom K"}, CurrentIndex: choiceIdx, StretchFactor: 1, OnCurrentIndexChanged: func() {
 				if u.kelvin == nil || u.choice == nil {

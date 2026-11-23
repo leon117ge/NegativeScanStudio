@@ -32,7 +32,7 @@ import (
 )
 
 const appName = "NegativeScan Studio"
-const appVersion = appName + " v1.11"
+const appVersion = appName + " v1.12"
 
 // legacyAppName: the program was called Film Base Meter up to v0.67; its
 // settings folder is still read (copied once, never changed) by migrateLegacyConfig.
@@ -1113,6 +1113,13 @@ func (u *HDRUI) setImage(img image.Image, what string) {
 	if err != nil {
 		return
 	}
+	u.setBitmap(bmp, what)
+}
+
+func (u *HDRUI) setBitmap(bmp *walk.Bitmap, what string) {
+	if bmp == nil {
+		return
+	}
 	if u.bmp != nil {
 		u.bmp.Dispose()
 	}
@@ -1204,19 +1211,26 @@ func (u *HDRUI) startLiveView() {
 					fps = float64(frames) / el.Seconds()
 					frames, tWin = 0, time.Now()
 				}
-				if !u.lvDrawing.Load() {
+				if u.lvDrawing.CompareAndSwap(false, true) {
 					if img, e := jpeg.Decode(bytes.NewReader(jpg)); e == nil {
-						u.lvDrawing.Store(true)
-						lbl := "Live view  (measuring fps)"
-						if fps > 0 {
-							lbl = fmt.Sprintf("Live view  %.1f fps", fps)
-						}
-						u.ui(func() {
-							defer u.lvDrawing.Store(false)
-							if u.lvOn.Load() {
-								u.setImage(img, lbl)
+						if bmp, be := walk.NewBitmapFromImage(img); be == nil {
+							lbl := "Live view  (measuring fps)"
+							if fps > 0 {
+								lbl = fmt.Sprintf("Live view  %.1f fps", fps)
 							}
-						})
+							u.ui(func() {
+								defer u.lvDrawing.Store(false)
+								if u.lvOn.Load() {
+									u.setBitmap(bmp, lbl)
+								} else {
+									bmp.Dispose()
+								}
+							})
+						} else {
+							u.lvDrawing.Store(false)
+						}
+					} else {
+						u.lvDrawing.Store(false)
 					}
 				}
 			}
@@ -1336,13 +1350,11 @@ func (u *HDRUI) imageRect() walk.Rectangle {
 
 func (u *HDRUI) paint(c *walk.Canvas, _ walk.Rectangle) error {
 	cb := u.view.ClientBoundsPixels()
-	bg, _ := walk.NewSolidColorBrush(walk.RGB(22, 22, 25))
-	defer bg.Dispose()
-	c.FillRectanglePixels(bg, cb)
+	if bg := cachedBrush(walk.RGB(22, 22, 25)); bg != nil {
+		c.FillRectanglePixels(bg, cb)
+	}
 	if u.bmp == nil {
-		f, _ := walk.NewFont("Segoe UI", 10, 0)
-		if f != nil {
-			defer f.Dispose()
+		if f := cachedFont("Segoe UI", 10, 0); f != nil {
 			msg := "No image yet.\r\nConnect the camera and start live view, or press Meter base.\r\nDrag a rectangle here to choose the clear film base yourself."
 			fmtx := walk.TextCenter | walk.TextWordbreak
 			tr := cb
@@ -1372,28 +1384,19 @@ func (u *HDRUI) paint(c *walk.Canvas, _ walk.Rectangle) error {
 		return walk.Rectangle{X: x0, Y: y0, Width: x1 - x0, Height: y1 - y0}
 	}
 	draw := func(r hdrscan.Rect, col walk.Color) {
-		br, _ := walk.NewSolidColorBrush(col)
-		if br == nil {
-			return
+		if pen := cachedPen(col, 2); pen != nil {
+			c.DrawRectanglePixels(pen, toPx(r))
 		}
-		defer br.Dispose()
-		pen, _ := walk.NewGeometricPen(walk.PenSolid, 2, br)
-		if pen == nil {
-			return
-		}
-		defer pen.Dispose()
-		c.DrawRectanglePixels(pen, toPx(r))
 	}
 	if !u.baseNorm.Empty() {
 		draw(u.baseNorm, walk.RGB(60, 220, 120))
-		if f, _ := walk.NewFont("Segoe UI", 8, walk.FontBold); f != nil {
+		if f := cachedFont("Segoe UI", 8, walk.FontBold); f != nil {
 			r := toPx(u.baseNorm)
 			lr := walk.Rectangle{X: r.X, Y: r.Y - 16, Width: 120, Height: 15}
 			if lr.Y < ir.Y {
 				lr.Y = r.Y + r.Height + 2
 			}
 			c.DrawTextPixels("film base", f, walk.RGB(60, 220, 120), lr, walk.TextLeft|walk.TextSingleLine)
-			f.Dispose()
 		}
 	}
 	if u.dragging {
@@ -1831,7 +1834,11 @@ func (u *HDRUI) evs() []int {
 func (u *HDRUI) showBracket() {
 	evs := u.evs()
 	if u.capBtn != nil {
-		u.capBtn.SetText("Capture HDR  (" + evText(evs) + ")")
+		if len(evs) > 1 {
+			u.capBtn.SetText("Capture HDR")
+		} else {
+			u.capBtn.SetText("Capture")
+		}
 	}
 	if u.p2Sh == nil {
 		return
@@ -2181,7 +2188,9 @@ func (u *HDRUI) Pages(batch TabPage) HDRPages {
 					ToolTipText: "Stop the scan in progress (capture or merge): the interrupted frame's partial RAFs/TIFFs are deleted, the light is restored to its pre-scan state. Earlier frames are kept."},
 			}},
 			ProgressBar{AssignTo: &u.pb, ColumnSpan: 2, MaxSize: Size{Height: 8}},
-			TextEdit{AssignTo: &u.resTE, ColumnSpan: 2, ReadOnly: true, VScroll: true, MinSize: Size{Height: 44}, Text: "Output: <Save to>\\<roll>\\[roll_]YYYYMMDD_HHMMSS_NNNN_HDR.tiff (time of frame 0, NNNN counts up and never repeats in the folder), RAFs _0EV/_+3EV/..., Record base _BASE.RAF. One linear 16-bit TIFF per frame (dust-cleaned if Dust removal is on), frame 0 scale."},
+			TextEdit{AssignTo: &u.resTE, ColumnSpan: 2, ReadOnly: true, VScroll: true, MinSize: Size{Height: 44},
+				Text:        "Output: <Save to>\\<roll>\\<name>_HDR.tiff",
+				ToolTipText: "[roll_]YYYYMMDD_HHMMSS_NNNN_HDR.tiff (time of frame 0; NNNN counts up in the folder), RAFs _0EV/_+3EV/..., Record base _BASE.RAF. One linear 16-bit TIFF per frame (dust-cleaned if Dust removal is on), frame 0 scale."},
 		},
 	}
 	capture := TabPage{

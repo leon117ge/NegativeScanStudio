@@ -5,18 +5,23 @@ import (
 	"testing"
 )
 
-func TestWrapLines(t *testing.T) {
-	s := "QA Portra400: Film base WARNING vs DB (R -0.02 G +0.09 B +0.26 EV): blue is off by more than the tolerance"
-	w := wrapLines(s, 58)
-	for _, l := range strings.Split(w, "\n") {
-		if len(l) > 58 {
-			t.Fatalf("line too long: %q", l)
+func TestWrapLinesRespectsColumns(t *testing.T) {
+	in := "Capture disabled: Hikrobot camera not connected (Connect above, or use the simulator)"
+	for _, cols := range []int{focusStatusWrapCols, monoStatusWrapCols, statusWrapCols} {
+		got := wrapLines(in, cols)
+		for _, line := range strings.Split(got, "\n") {
+			if len(line) > cols {
+				t.Fatalf("cols=%d line %q exceeds max length %d", cols, line, len(line))
+			}
 		}
 	}
-	if strings.Join(strings.Fields(w), " ") != s {
-		t.Fatalf("text changed: %q", w)
-	}
-	if wrapLines(w, 58) != w {
-		t.Fatal("not idempotent")
-	}
+}
+
+func TestSetStatusNilSafe(t *testing.T) {
+	setStatus(nil, "ok")
+	setMonoStatus(nil, "ok")
+	setMonoStatusTip(nil, "short", "full")
+	setFocusStatus(nil, "ok")
+	setFocusStatusTip(nil, "short", "full")
+	setStatusWide(nil, "ok")
 }

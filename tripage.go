@@ -309,9 +309,9 @@ func (t *TriUI) evs() []int {
 
 func (t *TriUI) captureText(evs []int) string {
 	if len(evs) == 1 {
-		return "Capture trichrome  (R, G, B)"
+		return "Capture trichrome"
 	}
-	return "Capture trichrome HDR  (R, G, B x " + evText(evs) + ")"
+	return "Capture trichrome HDR"
 }
 
 // scanValues are the light values a scan applies per channel: the leveling /
@@ -329,30 +329,30 @@ func (t *TriUI) scanValues() ([3]int, string, bool) {
 }
 
 // reason is why Capture is disabled ("" = ready).
-func (t *TriUI) reason() string {
+func (t *TriUI) reason() (short, full string) {
 	h, lu := t.hdr, t.light
 	switch {
 	case t.running:
-		return "a trichrome scan is running"
+		return "scan in progress", "A trichrome scan is running."
 	case h.dev == nil || h.sess == nil:
-		return "camera not connected (Camera and Light > Camera > Connect)"
+		return "camera not connected", "Camera not connected (Camera and Light > Camera > Connect)."
 	case h.busy && h.handoff != nil && h.handoff.pending:
-		return "locking frame 0 from " + h.handoff.Source + " ..."
+		return "locking frame 0 ...", "Locking frame 0 from " + h.handoff.Source + " ..."
 	case h.busy:
-		return "camera busy (metering, capture or leveling)"
+		return "camera busy", "Camera busy (metering, capture or leveling)."
 	case h.sess.Locked == nil && h.handoff != nil:
-		return "locking frame 0 from " + h.handoff.Source + " ..."
+		return "locking frame 0 ...", "Locking frame 0 from " + h.handoff.Source + " ..."
 	case h.sess.Locked == nil:
-		return "frame 0 not locked - level or load a preset on Camera and Light > Light (locks automatically), or Meter base on Camera and Light > Camera"
+		return "frame 0 not locked", "Frame 0 not locked - level or load a preset on Camera and Light > Light, or Meter base."
 	case lu == nil || !lu.connected():
-		return "RGB light not connected (Camera and Light > Light > Connect)"
+		return "RGB light not connected", "RGB light not connected (Camera and Light > Light > Connect)."
 	case lu.busy:
-		return "RGB light busy (leveling or a light command on Camera and Light > Light)"
+		return "RGB light busy", "RGB light busy (leveling or a light command)."
 	}
 	if _, _, ok := t.scanValues(); !ok {
-		return "light values unknown (Read state on Camera and Light > Light)"
+		return "light values unknown", "Light values unknown (Read state on Camera and Light > Light)."
 	}
-	return ""
+	return "", ""
 }
 
 func (t *TriUI) updateButtons() {
@@ -360,7 +360,7 @@ func (t *TriUI) updateButtons() {
 		return
 	}
 	h, lu := t.hdr, t.light
-	why := t.reason()
+	why, whyFull := t.reason()
 	t.capBtn.SetEnabled(why == "")
 	t.stopBtn.SetEnabled(t.cancel != nil || t.mergeCancel != nil)
 	t.modeCB.SetEnabled(!t.running)
@@ -373,26 +373,26 @@ func (t *TriUI) updateButtons() {
 		t.levelMetaCB.SetChecked(lu.cfg.UseLastLeveling)
 		t.levelMetaCB.SetEnabled(!t.running && !t.merging)
 	}
-	setStatusWide(t.baseLbl, h.lastLevelingText(v))
+	setMonoStatus(t.baseLbl, h.lastLevelingText(v))
 	t.capBtn.SetText(t.captureText(t.evs()))
 	if why != t.why {
 		if why == "" {
 			t.say("Capture ready.")
 		} else {
-			t.say("Capture disabled: " + why)
+			t.say("Capture disabled: " + whyFull)
 		}
 		t.why = why
 	}
 	if why == "" {
-		setStatusWide(t.whyLbl, "READY - press Capture for the next frame.")
+		setMonoStatus(t.whyLbl, "Ready. Press Capture for the next frame.")
 	} else {
-		setStatusWide(t.whyLbl, "Capture disabled: "+why)
+		setMonoStatusTip(t.whyLbl, "Capture disabled: "+why, "Capture disabled: "+whyFull)
 	}
 	// status lines
 	if h.dev == nil {
-		setStatusWide(t.camLbl, "Camera: not connected")
+		setMonoStatus(t.camLbl, "Camera: not connected")
 	} else {
-		setStatusWide(t.camLbl, "Camera: "+h.camLbl.Text())
+		setMonoStatus(t.camLbl, "Camera: "+h.camLbl.Text())
 	}
 	switch {
 	case h.sess != nil && h.sess.Locked != nil:
@@ -401,29 +401,36 @@ func (t *TriUI) updateButtons() {
 		if src == "" {
 			src = "Meter base"
 		}
-		setStatusWide(t.lockLbl, fmt.Sprintf("Frame 0: LOCKED  ISO %d, %s  (%s)", e.ISO, camera.ShutterLabel(e.Shutter), src))
+		setMonoStatusTip(t.lockLbl,
+			fmt.Sprintf("Frame 0: LOCKED  ISO %d, %s", e.ISO, camera.ShutterLabel(e.Shutter)),
+			fmt.Sprintf("Frame 0: LOCKED  ISO %d, %s (%s)", e.ISO, camera.ShutterLabel(e.Shutter), src))
 	case h.handoff != nil:
-		setStatusWide(t.lockLbl, fmt.Sprintf("Frame 0: lock pending - ISO %d, %s from %s", h.handoff.ISO, camera.ShutterLabel(h.handoff.Shutter), h.handoff.Source))
+		setMonoStatusTip(t.lockLbl,
+			fmt.Sprintf("Frame 0: lock pending  ISO %d, %s", h.handoff.ISO, camera.ShutterLabel(h.handoff.Shutter)),
+			fmt.Sprintf("Frame 0: lock pending - ISO %d, %s from %s", h.handoff.ISO, camera.ShutterLabel(h.handoff.Shutter), h.handoff.Source))
 	default:
-		setStatusWide(t.lockLbl, "Frame 0: not locked")
+		setMonoStatus(t.lockLbl, "Frame 0: not locked")
 	}
 	if lu == nil || !lu.connected() {
-		setStatusWide(t.lightLbl, "Light: not connected")
+		setMonoStatus(t.lightLbl, "Light: not connected")
 	} else if cs := lu.cl.CachedState(); cs != nil {
-		setStatusWide(t.lightLbl, "Light now: "+cs.String())
+		setMonoStatus(t.lightLbl, "Light now: "+cs.String())
 	} else {
-		setStatusWide(t.lightLbl, "Light: connected")
+		setMonoStatus(t.lightLbl, "Light: connected")
 	}
 	if v, src, ok := t.scanValues(); ok {
-		setStatusWide(t.valLbl, fmt.Sprintf("Scan values: R %d  G %d  B %d  (%s)", v[0], v[1], v[2], src))
+		setMonoStatusTip(t.valLbl, fmt.Sprintf("Scan values: R %d  G %d  B %d", v[0], v[1], v[2]),
+			fmt.Sprintf("Scan values: R %d  G %d  B %d (%s)", v[0], v[1], v[2], src))
 	} else {
-		setStatusWide(t.valLbl, "Scan values: -")
+		setMonoStatus(t.valLbl, "Scan values: -")
 	}
 	roll := h.cfg.Roll
 	if roll == "" {
-		roll = "(no roll name)"
+		roll = "none"
 	}
-	setStatusWide(t.outLbl, fmt.Sprintf("Output: %s, roll %s, frame counter %04d (next %04d), %d trichrome scans this session", h.outDir(), roll, h.cfg.Counter, h.cfg.Counter+1, t.scans))
+	setMonoStatusTip(t.outLbl,
+		fmt.Sprintf("Output: %s  (roll: %s, next #%04d)", h.outDir(), roll, h.cfg.Counter+1),
+		fmt.Sprintf("Output: %s, roll %s, frame counter %04d (next %04d), %d trichrome scans this session", h.outDir(), roll, h.cfg.Counter, h.cfg.Counter+1, t.scans))
 }
 
 func (t *TriUI) stop() {
@@ -455,8 +462,8 @@ func dropShot(sh *hdrscan.TriShot) int {
 
 func (t *TriUI) capture() {
 	h, lu := t.hdr, t.light
-	if why := t.reason(); why != "" {
-		t.say("Capture refused: " + why)
+	if why, whyFull := t.reason(); why != "" {
+		t.say("Capture refused: " + whyFull)
 		t.updateButtons()
 		return
 	}
@@ -699,7 +706,7 @@ func (t *TriUI) Page() TabPage {
 			}},
 			Composite{StretchFactor: 2, MinSize: Size{Width: 380}, MaxSize: Size{Width: 470}, Layout: VBox{MarginsZero: true, Spacing: 3}, Children: []Widget{
 				Card{
-					Title:  "Trichrome scan (R only, G only, B only)",
+					Title:  "Trichrome scan",
 					Icon:   iconTri,
 					Layout: VBox{Spacing: 4, Margins: Margins{Left: 8, Top: 4, Right: 8, Bottom: 6}},
 					Children: []Widget{
@@ -707,7 +714,7 @@ func (t *TriUI) Page() TabPage {
 						Label{AssignTo: &t.lockLbl, Text: "Frame 0: -", Font: bold},
 						Label{AssignTo: &t.lightLbl, Text: "Light: -"},
 						Label{AssignTo: &t.valLbl, Text: "Scan values: -"},
-						Label{AssignTo: &t.outLbl, Text: "Output: -"},
+						Label{AssignTo: &t.outLbl, Text: "Output: -", MinSize: Size{Height: 30}},
 						Composite{Layout: Grid{Columns: 2, MarginsZero: true, Spacing: 4}, Children: []Widget{
 							Label{Text: "Mode", MinSize: Size{Width: 130}},
 							ComboBox{AssignTo: &t.modeCB, Model: triModeItems, CurrentIndex: t.mode(), ToolTipText: triModeTip, OnCurrentIndexChanged: func() {
@@ -739,17 +746,18 @@ func (t *TriUI) Page() TabPage {
 								ToolTipText: "Stop the scan in progress (capture or merge): the light is restored to its pre-scan state and the interrupted frame's partial RAFs/TIFFs are deleted. Earlier frames are kept."},
 						}},
 						Composite{Layout: HBox{MarginsZero: true, Spacing: 6}, Children: []Widget{
-							PushButton{AssignTo: &t.meterBtn, Text: "Meter base (manual)", Enabled: false, MinSize: Size{Height: 28}, StretchFactor: 1, OnClicked: func() { h.meter() },
+							PushButton{AssignTo: &t.meterBtn, Text: "Meter base", Enabled: false, MinSize: Size{Height: 28}, StretchFactor: 1, OnClicked: func() { h.meter() },
 								ToolTipText: "Optional: meter frame 0 by hand (as on Camera and Light > Camera). Not needed after leveling or preset load."},
 							PushButton{AssignTo: &t.sendBtn, Text: "Send base to Develop", Enabled: false, MinSize: Size{Height: 28}, StretchFactor: 1, OnClicked: t.sendBase,
 								ToolTipText: "Film base R/G/B measured in the last RGB TIFF -> Develop > Density In for preview. TIFF pixels and metadata remain unchanged."},
 						}},
-						Label{AssignTo: &t.whyLbl, Text: "", Font: bold},
-						CheckBox{AssignTo: &t.levelMetaCB, Text: "Film base for metadata: Last leveling (after profile)", Checked: t.light.cfg.UseLastLeveling, OnClicked: func() { t.hdr.setUseLastLeveling(t.levelMetaCB.Checked()) }, ToolTipText: levelMetadataTip},
-						Label{AssignTo: &t.baseLbl, Text: "Last leveling: unavailable"},
+						Label{AssignTo: &t.whyLbl, Text: "", Font: bold, MinSize: Size{Height: 30}},
+						CheckBox{AssignTo: &t.levelMetaCB, Text: "Film base metadata: Last leveling", Checked: t.light.cfg.UseLastLeveling, OnClicked: func() { t.hdr.setUseLastLeveling(t.levelMetaCB.Checked()) }, ToolTipText: levelMetadataTip},
+						Label{AssignTo: &t.baseLbl, Text: "Last leveling: unavailable", MinSize: Size{Height: 32}},
 						ProgressBar{AssignTo: &t.pb, MaxSize: Size{Height: 8}},
 						TextEdit{AssignTo: &t.resTE, ReadOnly: true, VScroll: true, MinSize: Size{Height: 90},
-							Text: "Output: <Save to>\\<roll>\\<name>_RGB.tiff or _RGB_HDR.tiff, RAFs <name>_R_0EV.RAF ... (same folder, roll and counter as HDR scan)."},
+							Text:        "Output: <Save to>\\<roll>\\<name>_RGB.tiff (or _RGB_HDR.tiff)",
+							ToolTipText: "RAFs <name>_R_0EV.RAF ... (same folder, roll and counter as HDR scan)."},
 					},
 				},
 				VSpacer{},
