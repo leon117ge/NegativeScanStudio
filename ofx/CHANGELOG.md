@@ -1,11 +1,11 @@
 # NegativeScan Studio OFX — Changelog
 
-Current local test plugin: **0.90.14** (not pushed/released) · Last published tag: **0.90.6** ([Plugin release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/ofx-v0.90.6)) · [Scanning app changelog](../docs/CHANGELOG.md) · [Versioning policy](../docs/VERSIONING.md)
+Current plugin: **0.90.14** ([Plugin release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/ofx-v0.90.14)) · [Scanning app changelog](../docs/CHANGELOG.md) · [Versioning policy](../docs/VERSIONING.md) · [Status](../docs/STATUS.md)
 
 Plugin releases are independent from the Windows scanning app.
 
 
-## 0.90.14 — Separate Tone Color group with switches and presets, stronger cream after desaturation (local test build)
+## 0.90.14 — Separate Tone Color group with switches and presets, stronger cream after desaturation
 
 - UI: the color controls are a new, separate **Tone Color** group. Each group is laid out as switches, then its own preset menu, then the sliders:
   - **Tone**: `Highlight shoulder`, `Shadow toe` (switches) -> `Tone preset` -> `Shoulder strength`, `Shoulder start (stops)`, `Shoulder white (stops)`, `Toe strength`, `Toe start (stops)`, `Toe black (stops)`.

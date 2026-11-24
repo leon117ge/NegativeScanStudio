@@ -42,7 +42,7 @@ TIFF ImageDescription tag 270 keeps `nss.scan/1` JSON. App v0.91 writes the
 accepted normalized base unchanged, with `base_source: "light leveling (after profile)"`
 and additive `film_base_space: "after_profile"`. Lamp drive remains separate in
 `light_rgb`. A pending camera matrix is not marked baked into TIFF pixels.
-Use independent OFX 0.90.5 or newer for these references. The current plugin remains 0.90.6. The plugin does not apply
+Use independent OFX 0.90.5 or newer for these references. Use OFX 0.90.5 or newer (current plugin is 0.90.14). The plugin does not apply
 the matrix to an after-profile base twice, but still applies it to pending pixels.
 Unmarked legacy metadata retains its pre-profile meaning. Existing TIFFs are not repaired.
 

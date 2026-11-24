@@ -1,17 +1,18 @@
-# NegativeScan Studio app — Changelog / 扫描软件更新日志
+# NegativeScan Studio app — Changelog
 
-Current local test app: **v1.13**, not published. Latest published app: **v1.08** · [App release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/v1.08) · [OFX plugin changelog](../ofx/CHANGELOG.md) · [Versioning policy](VERSIONING.md)
+Current app: **v1.13** · [App release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/v1.13) · [OFX plugin changelog](../ofx/CHANGELOG.md) · [Versioning policy](VERSIONING.md) · [Status](STATUS.md)
 
-This file tracks the scanning app, not plugin-only releases. / 本文件只记录扫描软件。
+This file tracks the scanning app, not plugin-only releases.
 
-## v1.13 local test build
+## v1.13
 
 Focus Check auto-exposure stabilization (regression fix from v1.12). Capture sequence, light settling, HDR merge, CA correction, and image-quality algorithms are unchanged (OFX plugin untouched).
 
 - **Settled Focus Check auto-exposure (`hdrscan.LiveAE`).** Added `LiveAE` to skip two settle frames after any hardware exposure/gain write so in-flight frames from the previous exposure no longer trigger feedback oscillation in the faster v1.12 preview loop, sync `State` to actual hardware exposure/gain (eliminating deadband and quantized-shutter sawtoothing), and lock exposure once converged (`locked`) until the user zooms, pans, switches the light, or scene brightness shifts substantially.
 - **Tighter clip reduction and deadband alignment.** When highlights clip and the 90th percentile is also above target, `AdjustExposure` steps toward the darker ratio instead of taking slow 7% steps, and `applyAE` lowers its Hikrobot skip threshold from 4% / 0.15 dB to 1% / 0.05 dB so small valid adjustments are applied rather than blocked.
 - **Stable Focus Check label layout.** Kept `Auto exposure` and `Sharpness` labels at a consistent two-line height, skipped redundant `SetText`/`SetToolTipText` layout passes when text/tooltip have not changed, and only updated the sharpness progress bar when its value changes.
-- Local only; no tag/push/release.
+
+Published 2026-11-24 with OFX 0.90.14. Earlier notes called this a local test build.
 
 ## v1.12 local test build
 
@@ -112,31 +113,30 @@ See [verification and limits](QA_v0.91.md). Earlier entries below describe histo
 
 ## Historical app releases
 
-根据源码中的版本注释、备份文件与说明文件整理（v0.70 之前为 FilmBaseMeter v0.1–v0.67）。
+Compiled from version comments, backup files, and notes in the source (builds before v0.70 were FilmBaseMeter v0.1–v0.67).
 
-- **v0.70** – Develop 模块：三个 DCTL 移植到 Go，Resolve 式节点链；Ektar 相关数据。
-- **v0.71** – Develop 预览按帧旋转/翻转；默认输出为显示编码；嵌入 2383 (D65) LUT；卷打开与片基估计。
-- **v0.72–v0.74** – 色彩/测试参数与命令行选项调整。
-- **v0.75** – X-T3 实测预设与矩阵行；White LED / Narrowband 光源选择；QA 合成工具。
-- **v0.76** – 矩阵行缩放保持中性等默认值调整。
-- **v0.77** – 引导式去毛发/纤维。
-- **v0.78** – Vision3 500T 相关数据与测试、默认值调整。
-- **v0.79** – 纤维标记改进。
-- **v0.80** – RGB Light Air 设置页；ISO + 固定快门；传感器马赛克（感光点平均）合成。
-- **v0.81** – 三色扫描驱动灯；base shutter；串口原始日志；CFA 逐色缩放。
-- **v0.82** – 调平结果与 Light 页联动；三色片基送 DCTL；三色+HDR 扫描。
-- **v0.83** – 扫描配置预设（scanconfig）；HDR 子页重组；可停止的包围；RAW 清理；NegPy 风格折叠卡片。
-- **v0.84** – 相机+灯输入色卡校准（3×3 保持中性，CIEDE2000）。
-- **v0.85** – 调平逐通道目标（profile 矩阵前片基、TIFF 框修正）。
-- **v0.86** – 调平/Light 页改进。
-- **v0.87** – 三色自动调平支持手选片基矩形。
-- **v0.88** – Light 页共享实时画面直接拖框；调平 R/G/B 读数显示、复制、CSV 日志；「写入 DCTL」写入 Density_In 片基与预设。详见 `NegativeScanStudio_v0.88_notes.txt`。
+- **v0.70** — Develop module: three DCTLs ported to Go, a Resolve-style node chain; Ektar-related data.
+- **v0.71** — Develop preview per-frame rotate/flip; default output is display-referred; embedded 2383 (D65) LUT; roll open and film-base estimate.
+- **v0.72–v0.74** — Colour / test-parameter and command-line option adjustments.
+- **v0.75** — X-T3 measured presets and matrix rows; White LED / Narrowband illuminant choice; QA composite tools.
+- **v0.76** — Default-value adjustments such as matrix-row scaling that preserves neutrality.
+- **v0.77** — Guided hair / fibre removal.
+- **v0.78** — Vision3 500T data and tests, default-value adjustments.
+- **v0.79** — Fibre-marking improvements.
+- **v0.80** — RGB Light Air settings page; ISO + fixed shutter; sensor-mosaic (photosite-average) merge.
+- **v0.81** — Trichrome scanning drives the lamp; base shutter; raw serial log; CFA per-channel scaling.
+- **v0.82** — Leveling results linked to the Light page; trichrome film base sent to DCTL; trichrome + HDR scanning.
+- **v0.83** — Scan configuration presets (`scanconfig`); HDR sub-page reorganisation; abortable bracketing; RAW cleanup; NegPy-style collapsible cards.
+- **v0.84** — Camera + lamp input chart calibration (3×3, neutrality preserved, CIEDE2000).
+- **v0.85** — Per-channel leveling targets (profile-matrix film base, TIFF-frame correction).
+- **v0.86** — Leveling / Light-page improvements.
+- **v0.87** — Trichrome auto-leveling with a hand-selected film-base rectangle.
+- **v0.88** — Light page shares the live view for drag-to-select; leveling R/G/B readouts, copy, and CSV log; “Write DCTL” wrote Density_In base and presets. See `NegativeScanStudio_v0.88_notes.txt`.
+- **v0.89** — First 500T 3200 K balance path. Approximate density offsets from a 10 nm transcription of Kodak H-1-5219 rev. 3-26 spectral sensitivity, Planck illuminant integration, and ECN-2 gamma. Supported 3200/4300/5500/6500 K and custom K; Light page could write DCTL, save/load film-library entries, and send values to Develop. After leveling, the lamp, film base, and camera WB were left unchanged. Density_In gained default-off `cast_on/cast_r/g/b`, with the same formula in the Go Develop preview. Measured gray-point and residual-cast fitting were left for later.
+- **v0.90** — HDR/trichrome scan TIFFs write versioned `nss.scan/1` JSON in ImageDescription / tag 270 (known lamp values, film base, camera matrix/state, lamp model, roll name, version, and so on); hair/dust/crop are preserved. Go TIFF writer and headless round-trip tests passed; Windows EXE cross-compiled. First release that also attached an OFX 0.90 prototype; plugin history is now kept independently in [ofx/CHANGELOG.md](../ofx/CHANGELOG.md). The app remains v0.90; OFX 0.90.1 does not bump the app. The cancelled 400K WIP was not applied.
 
-- **v0.89** – 优先实现 500T 3200K 平衡。基于 Kodak H-1-5219 rev.3-26 的光谱感度 10 nm 转录、Planck 光源积分和 ECN-2 gamma，生成有来源的近似密度偏移。支持 3200/4300/5500/6500K 和自定义 K，Light 页写入 DCTL、胶片库保存与加载、发送到 Develop。调平后不改灯、不改片基、不改相机 WB。Density_In 增加默认关闭的 `cast_on/cast_r/g/b`，Go Develop 同步公式。灰点实测与交叉偏色拟合后续实现。
+## Repository notes
 
-- **v0.90** – HDR/三色扫描 TIFF 的 ImageDescription/tag270 写入 versioned `nss.scan/1` scan JSON（已知灯值、片基、相机矩阵/状态、灯型号、卷名、版本等）；hair/dust/crop保留。Go TIFF writer/headless往返测试通过，Windows exe交叉编译。首次同一release同时附带OFX v0.90原型，插件历史现独立记录于 [ofx/CHANGELOG.md](../ofx/CHANGELOG.md)。app仍为v0.90；OFX0.90.1不升级app。取消的400K WIP未应用。
-
-## 仓库说明
-仓库已通过 git 上传完整源码和构建所需的图标、资源与 LibRaw 静态库。Windows 可执行文件放在 GitHub Releases，不随源码重复提交。
+The git repository includes the complete source and the icons, resources, and LibRaw static libraries needed to build. Windows executables are attached to GitHub Releases and are not committed as source.
 
 The root `template.dctl` and `template_core.dctl` remain unchanged as inputs to `ofx/tools/generate.py`. They are not app assets or app export features. Removing them would break OFX regeneration, so app-only cleanup does not delete them.

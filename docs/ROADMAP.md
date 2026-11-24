@@ -1,6 +1,6 @@
 # NegativeScan Studio app roadmap
 
-Current app: **v1.13** (local; v1.08 published) · [App changelog](CHANGELOG.md) · [OFX roadmap](../ofx/ROADMAP.md) · [Versioning](VERSIONING.md)
+Current app: **v1.13** · [App changelog](CHANGELOG.md) · [OFX roadmap](../ofx/ROADMAP.md) · [Versioning](VERSIONING.md)
 
 ## Implemented
 

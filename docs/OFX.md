@@ -1,6 +1,6 @@
-# NegativeScan Studio OFX 0.90.14 (local test build)
+# NegativeScan Studio OFX 0.90.14
 
-Current local test build is **0.90.14** (last published tag: `ofx-v0.90.6`). 0.90.12 adds the optional Tone stage (highlight shoulder and shadow toe, on by default); the inversion math and all earlier numeric defaults remain unchanged. Real Windows Resolve and physical GPU acceptance remain outstanding. [Installation](../ofx/README.md).
+Current plugin is **0.90.14**. 0.90.12 added the optional Tone stage (highlight shoulder and shadow toe, on by default); 0.90.14 moves highlight/shadow desaturation and highlight cream into a separate Tone Color group. Inversion math and the earlier numeric defaults are unchanged except where a later changelog says so (Gamma scale and Exposure returned to 1.0 in 0.90.9 / 0.90.11). Real Windows Resolve and physical GPU acceptance remain outstanding. [Installation](../ofx/README.md).
 
 ## 0.90.14 Tone Color group and stronger cream
 
@@ -119,49 +119,49 @@ measurement. The plugin recognizes the explicit coordinate marker and loads the
 reference without applying the camera matrix twice. Older unmarked metadata is
 unchanged. Rendering kernels and film presets are unchanged.
 
-## 0.90.4：在画面直接点选灰白点
+## 0.90.4 — Pick gray / white in the viewer
 
-新增OFX OverlayInteractV1（OpenGL1.x系统动态加载），首个Viewer gray / white pick组请求默认展开。**先选NSS节点/效果 → viewer左下角选择Open FX Overlay / FX → 勾Pick gray on viewer → 点击/拖动中性灰白区域**。Shift + ~ (tilde)可切换overlay显隐；Window/Transform/Wipe模式不分发本插件点击。
+Adds OFX OverlayInteractV1 (OpenGL 1.x, loaded dynamically from the system). The first Viewer gray / white pick group is requested expanded by default. **Select the NSS node/effect first → in the lower-left of the viewer choose Open FX Overlay / FX → enable Pick gray on viewer → click or drag a neutral gray/white area.** Shift + ~ (tilde) toggles overlay visibility. Window / Transform / Wipe viewer modes do not dispatch clicks to this plugin.
 
-十字保持屏幕像素大小，采样框按render scale/PAR换算。pen与pick_point均canonical XYAbsolute，不重复乘viewer zoom/render scale。首次点击启用Auto gray、可见Base/balances置None/0；Auto已启用时后续点击保留手动balance。选好可取消Pick gray on viewer，Auto仍在固定点逐帧工作；关闭Auto才回到手动gray codes。没有Bake/自动追踪。
+The crosshair stays a constant screen-pixel size; the sample box is converted through render scale and pixel aspect ratio. Both the pen and `pick_point` use canonical XYAbsolute and are not multiplied again by viewer zoom or render scale. The first click turns Auto gray on and resets the visible Base / balances to None / 0; later clicks while Auto is already on keep a manual balance. After a point is chosen you can turn Pick gray on viewer off; Auto continues to work on that fixed point every frame. Turning Auto off returns to manual gray codes. There is no Bake and no automatic tracking.
 
-宿主OpenGL上下文仅用于绘制UI，不读framebuffer、不改变CPU/CUDA/OpenCL图像算法；push/pop恢复GL状态，不修改宿主矩阵/投影，不swap buffers。SlaveToParam触发参数变更重绘，click/drag成一组undo，PenUp/LoseFocus/异常结束编辑。保留原生2D handle/手填canonical X/Y作为fallback。真实Resolve的绘制、鼠标事件分发、HiDPI/代理/非方像素仍待验收。所有原有数值默认和app EXE均未变。
+The host OpenGL context is used only to draw the UI: the plugin does not read the framebuffer and does not change the CPU / CUDA / OpenCL image algorithm. It push/pops GL state, does not modify the host matrices or projection, and does not swap buffers. `SlaveToParam` triggers a redraw on parameter changes; a click/drag is one undo group; PenUp / LoseFocus / an exception ends the edit. The native 2D handle and typed canonical X/Y remain as a fallback. Real Resolve drawing, mouse dispatch, HiDPI, proxies, and non-square pixels still need acceptance. All previous numerical defaults and the scanning app EXE were unchanged in this release.
 
-参考：[OFX interact API](https://openfx.readthedocs.io/en/latest/Reference/api/file/ofxInteract_8h.html)、[Resolve onscreen controls手册章节（第三方镜像）](https://docs.imaster.org/davinci-resolve-21-manual/part-11-color-page-effects/ch.-151-using-open-fx-and-resolve-fx)。Resolve手册确认OpenFX onscreen controls/FX模式；这不代替本插件真机测试。
+References: [OFX interact API](https://openfx.readthedocs.io/en/latest/Reference/api/file/ofxInteract_8h.html), [Resolve on-screen controls (third-party mirror of the manual)](https://docs.imaster.org/davinci-resolve-21-manual/part-11-color-page-effects/ch.-151-using-open-fx-and-resolve-fx). The Resolve manual confirms OpenFX on-screen controls / FX mode; that is not a substitute for testing this plugin on a real host.
 
-## 0.90.3：仅更新500T Base
+## 0.90.3 — 500T Base only
 
-用户眼调指定 **R +1.07 / G 0 / B +0.67 stops**（上版+1.40/0/+0.80），同时作为loader和新实例可见balance默认值。不是新测量。已有工程由宿主保存的slider值不自动覆写；重选500T Base可加载新值。Gamma scale1.15、Exposure0.90、stock gamma、T5600表、GPU/CPU算法和扫描app均未变。
+User eye-tuning set **R +1.07 / G 0 / B +0.67 stops** (previous +1.40 / 0 / +0.80), used both as the 500T Base loader and as the visible balance defaults on new instances. This was not a new measurement. Existing projects keep host-saved slider values; re-selecting 500T Base loads the new numbers. Gamma scale 1.15, Exposure 0.90, stock gammas, the T5600 table, GPU/CPU algorithms, and the scanning app were unchanged in this release. (Gamma scale and Exposure defaults were later restored to 1.0 in 0.90.9 and 0.90.11.)
 
-## 0.90.2：默认观感与实际 GPU 路径
+## 0.90.2 — Default look and a real GPU path
 
-- 胶片 gamma **预设数值保持0.90.1原值**，没有统一×1.25。Positive Out 的 Gamma R/G/B 后紧接 **Gamma scale**，默认 **1.15**，范围.25–2。有效 gamma = 可见 R/G/B ×可见 scale，保持通道比例。Exposure 默认 **0.90 stops**（原1.00）。这两个新默认是用户选择的扫描观感/对比调整，不是 Kodak 实测 gamma 的更正。
-- 因此0.90.2新实例默认输出有意不同于0.90.1。纯公式/DCTL对照需 scale=1、Exposure=1，或把对应有效 gamma/exposure显式送入参考。旧项目请备份；若宿主恢复旧Exposure1但新增scale取1.15，观感仍会变化。设scale1可回到旧gamma。
-- 例如500T LED预设仍显示 .45/.54/.53，scale1.15时有效值 .5175/.621/.6095。旧500T Base实测于scale1。0.90.2当时Base按用户在新默认下眼调，从1.57/0/1.00改为1.40/0/0.80；已取消重测，不把眼调值视为通用stock校准。
-- Windows NVIDIA/Resolve若采用CUDA，只有OpenCL的插件可能退回CPU，带来整帧GPU↔CPU搬运。这是本次排查的**可验证假设，不是已测出的用户机根因**。本版新增CUDA Driver API/PTX路径，让宿主可直接提供CUDA device pointers和stream。
-- 播放/改变画面后点 **Show render engine**：应看到实际 `CUDA PTX (host stream)`、`OpenCL buffers (host queue)` 或 `CPU N threads`，并列出驱动/runtime可用性。仅“有CUDA驱动”不代表Resolve已协商CUDA；仍显示CPU时应先查宿主GPU模式、驱动、旧bundle/插件缓存，而不是据此承诺FPS。
+- Film-stock **gamma preset numbers stayed at their 0.90.1 values**; they were not uniformly multiplied by 1.25. Positive Out gained a **Gamma scale** control immediately after Gamma R/G/B, default **1.15**, range 0.25–2. Effective gamma = visible R/G/B × visible scale, preserving channel ratios. Exposure defaulted to **0.90 stops** (previously 1.00). Those two new defaults were a user-chosen scan look / contrast adjustment, not a correction of Kodak-measured gammas. Later releases set both defaults back to 1.0; existing projects keep whatever the host saved.
+- New 0.90.2 instances therefore did not match 0.90.1 defaults on purpose. Pure formula / DCTL comparisons needed scale = 1 and Exposure = 1, or the corresponding effective gamma / exposure fed into the reference. Back up old projects: if the host restored Exposure 1 but picked up the new scale of 1.15, the look still changed. Setting scale to 1 recovered the old gammas.
+- Example: the 500T LED preset still displayed .45 / .54 / .53; at scale 1.15 the effective values were .5175 / .621 / .6095. The older 500T Base had been measured at scale 1. Under the 0.90.2 defaults the Base was eye-tuned from 1.57 / 0 / 1.00 to 1.40 / 0 / 0.80 (and later to 1.07 / 0 / 0.67 in 0.90.3). That eye-tuning is not a universal stock calibration, and no re-measurement was done.
+- On Windows NVIDIA / Resolve, a plugin that only implemented OpenCL could be forced back to CPU when the host was in a CUDA mode, implying a full-frame GPU↔CPU copy. That was a **testable hypothesis, not a measured root cause on the user's machine**. 0.90.2 added a CUDA Driver API / PTX path so the host can pass CUDA device pointers and a stream directly.
+- After playback or a picture change, **Show render engine** should report the engine actually used: `CUDA PTX (host stream)`, `OpenCL buffers (host queue)`, or `CPU N threads`, and whether the driver / runtime is available. “A CUDA driver is installed” does not mean Resolve negotiated CUDA. If the line still says CPU, check the host GPU mode, the driver, and stale bundles / plugin caches before promising any FPS figure.
 
-## 处理链与交互
+## Processing chain and interaction
 
-线性 camera calibration → Density In → Positive Out。按反馈移除整个 mask/crosstalk 参数组和计算阶段；camera calibration 保留。原独立 DCTL/Go Develop 不改。新 OFX Film base 默认 **0.5/0.5/0.5**；Positive gamma sliders 默认 .55/.635/.62，Gamma scale默认1.15，500T Base 默认加载到可见balance（1.07/0/0.67）、曝光 +0.90、Cineon 输出不变。旧项目请先备份：被移除的 stage 不再生效，不承诺与旧项目完全同观感。
+Linear camera calibration → Density In → Positive Out. Following feedback, the entire mask/crosstalk parameter group and processing stage were removed; camera calibration remains. The independent DCTL / Go Develop paths were not changed. New OFX Film base defaults to **0.5 / 0.5 / 0.5**. At 0.90.2, Positive gamma sliders defaulted to .55 / .635 / .62, Gamma scale to 1.15, 500T Base loaded into the visible balances (later 1.07 / 0 / 0.67), Exposure +0.90, and Cineon output stayed the default. Back up old projects: a removed stage no longer runs, and an identical look is not promised. Current defaults (Gamma scale 1.0, Exposure 1.0, Tone / Tone Color on) are described in [ofx/README.md](../ofx/README.md) and in the 0.90.9–0.90.14 sections above.
 
-Film base and balance 合并片种 gamma、T/D、3200/3800/4400/5000/5600K、片基sliders；Gamma R/G/B和紧随Gamma B的Gamma scale位于Positive Out。选择 stock 立即填 gamma 并建议 T/D；选择类型/色温立即填片基，无 Apply/cast 字段。手动微调保留。科学模型和完整片基表见 [WB](data/ofx_wb.md)，gamma 来源/不确定度见 [stock gamma](data/ofx_stock_gamma.md)。
+Film base and balance combine stock gamma, T/D, 3200/3800/4400/5000/5600 K, and the film-base sliders. Gamma R/G/B and the Gamma scale that follows Gamma B live in Positive Out. Choosing a stock immediately fills gamma and suggests T/D; choosing type / colour temperature immediately fills film base. There is no Apply or cast field. Manual trimming remains. The scientific model and the full film-base table are in [WB](data/ofx_wb.md); gamma sources and uncertainty are in [stock gamma](data/ofx_stock_gamma.md).
 
-`base = baseline × 10^(+offset)`：正号与 Density_In `−log10(pixel/base)` 一致。新实例 baseline .5；Load metadata 后用导入的 camera-corrected base 作 baseline。baseline 单独持久保存，切换预设或反复 Load 不累乘；手动 base 微调在下一次选预设时重置。自动 source metadata 模式在 render 副本套同一补偿，不写 UI。手改 base / 选预设 / Load 将退出 Auto，以允许手动覆盖。
+`base = baseline × 10^(+offset)`: the positive sign matches Density In `-log10(pixel / base)`. New instances use baseline 0.5; after Load metadata the imported camera-corrected base becomes the baseline. The baseline is persisted on its own, so switching presets or loading repeatedly does not compound. A manual base trim is reset the next time a preset is chosen. Automatic source-metadata mode applies the same compensation on the render copy and does not write the UI. Hand-editing base, choosing a preset, or Load leaves Auto so a manual override can stick.
 
-Positive Out 保留 **Film white balance (None / 500T Base)**，是 loader，不是额外隐藏gain。500T Base 当前用户眼调R+1.07/G0/B+0.67 stops，立即写 Red/Green/Blue balance；None 将三条复位0。旧 white_code 0.0013 slope 已删除。T/D/stock选择只更新各自base/gamma，不清空手动balance，两者可显式叠加。每stock将来只有一个实测Base，其他片种未测不编数。[表、条件、测量记录](data/ofx_film_bases.md)。
+Positive Out keeps **Film white balance (None / 500T Base)** as a loader, not a hidden extra gain. 500T Base currently writes the user eye-tuned R +1.07 / G 0 / B +0.67 stops into Red/Green/Blue balance; None resets the three sliders to 0. The old white_code 0.0013 slope was removed. T/D / stock choices update their own base / gamma only and do not clear a manual balance; the two can be combined explicitly. Each stock will have at most one measured Base; unmeasured stocks do not get invented numbers. [Table, conditions, and measurement notes](data/ofx_film_bases.md).
 
-## Viewer 灰/白点
+## Viewer gray / white point
 
-1. 按上节选择Open FX Overlay，勾Pick gray on viewer，在画面点击/拖动实际中性灰白参考。也可手动开启Auto gray from point，再用原生2D handle或手填canonical X/Y。不能用任意有色物体。默认点仍由normalized .5/.5映射到画面中心。
-2. `Sample radius (pixels)` 0–32，在 **当前 render 分辨率**上取方形 patch；图边裁切，跳过透明/非有限样本。请求 Source ROI 包含 patch，支持 nonzero bounds、render scale、PAR、premult。
-3. 每帧从 SOURCE 读样本，解 DI、应用当前 camera 与 Density In，平均得到进入 Positive Out 的密度 code（×1023）。只在 render 副本启用 `gray_on`/`gray_r/g/b`，沿用现有灰点公式使 R/B 相对 G 中性；不改 Film base，也不在render写动画 key、不改变曝光目标；之后仍可手动微调balance。
-4. CPU 直接读小 patch；OpenCL 用一次 `clEnqueueReadBufferRect` 阻塞下载小 patch，再用同样的密度算法。**仅开启 picker 时**产生这次小 readback/同步，默认关闭。不读整张 GPU 图，也不把 cl_mem 当 CPU pointer。
-5. 固定画面坐标、逐帧采样，**不是跟踪器**；移动主体、饱和白、纯黑/透明区、上游节点改变像素都会影响结果。点不在输入 bounds 或无有效像素时保留手动灰点；Show render engine 显示 `pick unavailable`。没有bake按钮；已实现自绘GL overlay并保留原生point fallback，Resolve实际viewer呈现/输入仍待验收。
+1. As in the 0.90.4 section, choose Open FX Overlay, enable Pick gray on viewer, and click or drag an actually neutral gray/white reference. You can also turn Auto gray from point on manually and use the native 2D handle or type canonical X/Y. Do not use an arbitrary coloured object. The default point is still the frame centre from normalised 0.5 / 0.5.
+2. `Sample radius (pixels)` is 0–32 and takes a square patch at the **current render resolution**; it is clipped at the image edge and skips transparent or non-finite samples. The requested Source ROI includes the patch and handles non-zero bounds, render scale, PAR, and premultiplication.
+3. Each frame reads the sample from SOURCE, undoes Density In, applies the current camera and Density In, and averages to a density code going into Positive Out (×1023). Only the render copy enables `gray_on` / `gray_r/g/b`, using the existing gray-point formula so R and B are neutral relative to G. Film base is not changed, no animation keys are written during render, and the exposure target is unchanged; balances can still be trimmed by hand afterwards.
+4. CPU reads the small patch directly. OpenCL does one blocking `clEnqueueReadBufferRect` of the small patch and then the same density math. **This small readback / sync happens only when the picker is on**, and is off by default. The plugin does not download the whole GPU image and does not treat a `cl_mem` as a CPU pointer.
+5. The point is a fixed frame coordinate sampled every frame, **not a tracker**. A moving subject, a saturated white, a pure-black or transparent area, or an upstream node that changes the pixels will affect the result. If the point is outside the input bounds or has no valid pixels, the manual gray point is kept and Show render engine shows `pick unavailable`. There is no bake button. A custom GL overlay is implemented and the native point fallback is kept; real Resolve viewer appearance and input still need acceptance.
 
-## 数据契约
+## Data contract
 
-TIFF IFD0，tag270（ImageDescription），ASCII、NUL 结尾 JSON；中文/非 BMP 字符使用 JSON Unicode escapes，不依赖私有 tag。保留 Make/Model/Software 等原 tag、LZW、原像素。
+TIFF IFD0, tag 270 (ImageDescription), ASCII NUL-terminated JSON. Non-ASCII / non-BMP characters use JSON Unicode escapes. No private TIFF tag is required. Original tags such as Make / Model / Software, LZW, and the original pixels are preserved.
 
 ```json
 {
@@ -175,7 +175,6 @@ TIFF IFD0，tag270（ImageDescription），ASCII、NUL 结尾 JSON；中文/非 
   "film_base": [0.49844, 0.49639, 0.50210],
   "film_base_space": "after_profile",
   "base_source": "light leveling (after profile)",
-  "base_source": "measured RGB TIFF clear base",
   "encoding": "linear",
   "camera_matrix": [1,0,0,0,1,0,0,0,1],
   "camera_strength": 1,
@@ -184,96 +183,85 @@ TIFF IFD0，tag270（ImageDescription），ASCII、NUL 结尾 JSON；中文/非 
 }
 ```
 
-The example shows app v0.91 coordinates, not a universal film base. `light_rgb`
-is lamp drive, never the reference. `film_base` is the accepted Light-page
-leveling result after profile, unchanged by capture or merge. The app's default-on
-capture option displays that result and timestamp. Off or no matching accepted
-result omits the base instead of estimating it from image content. Light state
-and scan presets persist the result.
+The example shows app v0.91 coordinates, not a universal film base. `light_rgb` is lamp drive, never the reference. `film_base` is the accepted Light-page leveling result after profile, unchanged by capture or merge. The app's default-on capture option displays that result and timestamp. Off or no matching accepted result omits the base instead of estimating it from image content. Light state and scan presets persist the result.
 
-OFX 0.90.5 recognizes `film_base_space: after_profile` and does not multiply
-that base by the pending camera matrix again. TIFF pixels still receive their
-pending matrix. Older unmarked files retain their original pre-profile behavior.
-Visible base sliders equal the reference times `10^offset` for the current T/D
-selection. T at 3200 K or D at 5600 K displays the exact loaded reference. Files with
-`encoding=processed` or nonempty `processing` remain ineligible for automatic
-linear conversion. Existing v0.90 TIFFs are not automatically repaired.
+OFX 0.90.5 recognizes `film_base_space: after_profile` and does not multiply that base by the pending camera matrix again. TIFF pixels still receive their pending matrix. Older unmarked files retain their original pre-profile behavior. Visible base sliders equal the reference times `10^offset` for the current T/D selection. T at 3200 K or D at 5600 K displays the exact loaded reference. Files with `encoding=processed` or nonempty `processing` remain ineligible for automatic linear conversion. Existing v0.90 TIFFs are not automatically repaired.
 
-`created` 是写入时间（Asia/Shanghai UTC+8），不是胶片拍摄时间。当前无 EXIF 原始拍摄日期恢复，也没有宣称根据 Kelvin 可以推导设备 RGB PWM。扫描 TIFF 与照片场景色温是两个独立概念。
+`created` is the write time (Asia/Shanghai, UTC+8), not the time the film was shot. There is no EXIF original-date recovery, and a Kelvin value is not claimed to imply a device RGB PWM. A scan TIFF and the scene colour temperature of the photograph are independent.
 
-元数据装在原 HDR/三色写出路径中；裁切复制原 tag270；hair/dust 写回保留。离线 Merge 不复制当前灯状态到旧图；三色单通道中间文件标记 `encoding=trichrome-component`，不会当作成品RGB自动套用。单独 RAW Convert/开发预览导出没有扫描时的灯状态，**不冒充有卷扫描元数据**。老文件不被追溯修改。sidecar 按需用随 ZIP 脚本导出，不强制每次扫描多写一份文件。
+Metadata is written on the original HDR / trichrome output path; crop copies the original tag 270; hair / dust write-back preserves it. Offline Merge does not copy the current lamp state onto an old picture. Trichrome single-channel intermediates are marked `encoding=trichrome-component` and are not treated as finished RGB for automatic loading. A standalone RAW Convert or Develop-preview export has no scan-time lamp state and **must not pretend to carry roll-scan metadata**. Old files are not rewritten in place. A sidecar can be exported on demand with the script in the plugin ZIP; a sidecar is not forced on every scan.
 
-## 文件加载与根因
+## File loading and a measured root cause
 
-实际检查用户的 `/workspace/uploads/0206.tiff`：4170×6246、约156MB、IFD 位于像素之后，**没有 tag270**（只有像素/Software 等 tag）。因此旧版的 “No NSS metadata…” 对这张图是正确的“旧扫描没有信息”，不是已经证实的 Windows 路径故障。不能从不存在的元数据恢复未知 RGB；旧文件需手填或提供含实测值的 sidecar。
+A direct inspection of the user's `/workspace/uploads/0206.tiff` showed 4170×6246, about 156 MB, the IFD after the pixel data, and **no tag 270** (only pixel tags, Software, and similar). The older message “No NSS metadata…” was therefore a correct “this old scan has no information”, not a confirmed Windows path failure. Unknown RGB cannot be recovered from metadata that does not exist; old files need values typed by hand or a sidecar that contains measured values.
 
-本次加固：路径立即从 OFX string 复制；去外层引号/空白，支持 file:// percent UTF-8；Windows `_wfopen` + UTF-8→UTF-16，`_fseeki64`；classic TIFF / BigTIFF、LE/BE、64-bit offset。只 seek/read header、IFD 和 ≤1MiB description，**不读像素**。JSON BOM 亦支持；截断/数组/encoding/schema/matrix 校验；缺少信息负缓存，避免每帧重复读旧图。相同路径mtime最多每250ms检查一次，元数据只有路径/mtime变化才重读；显式Load强制立即重读。按钮捕获异常，不让异常跨 C ABI。窄 UI 短状态：`Loaded: 0.50/0.50/0.50` / `No NSS info (old scan)` / `File not found`。
+Hardening in this era: the path is copied immediately from the OFX string; outer quotes and whitespace are stripped; `file://` and percent-encoded UTF-8 are accepted; Windows uses `_wfopen` with UTF-8→UTF-16 and `_fseeki64`; classic TIFF and BigTIFF, LE/BE, and 64-bit offsets are supported. Only the header, IFD, and a description of at most 1 MiB are seeked/read — **pixels are not read**. A JSON BOM is accepted. Truncation, array, encoding, schema, and matrix checks apply; missing information is negatively cached so an old file is not re-read every frame. The same path's mtime is probed at most every 250 ms, and metadata is re-read only when the path or mtime changes; an explicit Load forces an immediate re-read. The button catches exceptions so they do not cross the C ABI. Narrow-UI status strings include `Loaded: 0.50/0.50/0.50`, `No NSS info (old scan)`, and `File not found`.
 
-Load 写入 base/camera、建立未作场景 WB 的 baseline，再套当前预设一次，关闭 Auto。失败不改变原来的 base。pending matrix 同时变换影像和导入片基；baked matrix 不重复应用。device `light_rgb` 只是 provenance/PWM，绝不当作归一化片基。
+Load writes base / camera, establishes a baseline that has not had scene WB applied, then applies the current preset once, and turns Auto off. Failure leaves the previous base unchanged. A pending matrix transforms both the image and an imported film base; a baked matrix is not applied twice. Device `light_rgb` is provenance / PWM only and is never treated as a normalised film base.
 
-## Resolve 自动源路径边界
+## Resolve automatic source-path limits
 
-标准 OFX 不保证原始源路径。探测公开记录的 Resolve 20 `OfxImageEffectPropSrcFilePath`，依次检查 render args、输入 image、effect、source clip；缺失就用明确文件路径 + Load。公开依据：[ASWF #142](https://github.com/AcademySoftwareFoundation/openfx/issues/142)。未安装私有 Resolve SDK，不能保证各版本都暴露该属性。
+Standard OFX does not guarantee a source filename. The plugin probes the publicly documented Resolve 20 `OfxImageEffectPropSrcFilePath`, checking render args, the input image, the effect, and the source clip in that order. If it is missing, use an explicit file path and Load. Public reference: [ASWF #142](https://github.com/AcademySoftwareFoundation/openfx/issues/142). The private Resolve SDK is not installed here, so every host version is not guaranteed to expose the property.
 
-Auto 有效时 metadata 只覆盖 render 副本，UI 不跳动；没有/损坏 metadata 回到手动，Load 可显示原因。代理、复合片段、序列 `%04d`、不同文件、上游非线性/色域变换可能使路径与像素不匹配。只有未被改写的同一线性 NSS 扫描可用，不是自动色彩管理。更改 camera/neutralise 后应重新确定片基。sidecar 导出脚本当前限 classic TIFF，插件自身支持 BigTIFF。
+When Auto is effective, metadata covers only the render copy and the UI does not jump; missing or damaged metadata falls back to manual, and Load can show the reason. Proxies, compound clips, `%04d` sequences, a different file, or an upstream non-linear / colour-managed transform can make the path disagree with the pixels. Only the same unconverted linear NSS scan is valid — this is not automatic colour management. After changing camera calibration or neutralisation, re-establish the film base. The sidecar export script is currently limited to classic TIFF; the plugin itself supports BigTIFF.
 
 ## CUDA / OpenCL / CPU
 
-### CUDA：Windows NVIDIA实验路径
+### CUDA: experimental Windows NVIDIA path
 
-- 系统目录动态加载 **nvcuda.dll**，只用CUDA Driver API。无需在用户机安装nvcc/NVRTC/toolkit，不捆绑NVIDIA DLL或专有SDK headers。
-- 声明OFX CudaRenderSupported/CudaStreamSupported，按CudaEnabled读取真实device pointers，按CudaStream使用宿主stream。用source allocation/stream恢复宿主context，作用域结束恢复线程原context；不创建自己的GPU context，不复制全帧到CPU。
-- 每实例/host context只JIT一次PTX并缓存module/function。每launch把40个float常量作为160-byte参数块传入，不创建/上传device常量buffer，不共享可变kernel参数。
-- 提供stream时只enqueue，不finish、不deviceSynchronize。旧宿主不提供stream属性时按OFX契约等待default stream；仅开启灰点时需小patch pinned-host download和该stream的等待。
-- PTX由官方 **NVRTC12.0.140** 在Linux离线生成，目标compute_52/PTX8.0，精确除法、禁FMA/FTZ/fast-math。ptxas已对sm_52成功组装，16寄存器、无stack/spill。需CUDA12兼容的NVIDIA驱动与sm_52或更新设备；实际Windows Driver JIT仍待验收。
-- 测试覆盖mock Driver ABI、opaque device addresses、context切换/恢复、host/default stream、module cache、native编译CUDA源数学和可选灰点。**这不是PTX GPU执行/真实CUDA math parity**。无物理NVIDIA GPU，不能声称已测实际CUDA性能。
+- **nvcuda.dll** is loaded dynamically from the system directory; only the CUDA Driver API is used. The user machine does not need nvcc, NVRTC, or a toolkit install, and no NVIDIA DLL or proprietary SDK headers are bundled.
+- The plugin declares OFX CudaRenderSupported / CudaStreamSupported, reads real device pointers when CudaEnabled, and uses the host stream when CudaStream is set. It restores the host context from the source allocation / stream and restores the thread's previous context when the scope ends. It does not create its own GPU context and does not copy full frames to the CPU.
+- PTX is JIT-compiled once per instance / host context and the module / function are cached. Each launch passes 40 floats (later builds use more for Tone) as a small parameter block; no device constant buffer is created or uploaded, and mutable kernel parameters are not shared.
+- When a stream is provided the plugin only enqueues: it does not finish or deviceSynchronize. Older hosts that omit the stream property wait on the default stream, per the OFX contract. Only the gray picker needs a small pinned-host download and a wait on that stream.
+- PTX is generated offline on Linux with official **NVRTC 12.0.140**, targeting compute_52 / PTX 8.0, IEEE division, no FMA / FTZ / fast-math. ptxas assembled it for sm_52 with 16 registers and no stack or spills (later Tone builds regenerated PTX; see the 0.90.12–0.90.14 notes). A CUDA 12-compatible NVIDIA driver and sm_52 or newer are required; actual Windows Driver JIT still needs acceptance.
+- Tests cover a mock Driver ABI, opaque device addresses, context switch/restore, host/default streams, module cache, native-compiled CUDA source math, and the optional gray point. **This is not PTX GPU execution or real CUDA math parity.** There is no physical NVIDIA GPU on the box, so no real CUDA performance claim is made.
 
-### OpenCL与CPU
+### OpenCL and CPU
 
-- 系统目录动态加载OpenCL.dll，采用宿主queue/cl_mem buffer，不支持OpenCL image。program和kernel按context/device缓存，设置args/enqueue以短mutex保护；切换两个真实PoCL context不会重复编译。不是每帧/每tile编译。
-- CPU精确math和最多8线程保持；逐实例缓存完全相同Pipeline的Prepared常量，参数/metadata/灰点结果变化才重建，不按时间猜测动画值。render仍读取当前time的参数，避免陈旧动画缓存。
-- 开启SupportsTiles/MultiResolution，关闭HostFrameThreading，避免宿主切片线程与内部CPU线程叠乘。clipGetImage明确请求render window对应canonical ROI；灰点关闭不扩展至全帧，开启才并入patch。宿主可返回更大的buffer，插件不假定紧密内存布局。
-- GPU失败返回OFX GPU render failure (1002)，允许宿主重试CPU；不把CUDA/OpenCL pointer当CPU指针。可手动Render engine→CPU。自动回退取决于宿主实现。
-- Metal与当前Windows包无关，没有Metal实现。CUDA/OpenCL都需要宿主真实协商，不能只看advertised flag判断是否在GPU。
+- OpenCL.dll is loaded dynamically from the system directory. The plugin uses the host queue and `cl_mem` buffers; OpenCL images are not used. Programs and kernels are cached per context / device; setting args and enqueueing is guarded by a short mutex. Switching between two real PoCL contexts does not recompile. There is no per-frame or per-tile compile.
+- Exact CPU math and up to eight threads remain. Fully identical Pipeline `Prepared` constants are cached per instance and rebuilt only when parameters, metadata, or the gray-point result change; animation values are not guessed from time. Render still reads parameters at the current time so a stale animation cache is avoided.
+- SupportsTiles / MultiResolution are on; HostFrameThreading is off, so host tile threads are not multiplied by the internal CPU threads. `clipGetImage` requests the canonical ROI of the render window. With the gray picker off this is not expanded to the full frame; with it on the patch is included. The host may return a larger buffer; the plugin does not assume a tightly packed layout.
+- A GPU failure returns OFX GPU render failure (1002) so the host may retry on CPU. CUDA / OpenCL pointers are never treated as CPU pointers. Render engine can be forced to CPU. Automatic fallback depends on the host.
+- Metal is not part of the current Windows package and is not implemented. Both CUDA and OpenCL require a real host negotiation; an advertised flag alone does not mean the effect is running on the GPU.
 
-## 验证与性能
+## Validation and performance
 
-- Go v0.90 writer fixture 真实写 TIFF，当前插件导入；classic/BigTIFF LE/BE、稀疏 >4GiB metadata offset、Unicode/quoted/file URL/BOM、实际旧156MB TIFF、坏 metadata 均测试。
-- 最小 OFX suite host 调用真实 Load/Describe/Create/Render/Changed/ROI/Destroy：负 row stride、非零 origin、alpha/premult、自动 metadata、立即 stock/gamma/base、反复 Load/切换不累乘、WB 正号、picker 中性化及越界 fallback。原生/custom viewer overlay外观未测。
-- Overlay host测试调用descriptor里的真实callback：Describe/Create/Draw/PenDown/Motion/Up/LoseFocus/Destroy，验证arm、canonical点位、首击Auto/可见balance复位、后续微调保留、RoD边界、GL命令几何/状态保护和render-scale/PAR。GL用记录mock，不是真实OpenGL/Resolve。
-- CPU 对独立 Go DCTL port：100组合×360像素×RGB =108000；旧Go隐藏WB关闭，用相同可见manual gains等效比较。最大绝对差 **9.16e-5**（HDR），实际 scan patch 最大 **6.10e-5**，scaled max **1.50e-6**。通过 `1e-5*max(1,abs(reference))`，不声称 HDR 绝对差均≤1e-5。[结果](data/ofx_0903_parity_result.json)。
-- 真实 OpenCL Render：164组合 +4个二维 picker/prepass 组合（0.90.2另验证双context program/kernel缓存），193536通道比较，最大绝对差 **2.10e-5**、scaled **9.93e-7**（相对 CPU）。[结果](data/ofx_0903_opencl_result.json)。不同 GPU 驱动仍需验收。
-- Windows x64 MinGW 静态 C++/gcc DLL 导出2个 OFX 入口，仅系统 KERNEL32/msvcrt imports；OpenCL.dll 是运行时加载，不是硬依赖。
+- A Go v0.90 writer fixture writes a real TIFF that the current plugin imports. Tests cover classic / BigTIFF LE/BE, a sparse metadata offset above 4 GiB, Unicode / quoted / file URL / BOM paths, the real old 156 MB TIFF, and bad metadata.
+- A minimal OFX suite host calls the real Load / Describe / Create / Render / Changed / ROI / Destroy path: negative row stride, non-zero origin, alpha / premultiplication, automatic metadata, immediate stock / gamma / base, repeated Load / switching without compounding, the correct WB sign, picker neutralisation, and out-of-bounds fallback. Native / custom viewer overlay appearance was not tested here.
+- The overlay host test calls the real callbacks from the descriptor: Describe / Create / Draw / PenDown / Motion / Up / LoseFocus / Destroy, and checks arming, canonical points, first-click Auto / visible-balance reset, later trims being kept, RoD bounds, GL command geometry / state protection, and render-scale / PAR. GL is a recording mock, not real OpenGL or Resolve.
+- CPU versus the independent Go DCTL port: 100 combinations × 360 pixels × RGB = 108,000 values. The old Go hidden WB is off; the same visible manual gains are compared. Maximum absolute difference **9.16e-5** (HDR), **6.10e-5** on a real scan patch, scaled max **1.50e-6**. The test uses `1e-5 * max(1, abs(reference))` and does not claim every HDR absolute error is ≤ 1e-5. [Results](data/ofx_0903_parity_result.json). Later Tone releases have their own tighter kernel-versus-reference figures in the 0.90.12–0.90.14 sections.
+- Real OpenCL Render: 164 combinations + 4 two-dimensional picker / prepass combinations (0.90.2 also verified a dual-context program / kernel cache), 193,536 channel comparisons, maximum absolute difference **2.10e-5**, scaled **9.93e-7** versus CPU. [Results](data/ofx_0903_opencl_result.json). Other GPU drivers still need acceptance.
+- The Windows x64 MinGW static C++/gcc DLL exports the two OFX entry points and imports only system KERNEL32 / msvcrt. OpenCL.dll is loaded at runtime and is not a hard dependency.
 
-## 0.90.2实际Render CPU对照（不是CUDA/Resolve FPS）
+## 0.90.2 actual Render CPU comparison (not CUDA or Resolve FPS)
 
-结论：**没有额外CPU加速**。本轮新版大帧median慢约2.8%（五组范围重叠），16×16微tile单次慢约1.9%（约0.74µs），不将缓存改动包装成CPU吞吐提升。主要改进目标是让NVIDIA宿主可协商CUDA、避免CPU回退及不必要全图请求，真实收益必须在用户机确认。
+Conclusion: **there is no extra CPU speedup**. On this round the new build's large-frame median was about 2.8% slower (the five-run ranges overlap) and a single 16×16 micro-tile was about 1.9% slower (about 0.74 µs). Caching changes are not packaged as a CPU throughput win. The main goal was to let an NVIDIA host negotiate CUDA and avoid a CPU fallback and unnecessary full-frame requests. Any real gain has to be confirmed on the user's machine.
 
-同一minimal OFX host实际调用旧tag `ofx-v0.90.1` 与0.90.2 Render，不是只测一个数学函数。双方有效参数匹配0.90.2默认：raw gamma .55/.635/.62×1.15、Exposure.90、balance1.40/0/.80、相同pending camera/base metadata、Cineon、picker off。旧版用手调gamma/balance匹配，不把观感变化算作优化。
+The same minimal OFX host actually called Render on the old tag `ofx-v0.90.1` and on 0.90.2; this is not a single math-function microbench. Effective parameters on both sides matched the 0.90.2 defaults: raw gamma .55 / .635 / .62 × 1.15, Exposure 0.90, balance 1.40 / 0 / 0.80, the same pending camera / base metadata, Cineon, picker off. The old build was hand-matched on gamma / balance so a look change is not counted as an optimisation.
 
-Linux8-vCPU Xeon/KVM，同-O3/no-math-errno/no-trapping-math。每process预热一次，五组old/new交替，实际0206全帧6246×4170，计时包含参数、metadata、image fetch、prep及内部线程启动；不含TIFF decode/process启动/真实宿主调度与GPU↔CPU搬运。
+Linux 8-vCPU Xeon/KVM, same `-O3` / no-math-errno / no-trapping-math. Each process warmed up once, then five alternating old/new groups. The real 0206 full frame is 6246×4170. Timing includes parameters, metadata, image fetch, prep, and internal thread start; it excludes TIFF decode, process start, real host scheduling, and GPU↔CPU copies.
 
 | CPU Render | 0.90.1 median / range ms | 0.90.2 median / range ms |
 |---|---:|---:|
-| 全帧 | 405.332535 / 402.708040–419.419989 | 416.594263 / 404.228400–470.040237 |
-| 16×16 tile（2000次/组，单次） | 0.039079 / 0.038704–0.039299 | 0.039818 / 0.039739–0.040203 |
+| Full frame | 405.332535 / 402.708040–419.419989 | 416.594263 / 404.228400–470.040237 |
+| 16×16 tile (2000 times/group, per call) | 0.039079 / 0.038704–0.039299 | 0.039818 / 0.039739–0.040203 |
 
-全输出checksum匹配、所有输出finite、固定grid参考误差0、失败0。小tile组中新版Prepared只建1次、metadata只解析1次、mtime probe1次；source全图请求从2000次变为0（改为明确ROI请求，真实宿主如何分配仍待测）。大帧CPU算术仍占主导：独立非对照profile八帧wall4.376s/user28.553s/system.584s；不能把250ms metadata节流或一次性JIT缓存宣称为成倍CPU像素计算加速。
+All output checksums matched, every output was finite, the fixed-grid reference error was 0, and there were 0 failures. In the small-tile groups the new build built `Prepared` once, parsed metadata once, and probed mtime once; full-frame source requests went from 2000 to 0 (an explicit ROI is requested instead; how a real host allocates that is still untested). On the large frame, CPU arithmetic still dominates: an independent non-comparison profile of eight frames was 4.376 s wall / 28.553 s user / 0.584 s system. A 250 ms metadata throttle or a one-time JIT cache must not be advertised as a multi-fold CPU pixel-math speedup.
 
-复现：`ofx/tests/benchmark_host.sh`；[原始五组/校验/计数](data/ofx_0902_host_benchmark.json)。[CUDA离线构建/组装记录](data/ofx_0902_cuda_build.json)。无物理NVIDIA GPU，CUDA Driver JIT、PTX执行parity和GPU性能均未测。
+Reproduce with `ofx/tests/benchmark_host.sh`; [raw five-run checks and counts](data/ofx_0902_host_benchmark.json). [CUDA offline build / assembly record](data/ofx_0902_cuda_build.json). There is no physical NVIDIA GPU, so CUDA Driver JIT, PTX execution parity, and GPU performance were not measured.
 
-### 历史0.90→0.90.1 CPU benchmark（不是0.90.2额外加速）
+### Historical 0.90 → 0.90.1 CPU benchmark (not an extra 0.90.2 speedup)
 
-0206 全帧 6246×4170 =26,045,820 像素，内存 float RGBA。Linux box 8 vCPU，Intel Xeon/KVM；相同编译器与 `-O3 -fno-math-errno -fno-trapping-math`。对照提交 `fc8dd26` 单线程（旧版发货O2，但这里双方统一O3）；相同 .5 base/原gamma曝光Cineon、identity camera、旧cross关闭；双方使用相同实测Base（旧参考以None+manual R1.57/B1.00等效）。每路径预热1次，5组交替测，包含 preparation/线程启动，消费 checksum并逐值比较。
+0206 full frame 6246×4170 = 26,045,820 pixels, in-memory float RGBA. Linux box, 8 vCPU, Intel Xeon/KVM; same compiler and `-O3 -fno-math-errno -fno-trapping-math`. The comparison commit is `fc8dd26`, single-threaded (the originally shipped 0.90 used O2; both sides are O3 here). Same 0.5 base, original-gamma, Exposure, Cineon, identity camera, old crosstalk off; both sides use the same measured Base (the old reference is equivalent to None + manual R 1.57 / B 1.00). Each path is warmed once, then five alternating groups, including preparation and thread start; a checksum is consumed and every value is compared.
 
 | path | median ms | min–max ms |
 |---|---:|---:|
-| 原 v0.90 单线程 | 3779.940 | 3757.330–3808.072 |
-| 0.90.1 prepared 单线程 | 1796.088 | 1780.715–1822.019 |
-| 0.90.1 prepared 8线程 | 331.550 | 283.902–336.799 |
+| Original v0.90 single thread | 3779.940 | 3757.330–3808.072 |
+| 0.90.1 prepared single thread | 1796.088 | 1780.715–1822.019 |
+| 0.90.1 prepared 8 threads | 331.550 | 283.902–336.799 |
 
-该测试范围 **11.40×**，default全帧输出 bit-exact（max error0）；优化前后不是改低分辨率/缓存结果。单线程2.10×，再8线程5.42×，支持“重复逐像素计算/单核算术限制”的解释，不是 TIFF decode/I/O 加速。没有把 optional picker readback 纳入默认关闭基准。
+This test range is **11.40×**, with bit-exact default full-frame output (max error 0). The optimisation is not a lower resolution or a cached result. Single thread is 2.10×, then 8 threads another 5.42×, which supports a “repeated per-pixel work / single-core arithmetic bound” reading, not a TIFF decode / I/O speedup. The optional picker readback is not included in this default-off bench.
 
-范围只含 CPU 内存 render；不含 decode、metadata I/O、viewer/host调度、GPU传输/执行。**不等于 Windows/Resolve 端到端加速11.40×**；真实时间待用户验收。[原始5组、误差和checksum](data/ofx_0901_cpu_benchmark.json)，复现 `ofx/tests/benchmark.sh`。
+The scope is CPU in-memory render only: no decode, metadata I/O, viewer / host scheduling, or GPU transfer / execution. **This is not an 11.40× end-to-end Windows / Resolve speedup**; real timings await user acceptance. [Raw five runs, errors, and checksums](data/ofx_0901_cpu_benchmark.json), reproduce with `ofx/tests/benchmark.sh`.
 
-科学限制：T=5219/3200K，D=5207/5600K（其他 daylight stocks 暂共用5207）；Planck 非实测 LED/CIE D。Status M 曲线 slope 与 scanner RGB gamma 不等价，见 [5219 LED](data/5219_led_gamma.md)。不改扫描灯/相机 WB/已取消400K stash。
+Scientific limits: T = 5219 / 3200 K, D = 5207 / 5600 K (other daylight stocks temporarily share 5207); Planck is not a measured LED or CIE D. A Status M curve slope is not equivalent to a scanner RGB gamma; see [5219 LED](data/5219_led_gamma.md). The scanning lamp, camera WB, and the cancelled 400K stash are not changed here.
