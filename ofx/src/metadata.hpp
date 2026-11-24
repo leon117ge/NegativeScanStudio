@@ -71,6 +71,7 @@ inline std::string readDescription(const std::string &input) {
 struct Metadata {
  std::array<float,3> base{};std::optional<std::array<int,3>> light;
  std::optional<std::array<float,9>> camera;float strength=1;bool cameraApplied=false,baseAfterProfile=false;
+ std::string mode,cameraProfile,software;
 };
 inline Metadata parseMetadata(const std::string &text) {
  JSON j;try{j=JSON::parse(text);}catch(...){throw std::runtime_error("Bad NSS JSON");}
@@ -84,11 +85,15 @@ inline Metadata parseMetadata(const std::string &text) {
  if(!j.at("film_base").is_array()||j.at("film_base").size()!=3)throw std::runtime_error("Film base must have 3 elements");
  m.base=j.at("film_base").get<std::array<float,3>>();
  for(float v:m.base)if(!std::isfinite(v)||v<.0001f||v>16.f)throw std::runtime_error("Invalid film base");
- if(j.contains("light_rgb")) {m.light=j.at("light_rgb").get<std::array<int,3>>();for(int v:*m.light)if(v<0||v>65535)throw std::runtime_error("Invalid light drive value");}
- if(j.contains("camera_matrix")) {
+ if(j.contains("mode")&&j.at("mode").is_string())m.mode=j.at("mode").get<std::string>();
+ if(j.contains("camera_profile")&&j.at("camera_profile").is_string())m.cameraProfile=j.at("camera_profile").get<std::string>();
+ if(j.contains("software")&&j.at("software").is_string())m.software=j.at("software").get<std::string>();
+ if(j.contains("light_rgb")&&!j.at("light_rgb").is_null()) {m.light=j.at("light_rgb").get<std::array<int,3>>();for(int v:*m.light)if(v<0||v>65535)throw std::runtime_error("Invalid light drive value");}
+ if(j.contains("camera_matrix")&&!j.at("camera_matrix").is_null()) {
   if(!j.at("camera_matrix").is_array()||j.at("camera_matrix").size()!=9)throw std::runtime_error("Matrix must have 9 elements");
   m.camera=j.at("camera_matrix").get<std::array<float,9>>();for(float v:*m.camera)if(!std::isfinite(v)||std::abs(v)>16)throw std::runtime_error("Invalid camera matrix");
-  m.strength=j.at("camera_strength").get<float>();if(!std::isfinite(m.strength)||m.strength<0||m.strength>1)throw std::runtime_error("Invalid camera strength");
+  m.strength=j.contains("camera_strength")&&!j.at("camera_strength").is_null()?j.at("camera_strength").get<float>():1.0f;
+  if(!std::isfinite(m.strength)||m.strength<0||m.strength>1)throw std::runtime_error("Invalid camera strength");
  }
  m.cameraApplied=j.value("camera_applied",false);return m;
 }
