@@ -11,6 +11,8 @@ python3 ofx/tools/generate.py
 python3 ofx/tools/cuda_source.py
 "$CXX" -std=c++17 -O3 -fno-math-errno -fno-trapping-math -Iofx/vendor/openfx/include -Iofx/vendor/opencl ofx/tests/host_test.cpp -o "$BUILD/host_test"
 "$CXX" -std=c++17 -O3 -fno-math-errno -fno-trapping-math ofx/tests/math_runner.cpp -o "$BUILD/math_runner"
+"$CXX" -std=c++17 -O3 -fno-math-errno -fno-trapping-math ofx/tests/tone_test.cpp -o "$BUILD/tone_test"
+"$BUILD/tone_test"
 go build -o "$BUILD/go_reference" ./cmd/ofxreference
 NSS_META_FIXTURE="$BUILD/metadata-fixture.tiff" go test ./hdrscan -run TestScanTIFFMetadataAndHairPreservation -count=1
 "$BUILD/host_test" "$BUILD/metadata-fixture.tiff" "$SCAN"

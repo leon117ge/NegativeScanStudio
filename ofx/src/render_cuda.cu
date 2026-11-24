@@ -1,5 +1,5 @@
 // render_math.h is embedded before this kernel by tools/compile_cuda.py.
-struct NssBlock {float values[40];};
+struct NssBlock {float values[48];};
 extern "C" __global__ void nss_render_cuda(const float *source,float *dest,NssBlock block,
  int sx1,int sy1,int sx2,int sy2,int sourceStride,int dx1,int dy1,int dx2,int dy2,int destStride,
  int wx1,int wy1,int width,int height,int premult){
@@ -13,7 +13,10 @@ extern "C" __global__ void nss_render_cuda(const float *source,float *dest,NssBl
  if(premult&&a!=0.f){r/=a;g/=a;b/=a;}
  if(p[0]!=0.f){r=nss_di_decode(r);g=nss_di_decode(g);b=nss_di_decode(b);}
  if(p[27]!=0.f){float nr=r+p[37]*(p[28]*r+p[29]*g+p[30]*b-r),ng=g+p[37]*(p[31]*r+p[32]*g+p[33]*b-g),nb=b+p[37]*(p[34]*r+p[35]*g+p[36]*b-b);r=nr;g=ng;b=nb;}
- r=nss_channel(r,p,0);g=nss_channel(g,p,1);b=nss_channel(b,p,2);
+ if(!nss_tone_active(p)){r=nss_channel(r,p,0);g=nss_channel(g,p,1);b=nss_channel(b,p,2);}
+ else{r=nss_linear(nss_code(r,p,0),p,0);g=nss_linear(nss_code(g,p,1),p,1);b=nss_linear(nss_code(b,p,2),p,2);
+  float k=nss_shoulder_gain(nss_tone_norm(r,g,b),p);r*=k;g*=k;b*=k;float t=nss_toe_offset(nss_tone_min(r,g,b),p);
+  r=nss_encode(r+t,p);g=nss_encode(g+t,p);b=nss_encode(b+t,p);}
  if(premult){r*=a;g*=a;b*=a;}
  dest[oi]=r;dest[oi+1]=g;dest[oi+2]=b;dest[oi+3]=a;
 }

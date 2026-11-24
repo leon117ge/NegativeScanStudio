@@ -2,9 +2,10 @@
 #include "dctl_math.hpp"
 #include <array>
 #include "wb_presets.hpp"
+#include "tone_math.hpp"
 namespace nss {
 struct Pipeline {
- Density density; Positive positive;
+ Density density; Positive positive; Tone tone;
  int cameraOn=1, neutralise=0,stage=1;
  float cameraStrength=1;
  std::array<float,9> camera{1,0,0,0,1,0,0,0,1},neutral{1,0,0,0,1,0,0,0,1};
@@ -23,7 +24,9 @@ struct Pipeline {
   if(d.in_di) {auto lin=[](float x){return x>.02740668f?std::exp2(x/.07329248f-7.f)-.0075f:x/10.44426855f;};v={lin(v.x),lin(v.y),lin(v.z)};d.in_di=0;}
   v=cameraPixel(v);v=d.transform(0,0,0,0,v.x,v.y,v.z);
   if(stage==0||d.out_trans)return v;
-  return positive.transform(0,0,0,0,v.x,v.y,v.z);
+  auto c=toneConstants(tone);if(!c.shoulder&&!c.toe)return positive.transform(0,0,0,0,v.x,v.y,v.z);
+  auto lin=positive;lin.out_mode=4;v=lin.transform(0,0,0,0,v.x,v.y,v.z);toneReference(tone,v.x,v.y,v.z);
+  return {toneEncodeReference(positive.out_mode,v.x),toneEncodeReference(positive.out_mode,v.y),toneEncodeReference(positive.out_mode,v.z)};
  }
 };
 inline bool samePipeline(const Pipeline &a,const Pipeline &b){return

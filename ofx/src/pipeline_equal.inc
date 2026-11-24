@@ -30,3 +30,11 @@ a.positive.gray_on==b.positive.gray_on &&
 a.positive.gray_r==b.positive.gray_r &&
 a.positive.gray_g==b.positive.gray_g &&
 a.positive.gray_b==b.positive.gray_b &&
+a.tone.shoulder_on==b.tone.shoulder_on &&
+a.tone.shoulder_strength==b.tone.shoulder_strength &&
+a.tone.shoulder_pivot==b.tone.shoulder_pivot &&
+a.tone.shoulder_white==b.tone.shoulder_white &&
+a.tone.toe_on==b.tone.toe_on &&
+a.tone.toe_strength==b.tone.toe_strength &&
+a.tone.toe_pivot==b.tone.toe_pivot &&
+a.tone.toe_black==b.tone.toe_black &&

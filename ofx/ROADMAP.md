@@ -1,6 +1,11 @@
 # NegativeScan Studio OFX — Roadmap
 
-Current local test plugin: **0.90.11** (last published tag: **0.90.6**) · [Plugin changelog](CHANGELOG.md) · [Scanning app roadmap](../docs/ROADMAP.md) · [Versioning](../docs/VERSIONING.md)
+Current local test plugin: **0.90.12** (last published tag: **0.90.6**) · [Plugin changelog](CHANGELOG.md) · [Scanning app roadmap](../docs/ROADMAP.md) · [Versioning](../docs/VERSIONING.md)
+
+## Implemented in 0.90.12 (local test build, Resolve pending)
+
+- Tone group: optional highlight shoulder (RGB mean, ratio preserving) and shadow toe (darkest channel, hue preserving), default ON with `Soft cinematic`, plus `Gentle`, `Strong roll-off`, `Night practicals` and `Off / Classic 0.90.11` (bit-identical to 0.90.11).
+- Next: check the presets in Resolve on real 500T night and daylight footage through the 2383 LUT; decide whether a softer density cap is needed for very dense practicals.
 
 ## Implemented in 0.90.11 (local test build, Resolve pending)
 

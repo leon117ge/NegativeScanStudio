@@ -1,9 +1,39 @@
 # NegativeScan Studio OFX — Changelog
 
-Current local test plugin: **0.90.11** (not pushed/released) · Last published tag: **0.90.6** ([Plugin release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/ofx-v0.90.6)) · [Scanning app changelog](../docs/CHANGELOG.md) · [Versioning policy](../docs/VERSIONING.md)
+Current local test plugin: **0.90.12** (not pushed/released) · Last published tag: **0.90.6** ([Plugin release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/ofx-v0.90.6)) · [Scanning app changelog](../docs/CHANGELOG.md) · [Versioning policy](../docs/VERSIONING.md)
 
 Plugin releases are independent from the Windows scanning app.
 
+
+## 0.90.12 — Tone: highlight shoulder and shadow toe (local test build)
+
+- New open **Tone** group (English only) with `Tone preset`, `Highlight shoulder` (on/off), `Shoulder strength`, `Shoulder start (stops)`, `Shoulder white (stops)`, `Shadow toe` (on/off), `Toe strength`, `Toe start (stops)` and `Toe black (stops)`. Choosing a preset writes the eight controls; editing any of them switches the menu to `Custom`.
+- **Default is ON** with `Soft cinematic`, so new instances render soft, non-clipping highlights and lifted, slightly desaturated blacks. Choose `Off / Classic 0.90.11` (or switch both off) for output that is bit-identical to 0.90.11. Existing projects that were saved without these parameters get the new default when opened.
+- Presets:
+
+| Preset | Shoulder on / strength / start / white (stops) | Toe on / strength / start / black (stops) |
+|---|---|---|
+| **Soft cinematic** (default) | on / 1.00 / +0.75 / +2.20 | on / 1.00 / -2.00 / -4.00 |
+| Gentle | on / 0.60 / +1.00 / +2.60 | on / 0.60 / -2.00 / -3.80 |
+| Strong roll-off | on / 1.00 / +0.50 / +1.80 | on / 1.00 / -1.75 / -3.60 |
+| Night practicals | on / 1.00 / +1.00 / +2.40 | on / 0.50 / -2.50 / -4.00 |
+| Off / Classic 0.90.11 | off | off |
+
+- Tuned offline on four frames (Hikrobot mono trichrome HDR 0280, X-T3 0206, X-T3 500T F2 and F5) through the repo `Kodak_2383_D65` LUT toward the Silbersalz35 graded reference (Y p0.5/p50/p99.9 = 14/133/198, no clipping). With a per-frame gray-world balance, `Soft cinematic` gives top 202/205/205/209, black 19/25/21/19, mids 137/137/127/100 (0.90.11: top 244/247/235/246, mids 147/137/127/100) and 0% pixels above 250. See `docs/OFX.md`.
+- Math (identical in CPU, OpenCL and CUDA; shared `render_math.h`):
+
+- Where: on the scene-linear positive of the Positive stage, after the per-channel inversion and the optional `Contrast` curve, and before the output encoding. The Density In stage and transmittance output are never toned. Stops are `log2(value / 0.18)`, so they move with `Exposure` and the balances.
+- Shoulder (highlights): `n = mean(R,G,B)`, `x = log2(n/0.18)`. Above `start` (`xs`), `f = xs + h*(1 - exp(-(x - xs)/h))` with `h = white - xs` (at least 0.05), then `y = x + strength*(f - x)`. R, G and B are multiplied by the same gain `2^(y - x)`, so R:G:B ratios and hue are unchanged. At full strength the mean never goes above `white`, so with the default preset the brightest channel is at most about `+3.8` stops (3x the mean; Cineon about 800 of 1023): nothing clips in Cineon or in a 0..1 LUT input.
+- Toe (shadows): `m = min(R,G,B)` after the shoulder, `x = log2(m/0.18)`. Below `start` (`xt`, never above the shoulder start), `g = xt - r*(1 - exp(-(xt - x)/r))` with `r = xt - black` (at least 0.05), and the same offset `strength*(0.18*2^g - m)` is added to R, G and B. Hue (HSV) is unchanged, deep shadows desaturate slightly, and pure black lifts to the neutral floor `strength*0.18*2^black` (default 0.0113 linear, Cineon about 187 of 1023). The darkest channel is used, not the mean, because an offset from the mean makes the weakest channel of saturated dark colors go backwards; with the darkest channel every channel is monotonic along any hue line.
+- Both curves have slope 1 at their start point (C1, no kink), are monotonic, and leave everything between the toe start and the shoulder start untouched.
+- Output encodings: the tone runs on scene-linear values, so Rec709, DaVinci Intermediate, Cineon, ACEScct and Linear all receive the same toned linear values through their unchanged encoders. With Linear output the shoulder keeps values below `0.18*2^white` times the pixel's max/mean ratio (at most 3x); with Rec709 values above 1.0 are still possible for very bright saturated pixels, exactly as in 0.90.11.
+- Density clamp: the 1.856 density cap (`Clamp output to 0 to 1`) is unchanged. No pixel of the four test frames reaches it (the brightest Cineon values come from the positive curve, not the cap), so softening it was not needed.
+- Off: when both switches are off (or both strengths are 0) the kernels take the 0.90.11 per-channel code path, bit for bit (checked against a 0.90.11 build on 3.1 million values: identical).
+- Constants grew from 40 to 48 floats (`Prepared`, OpenCL `__constant`, CUDA `NssBlock`). PTX regenerated with NVRTC 12.0.140 (`docs/data/ofx_0902_cuda_build.json`). Presets live in `docs/data/ofx_tone_presets.json`; `ofx/tools/generate.py` writes `ofx/src/tone_params.hpp` and the parameter plumbing from it.
+- CPU fallback cost on a real 500T frame (0206, single thread): 73 ns/pixel off, 100 ns/pixel with `Soft cinematic`. GPU kernels add the same few operations per pixel; no real GPU timing was done.
+- Tests: new `ofx/tests/tone_test.cpp` (off = 0.90.11 path bit for bit for all outputs and contrasts, kernel math vs an independent stops-based reference, 16-bit ramps, hue drift on saturated patches, no Cineon clipping, C1 at both pivots, black floor); host test (version 9012, defaults, visible controls, preset application, `Custom`); PoCL OpenCL parity for every preset and output; mocked CUDA contract with the default tone; Go parity with Tone off.
+- Known limit: on a gray input ramp the channels drift apart in the densest highlights (the stock gammas differ per channel), and because the shoulder keeps R:G:B, the weakest channel can dip by up to 0.15 stops (`Soft cinematic`; 0.20 for `Strong roll-off`) above about +5 stops. Luminance stays monotonic.
+- Plugin label is **NegativeScan Studio OFX 0.90.12**; version minor is 9012. No other defaults, parameters or inversion math changed. Real Resolve and real GPU testing are still pending.
 
 ## 0.90.11 — Exposure default 1.0 (local test build)
 

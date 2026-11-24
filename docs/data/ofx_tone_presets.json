@@ -1,0 +1,20 @@
+{
+  "note": "Tone presets for OFX 0.90.12. Stops are log2 relative to linear 0.18 after Exposure/balance. The shoulder works on the RGB mean, the toe on the darkest channel. The first preset is the plugin default. Tuned offline (cine_proto) on 4 frames through the repo Kodak_2383_D65 LUT toward Silbersalz35 graded targets: top about 195-215/255, black about 15-25/255, mid tones held, no clipping.",
+  "controls": [
+    {"key": "shoulder_on", "label": "Highlight shoulder", "kind": "Boolean", "min": 0, "max": 1, "step": 1},
+    {"key": "shoulder_strength", "label": "Shoulder strength", "kind": "Number", "min": 0.0, "max": 1.0, "step": 0.01},
+    {"key": "shoulder_pivot", "label": "Shoulder start (stops)", "kind": "Number", "min": -1.0, "max": 4.0, "step": 0.05},
+    {"key": "shoulder_white", "label": "Shoulder white (stops)", "kind": "Number", "min": 0.5, "max": 8.0, "step": 0.05},
+    {"key": "toe_on", "label": "Shadow toe", "kind": "Boolean", "min": 0, "max": 1, "step": 1},
+    {"key": "toe_strength", "label": "Toe strength", "kind": "Number", "min": 0.0, "max": 1.0, "step": 0.01},
+    {"key": "toe_pivot", "label": "Toe start (stops)", "kind": "Number", "min": -6.0, "max": 0.0, "step": 0.05},
+    {"key": "toe_black", "label": "Toe black (stops)", "kind": "Number", "min": -10.0, "max": -0.5, "step": 0.05}
+  ],
+  "presets": [
+    {"name": "Soft cinematic", "shoulder_on": 1, "shoulder_strength": 1.0, "shoulder_pivot": 0.75, "shoulder_white": 2.2, "toe_on": 1, "toe_strength": 1.0, "toe_pivot": -2.0, "toe_black": -4.0},
+    {"name": "Gentle", "shoulder_on": 1, "shoulder_strength": 0.6, "shoulder_pivot": 1.0, "shoulder_white": 2.6, "toe_on": 1, "toe_strength": 0.6, "toe_pivot": -2.0, "toe_black": -3.8},
+    {"name": "Strong roll-off", "shoulder_on": 1, "shoulder_strength": 1.0, "shoulder_pivot": 0.5, "shoulder_white": 1.8, "toe_on": 1, "toe_strength": 1.0, "toe_pivot": -1.75, "toe_black": -3.6},
+    {"name": "Night practicals", "shoulder_on": 1, "shoulder_strength": 1.0, "shoulder_pivot": 1.0, "shoulder_white": 2.4, "toe_on": 1, "toe_strength": 0.5, "toe_pivot": -2.5, "toe_black": -4.0},
+    {"name": "Off / Classic 0.90.11", "shoulder_on": 0, "shoulder_strength": 1.0, "shoulder_pivot": 0.75, "shoulder_white": 2.2, "toe_on": 0, "toe_strength": 1.0, "toe_pivot": -2.0, "toe_black": -4.0}
+  ]
+}

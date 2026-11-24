@@ -1,6 +1,48 @@
-# NegativeScan Studio OFX 0.90.11 (local test build)
+# NegativeScan Studio OFX 0.90.12 (local test build)
 
-Current local test build is **0.90.11** (last published tag: `ofx-v0.90.6`). Core rendering math, computation order, CPU/OpenCL/CUDA kernels, and all numeric defaults remain unchanged. Real Windows Resolve and physical GPU acceptance remain outstanding. [Installation](../ofx/README.md).
+Current local test build is **0.90.12** (last published tag: `ofx-v0.90.6`). 0.90.12 adds the optional Tone stage (highlight shoulder and shadow toe, on by default); the inversion math and all earlier numeric defaults remain unchanged. Real Windows Resolve and physical GPU acceptance remain outstanding. [Installation](../ofx/README.md).
+
+## 0.90.12 Tone: highlight shoulder and shadow toe
+
+Goal: the "cinematic HDR" look (soft, non-clipping highlights, open shadows with a soft black, smooth roll-off) when the Cineon output is viewed through the Kodak 2383 LUT, without local contrast. Controls, defaults and presets:
+
+| Preset | Shoulder on / strength / start / white (stops) | Toe on / strength / start / black (stops) |
+|---|---|---|
+| **Soft cinematic** (default) | on / 1.00 / +0.75 / +2.20 | on / 1.00 / -2.00 / -4.00 |
+| Gentle | on / 0.60 / +1.00 / +2.60 | on / 0.60 / -2.00 / -3.80 |
+| Strong roll-off | on / 1.00 / +0.50 / +1.80 | on / 1.00 / -1.75 / -3.60 |
+| Night practicals | on / 1.00 / +1.00 / +2.40 | on / 0.50 / -2.50 / -4.00 |
+| Off / Classic 0.90.11 | off | off |
+
+### Math and behavior
+
+- Where: on the scene-linear positive of the Positive stage, after the per-channel inversion and the optional `Contrast` curve, and before the output encoding. The Density In stage and transmittance output are never toned. Stops are `log2(value / 0.18)`, so they move with `Exposure` and the balances.
+- Shoulder (highlights): `n = mean(R,G,B)`, `x = log2(n/0.18)`. Above `start` (`xs`), `f = xs + h*(1 - exp(-(x - xs)/h))` with `h = white - xs` (at least 0.05), then `y = x + strength*(f - x)`. R, G and B are multiplied by the same gain `2^(y - x)`, so R:G:B ratios and hue are unchanged. At full strength the mean never goes above `white`, so with the default preset the brightest channel is at most about `+3.8` stops (3x the mean; Cineon about 800 of 1023): nothing clips in Cineon or in a 0..1 LUT input.
+- Toe (shadows): `m = min(R,G,B)` after the shoulder, `x = log2(m/0.18)`. Below `start` (`xt`, never above the shoulder start), `g = xt - r*(1 - exp(-(xt - x)/r))` with `r = xt - black` (at least 0.05), and the same offset `strength*(0.18*2^g - m)` is added to R, G and B. Hue (HSV) is unchanged, deep shadows desaturate slightly, and pure black lifts to the neutral floor `strength*0.18*2^black` (default 0.0113 linear, Cineon about 187 of 1023). The darkest channel is used, not the mean, because an offset from the mean makes the weakest channel of saturated dark colors go backwards; with the darkest channel every channel is monotonic along any hue line.
+- Both curves have slope 1 at their start point (C1, no kink), are monotonic, and leave everything between the toe start and the shoulder start untouched.
+- Output encodings: the tone runs on scene-linear values, so Rec709, DaVinci Intermediate, Cineon, ACEScct and Linear all receive the same toned linear values through their unchanged encoders. With Linear output the shoulder keeps values below `0.18*2^white` times the pixel's max/mean ratio (at most 3x); with Rec709 values above 1.0 are still possible for very bright saturated pixels, exactly as in 0.90.11.
+- Density clamp: the 1.856 density cap (`Clamp output to 0 to 1`) is unchanged. No pixel of the four test frames reaches it (the brightest Cineon values come from the positive curve, not the cap), so softening it was not needed.
+- Off: when both switches are off (or both strengths are 0) the kernels take the 0.90.11 per-channel code path, bit for bit (checked against a 0.90.11 build on 3.1 million values: identical).
+
+### Evidence
+
+Offline port `cine_proto/ofxport.py` matches the C++ `Prepared` path to at most 3.2e-7 (Cineon) for every preset. Frames through `develop/luts/Kodak_2383_D65.cube`, 8-bit output, Y = Rec709 weights, centre crop. "gray-world" adds only a per-frame Red/Blue balance because the default balances are tuned for tungsten light and these frames are mostly daylight.
+
+| Frame | 0.90.11 as-is Y p0.5/p50/p99.9, clip>250 | 0.90.12 Soft cinematic as-is | 0.90.11 + gray-world | 0.90.12 Soft cinematic + gray-world |
+|---|---|---|---|---|
+| Hikrobot 0280 (stock not confirmed) | 12/139/242, 5.80% | 19/116/199, 0% | 13/147/244, 0.46% | 19/137/202, 0% |
+| X-T3 0206 (500T) | 17/111/242, 0% | 23/111/202, 0% | 19/137/247, 0.15% | 25/137/205, 0% |
+| X-T3 500T F2 | 15/107/229, 0% | 22/107/181, 0% | 15/127/235, 0% | 21/127/205, 0% |
+| X-T3 500T F5 | 13/85/242, 0.89% | 20/85/181, 0% | 13/100/246, 0% | 19/100/209, 0% |
+| Reference: Silbersalz35 graded (phillipreeve.net Part 5) | 14/133/198, 0% | | | |
+
+Mid-tone saturation (gray-world) is unchanged on 0206, F2 and F5 and rises from 0.232 to 0.297 on 0280, whose mid tones are bright enough to reach the shoulder (its p50 drops from 147 to 137).
+
+### Tests
+
+`ofx/tests/tone_test.cpp`: off and zero strength are bit-identical to the 0.90.11 per-channel path for all 5 outputs and 4 contrast settings; the kernel math agrees with the independent stops-based reference in `tone_math.hpp` (worst 7.5e-7); 16-bit ramps are monotonic along fixed-hue lines for every preset (float rounding only) and the mean is monotonic on the real input ramp; Cineon stays below 1.0 whenever the shoulder is on; HSV hue drift on saturated patches is at most 6e-5 degrees; slopes match on both sides of each pivot; pure black lifts to the documented floor. A 0.90.11 build (commit 5f4cfcc) and this build with Tone off give identical bits on 3,111,120 values. PoCL OpenCL runs every preset on every output (264 cases, max scaled error 1.5e-6); the mocked CUDA contract renders the default tone through the native-compiled CUDA source; Go parity runs with Tone off. Not tested: real Resolve, real NVIDIA/AMD GPU timing or execution of the PTX.
+
+Known limit: on a gray input ramp the three channels drift apart in the densest highlights because the stock gammas differ per channel. The shoulder keeps R:G:B, so in that region the weakest channel can dip by up to 0.15 stops (`Soft cinematic`; 0.20 `Strong roll-off`, 0.15 `Night practicals`, 0.01 `Gentle`) while luminance stays monotonic.
 
 ## 0.90.10 User-saved Color balance presets
 

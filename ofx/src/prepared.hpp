@@ -20,7 +20,7 @@
 #undef NSS_PARAMS
 namespace nss {
 struct Prepared {
- std::array<float,40> values{};
+ std::array<float,48> values{};
  explicit Prepared(const Pipeline &pipe){
   const auto &d=pipe.density;const auto &o=pipe.positive;auto &p=values;
   p[0]=float(d.in_di);p[1]=float(d.out_trans);p[2]=float(d.clamp01);p[3]=d.dmin_code/d.full_code;
@@ -40,12 +40,18 @@ struct Prepared {
   auto &m=pipe.neutralise?pipe.neutral:pipe.camera;bool identity=true;
   for(int c=0;c<9;c++){p[28+c]=m[c];if(m[c]!=(c%4==0?1.f:0.f))identity=false;}
   p[27]=float(pipe.cameraOn&&!identity&&pipe.cameraStrength!=0.f);p[37]=std::fmin(std::fmax(pipe.cameraStrength,0.f),1.f);
+  auto t=toneConstants(pipe.tone);
+  p[38]=float(t.shoulder);p[39]=t.ss;p[40]=t.xs;p[41]=t.h;p[42]=float(t.toe);p[43]=t.ts;p[44]=t.xt;p[45]=t.r;p[46]=t.ns;p[47]=t.nt;
  }
  Vec3 pixel(Vec3 v) const {
   const float *p=values.data();
   if(p[0]!=0.f)v={nss_di_decode(v.x),nss_di_decode(v.y),nss_di_decode(v.z)};
   if(p[27]!=0.f)v={v.x+p[37]*(p[28]*v.x+p[29]*v.y+p[30]*v.z-v.x),v.y+p[37]*(p[31]*v.x+p[32]*v.y+p[33]*v.z-v.y),v.z+p[37]*(p[34]*v.x+p[35]*v.y+p[36]*v.z-v.z)};
-  return {nss_channel(v.x,p,0),nss_channel(v.y,p,1),nss_channel(v.z,p,2)};
+  if(!nss_tone_active(p))return {nss_channel(v.x,p,0),nss_channel(v.y,p,1),nss_channel(v.z,p,2)};
+  float r=nss_linear(nss_code(v.x,p,0),p,0),g=nss_linear(nss_code(v.y,p,1),p,1),b=nss_linear(nss_code(v.z,p,2),p,2);
+  float k=nss_shoulder_gain(nss_tone_norm(r,g,b),p);r*=k;g*=k;b*=k;
+  float t=nss_toe_offset(nss_tone_min(r,g,b),p);
+  return {nss_encode(r+t,p),nss_encode(g+t,p),nss_encode(b+t,p)};
  }
  void rgba(const float *in,float *out,bool premult) const {
   float a=in[3];Vec3 v{in[0],in[1],in[2]};
