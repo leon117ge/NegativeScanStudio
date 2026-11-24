@@ -1,6 +1,11 @@
 # NegativeScan Studio OFX — Roadmap
 
-Current local test plugin: **0.90.12** (last published tag: **0.90.6**) · [Plugin changelog](CHANGELOG.md) · [Scanning app roadmap](../docs/ROADMAP.md) · [Versioning](../docs/VERSIONING.md)
+Current local test plugin: **0.90.13** (last published tag: **0.90.6**) · [Plugin changelog](CHANGELOG.md) · [Scanning app roadmap](../docs/ROADMAP.md) · [Versioning](../docs/VERSIONING.md)
+
+## Implemented in 0.90.13 (local test build, Resolve pending)
+
+- Tone color: highlight and shadow desaturation toward luminance and a luminance-preserving cream tint for near-neutral highlights, default ON in all named presets, zero = 0.90.12 bit for bit.
+- Next: optional shadow tint to counter the 2383 LUT's cyan blacks, if wanted after Resolve tests.
 
 ## Implemented in 0.90.12 (local test build, Resolve pending)
 

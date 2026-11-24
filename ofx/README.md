@@ -1,12 +1,12 @@
-# NegativeScan Studio OFX 0.90.12 - Windows x64 (local test build)
+# NegativeScan Studio OFX 0.90.13 - Windows x64 (local test build)
 
 ## Installation
-Quit Resolve, back up your project, and remove the previous bundle. Copy the entire `NegativeScanStudio.ofx.bundle` into `C:\Program Files\Common Files\OFX\Plugins\` (administrator access may be needed). Restart Resolve and find **NegativeScan Studio OFX 0.90.12** under OpenFX > NegativeScan Studio. Do not install duplicate bundles.
+Quit Resolve, back up your project, and remove the previous bundle. Copy the entire `NegativeScanStudio.ofx.bundle` into `C:\Program Files\Common Files\OFX\Plugins\` (administrator access may be needed). Restart Resolve and find **NegativeScan Studio OFX 0.90.13** under OpenFX > NegativeScan Studio. Do not install duplicate bundles.
 
 Auto uses CUDA or OpenCL buffers when offered by the host. CPU fallback is available. No extra CUDA/OpenCL DLL is bundled or required for CPU use. Keep the whole bundle together. Scanning app binaries are unchanged.
 
 ## Controls
-All UI labels, statuses, and prompts are in English. The inversion math and all earlier numerical defaults are unchanged from 0.90.6; 0.90.12 adds the optional Tone stage (on by default) after the inversion.
+All UI labels, statuses, and prompts are in English. The inversion math and all earlier numerical defaults are unchanged from 0.90.6; 0.90.12 added the optional Tone stage (on by default) after the inversion; 0.90.13 adds highlight/shadow desaturation and highlight cream to it.
 
 1. **Camera calibration**
    - **X-T3**: Uses the pending X-T3 matrix from loaded `nss.scan/1` metadata, or falls back to the default X-T3 trichrome matrix (`DefaultXT3Trichrome`).
@@ -34,11 +34,25 @@ All UI labels, statuses, and prompts are in English. The inversion math and all 
    - **Save** / **Delete**: Save stores the current slider values in `%APPDATA%\NegativeScanStudio\balance_presets.json` (shared across all projects; `NSS_BALANCE_PRESETS` can override the path). Delete removes the selected slot. A missing or corrupt file is treated as empty.
    - **Preset status**: Lists saved slot names, or a short result after Save/Delete. Use this list if the host does not refresh the dropdown labels.
 
-5. **Tone** (new in 0.90.12, on by default)
+5. **Tone** (new in 0.90.12, color controls in 0.90.13, on by default)
    - **Tone preset**: `Soft cinematic` (default), `Gentle`, `Strong roll-off`, `Night practicals`, `Off / Classic 0.90.11`, `Custom`. Choosing a preset sets the controls below; editing a control shows `Custom`.
    - **Highlight shoulder**, **Shoulder strength**, **Shoulder start (stops)**, **Shoulder white (stops)**: soft roll-off of bright areas. One gain is applied to R, G and B, so colors keep their hue and nothing clips.
    - **Shadow toe**, **Toe strength**, **Toe start (stops)**, **Toe black (stops)**: lifts deep shadows to a soft neutral floor. The same small amount is added to R, G and B, so hue is kept and the deepest shadows desaturate a little.
+   - **Highlight desaturation**, **Highlight color start (stops)**, **Highlight cream**: bright areas lose some color toward their own luminance, and near-neutral highlights get a warm cream tint. Brightness is unchanged; mid-tones and shadows get no tint.
+   - **Shadow desaturation**, **Shadow color start (stops)**: deep shadows lose some color toward their own luminance.
    - Stops are relative to 18% gray after Exposure and balance. `Off / Classic 0.90.11` renders exactly like 0.90.11. Works with every Output setting; it is designed for Cineon into a Kodak 2383 LUT.
+
+Color settings per preset:
+
+| Preset | Highlight desaturation / color start (stops) / cream | Shadow desaturation / color start (stops) |
+|---|---|---|
+| **Soft cinematic** (default) | 0.60 / +0.75 / 1.00 | 0.70 / -2.00 |
+| Gentle | 0.40 / +1.00 / 0.60 | 0.40 / -2.25 |
+| Strong roll-off | 0.75 / +0.50 / 1.00 | 0.80 / -1.75 |
+| Night practicals | 0.50 / +1.00 / 0.80 | 0.50 / -2.50 |
+| Off / Classic 0.90.11 | 0 / +0.75 / 0 | 0 / -2.00 |
+
+Shoulder and toe per preset:
 
 | Preset | Shoulder on / strength / start / white (stops) | Toe on / strength / start / black (stops) |
 |---|---|---|

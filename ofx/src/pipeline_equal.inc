@@ -38,3 +38,8 @@ a.tone.toe_on==b.tone.toe_on &&
 a.tone.toe_strength==b.tone.toe_strength &&
 a.tone.toe_pivot==b.tone.toe_pivot &&
 a.tone.toe_black==b.tone.toe_black &&
+a.tone.highlight_desat==b.tone.highlight_desat &&
+a.tone.highlight_start==b.tone.highlight_start &&
+a.tone.highlight_cream==b.tone.highlight_cream &&
+a.tone.shadow_desat==b.tone.shadow_desat &&
+a.tone.shadow_start==b.tone.shadow_start &&

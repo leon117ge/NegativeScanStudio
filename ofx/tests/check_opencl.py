@@ -23,7 +23,7 @@ for di,trans in itertools.product([0,1],[0,1]):
  cases.append(dict(stage=1,pixels=pixels.tolist(),camera_on=1,camera=[1.1,-.1,0,0,1.02,-.02,.01,-.01,1],camera_strength=.7,density={'base_r':.6,'base_g':.5,'base_b':.35,'in_di':di,'out_trans':trans,'clamp01':0,'ev_stops':-.5,'blk_r':.001},positive={'film_wb':0,'out_mode':4,'gam_r':.45,'gam_g':.54,'gam_b':.53},premult=1))
 # Tone (0.90.12): base cases run with Tone off (0.90.11 math); every preset runs on every output.
 presets=json.loads((root/'docs/data/ofx_tone_presets.json').read_text())['presets']
-tone_keys=['shoulder_on','shoulder_strength','shoulder_pivot','shoulder_white','toe_on','toe_strength','toe_pivot','toe_black']
+tone_keys=[c['key'] for c in json.loads((root/'docs/data/ofx_tone_presets.json').read_text())['controls']]
 for c in cases:c.setdefault('tone',{k:presets[-1][k] for k in tone_keys})
 for preset in presets:
  for mode,contrast in itertools.product(range(5),[0,2]):
@@ -53,7 +53,7 @@ try:
   data=np.concatenate([pixels.copy(),np.ones((len(pixels),1),np.float32)],axis=1).astype(np.float32)
   data[::3,3]=.5;data[0]=0
   if premult:data[:,:3]*=data[:,3:4]
-  c=dict(stage=1,camera_on=1,camera=[1.1,-.1,0,0,1.02,-.02,.01,-.01,1],positive={'film_wb':0},pick=dict(x=10+px+.5,y=20+py+.5,radius=radius))
+  c=dict(stage=1,camera_on=1,camera=[1.1,-.1,0,0,1.02,-.02,.01,-.01,1],positive={'film_wb':0},pick=dict(x=10+px+.5,y=20+py+.5,radius=radius),tone={'highlight_cream':0.0})  # cream warms neutral highlights by design
   encoded=json.dumps(c).encode();expected=np.zeros_like(data)
   assert lib.nss_test_cpu(data.ctypes.data,expected.ctypes.data,48,8,premult,encoded)==0
   src=cl.Buffer(ctx,cl.mem_flags.READ_ONLY|cl.mem_flags.COPY_HOST_PTR,hostbuf=data);dest=cl.Buffer(ctx,cl.mem_flags.READ_WRITE,size=data.nbytes)

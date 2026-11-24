@@ -10,14 +10,19 @@ struct Tone {
  float toe_strength=1.0f;
  float toe_pivot=-2.0f;
  float toe_black=-4.0f;
+ float highlight_desat=0.6f;
+ float highlight_start=0.75f;
+ float highlight_cream=1.0f;
+ float shadow_desat=0.7f;
+ float shadow_start=-2.0f;
 };
 struct TonePreset {const char *name;Tone tone;};
 inline constexpr TonePreset tonePresets[]={
- {"Soft cinematic",{1,1.0f,0.75f,2.2f,1,1.0f,-2.0f,-4.0f}},
- {"Gentle",{1,0.6f,1.0f,2.6f,1,0.6f,-2.0f,-3.8f}},
- {"Strong roll-off",{1,1.0f,0.5f,1.8f,1,1.0f,-1.75f,-3.6f}},
- {"Night practicals",{1,1.0f,1.0f,2.4f,1,0.5f,-2.5f,-4.0f}},
- {"Off / Classic 0.90.11",{0,1.0f,0.75f,2.2f,0,1.0f,-2.0f,-4.0f}}
+ {"Soft cinematic",{1,1.0f,0.75f,2.2f,1,1.0f,-2.0f,-4.0f,0.6f,0.75f,1.0f,0.7f,-2.0f}},
+ {"Gentle",{1,0.6f,1.0f,2.6f,1,0.6f,-2.0f,-3.8f,0.4f,1.0f,0.6f,0.4f,-2.25f}},
+ {"Strong roll-off",{1,1.0f,0.5f,1.8f,1,1.0f,-1.75f,-3.6f,0.75f,0.5f,1.0f,0.8f,-1.75f}},
+ {"Night practicals",{1,1.0f,1.0f,2.4f,1,0.5f,-2.5f,-4.0f,0.5f,1.0f,0.8f,0.5f,-2.5f}},
+ {"Off / Classic 0.90.11",{0,1.0f,0.75f,2.2f,0,1.0f,-2.0f,-4.0f,0.0f,0.75f,0.0f,0.0f,-2.0f}}
 };
 inline constexpr int kTonePresetCount=int(sizeof(tonePresets)/sizeof(tonePresets[0]));
 inline constexpr const char *kTonePresetMenu="Soft cinematic|Gentle|Strong roll-off|Night practicals|Off / Classic 0.90.11|Custom";

@@ -53,6 +53,7 @@ int main(){driver::install();mock::init();OfxHost host{nullptr,mock::fetch};setH
  // No stream property requires completion of default stream, never device sync.
  args.pointers.erase(kOfxImageEffectPropCudaStream);check(entry(kOfxImageEffectActionRender,e,bag(args),nullptr));require(driver::syncs==1&&driver::lastStream==nullptr);mock::sp(bag(args),kOfxImageEffectPropCudaStream,0,stream);
  // Gray picker is the only normal source download/sync, and is source based.
+ setD(s,"tone_highlight_cream",0); // cream warms neutral highlights by design; the pick check needs neutral output
  setI(s,"pick_auto",1);mock::Bag changed;mock::ss(bag(changed),kOfxPropName,0,"pick_auto");mock::ss(bag(changed),kOfxPropChangeReason,0,kOfxChangeUserEdited);check(entry(kOfxActionInstanceChanged,e,bag(changed),nullptr));setD(s,"pick_radius",0);check(param->paramSetValue(handle(s,"pick_point"),11.5,20.5));check(entry(kOfxImageEffectActionRender,e,bag(args),nullptr));require(driver::copies==1&&driver::allocations==1&&driver::syncs==2);require(std::abs(output[4]-output[5])<2e-5f&&std::abs(output[5]-output[6])<2e-5f);
  setI(s,"pick_auto",0);setI(s,"render_device",1);require(entry(kOfxImageEffectActionRender,e,bag(args),nullptr)==kOfxStatGPURenderFailed);
  check(entry(kOfxActionDestroyInstance,e,nullptr,nullptr));require(driver::unloads==2&&driver::current==nullptr);

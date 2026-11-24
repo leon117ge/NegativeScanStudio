@@ -121,11 +121,16 @@ const char *toneHint(const char *key){
  if(k=="tone_toe_strength")return "0 = no toe, 1 = full toe curve.";
  if(k=="tone_toe_pivot")return "Stops below 18% gray (darkest channel) where the toe starts. Above this point nothing changes. Never above Shoulder start.";
  if(k=="tone_toe_black")return "Stops below 18% gray of the lifted black floor. Pure black lands here at full strength.";
+ if(k=="tone_highlight_desat")return "Reduces color in bright areas, mixing toward each pixel's own luminance, so brightness and hue stay the same. 0 = off.";
+ if(k=="tone_highlight_start")return "Stops above 18% gray where highlight desaturation and cream begin. They fade in smoothly above this point; nothing changes below it.";
+ if(k=="tone_highlight_cream")return "Warm cream tint in the highlights only (more red, a little more green, less blue), with luminance kept the same. 0 = off, 1 = full.";
+ if(k=="tone_shadow_desat")return "Reduces color in deep shadows, mixing toward each pixel's own luminance. 0 = off.";
+ if(k=="tone_shadow_start")return "Stops below 18% gray where shadow desaturation begins. It fades in smoothly below this point. Never above Highlight color start.";
  return "";
 }
 OfxStatus describe(OfxImageEffectHandle e) {
  auto p=properties(e);if(interact){OfxPluginEntryPoint *callback=overlayEntry;void *address=nullptr;static_assert(sizeof(callback)==sizeof(address));std::memcpy(&address,&callback,sizeof(address));prop->propSetPointer(p,kOfxImageEffectPluginPropOverlayInteractV1,0,address);}
- prop->propSetString(p,kOfxPropLabel,0,"NegativeScan Studio OFX 0.90.12");prop->propSetString(p,kOfxImageEffectPluginPropGrouping,0,"NegativeScan Studio");prop->propSetString(p,kOfxImageEffectPropSupportedContexts,0,kOfxImageEffectContextFilter);prop->propSetString(p,kOfxImageEffectPropSupportedPixelDepths,0,kOfxBitDepthFloat);prop->propSetString(p,kOfxImageEffectPluginRenderThreadSafety,0,kOfxImageEffectRenderFullySafe);prop->propSetInt(p,kOfxImageEffectPropSupportsTiles,0,1);prop->propSetInt(p,kOfxImageEffectPropSupportsMultiResolution,0,1);prop->propSetInt(p,kOfxImageEffectPluginPropHostFrameThreading,0,0);
+ prop->propSetString(p,kOfxPropLabel,0,"NegativeScan Studio OFX 0.90.13");prop->propSetString(p,kOfxImageEffectPluginPropGrouping,0,"NegativeScan Studio");prop->propSetString(p,kOfxImageEffectPropSupportedContexts,0,kOfxImageEffectContextFilter);prop->propSetString(p,kOfxImageEffectPropSupportedPixelDepths,0,kOfxBitDepthFloat);prop->propSetString(p,kOfxImageEffectPluginRenderThreadSafety,0,kOfxImageEffectRenderFullySafe);prop->propSetInt(p,kOfxImageEffectPropSupportsTiles,0,1);prop->propSetInt(p,kOfxImageEffectPropSupportsMultiResolution,0,1);prop->propSetInt(p,kOfxImageEffectPluginPropHostFrameThreading,0,0);
  prop->propSetString(p,kOfxImageEffectPropOpenCLRenderSupported,0,nss::CLApi::get().available?"true":"false");
  prop->propSetString(p,kOfxImageEffectPropOpenCLSupported,0,"false");
  prop->propSetString(p,kOfxImageEffectPropCudaRenderSupported,0,nss::CudaApi::get().available?"true":"false");
@@ -192,7 +197,7 @@ OfxStatus describeContext(OfxImageEffectHandle e) {
  // Tone (0.90.12): preset menu first; it only loads the sliders below and never renders by itself.
  auto tonePreset=choiceDef(s,"tone_preset","Tone preset",nss::kTonePresetMenu,0,"tone");
  prop->propSetInt(tonePreset,kOfxParamPropEvaluateOnChange,0,0);
- prop->propSetString(tonePreset,kOfxParamPropHint,0,"Load highlight shoulder and shadow toe settings. Soft cinematic is the default. Off / Classic 0.90.11 renders exactly like 0.90.11. Editing a Tone slider switches this menu to Custom.");
+ prop->propSetString(tonePreset,kOfxParamPropHint,0,"Load highlight shoulder, shadow toe, desaturation and cream settings. Soft cinematic is the default. Off / Classic 0.90.11 renders exactly like 0.90.11. Editing a Tone slider switches this menu to Custom.");
  for(auto &d:defs) {
   const char *grp=std::strncmp(d.key,"positive_bal_",13)==0?"color_balance":d.group;
   OfxPropertySetHandle dp=nullptr;
@@ -226,6 +231,7 @@ OfxStatus describeContext(OfxImageEffectHandle e) {
   "stock","film_type","temperature","positive_expo","gamma_scale","positive_contrast","positive_out_mode",
   "positive_bal_r","positive_bal_g","positive_bal_b",
   "tone_preset","tone_shoulder_on","tone_shoulder_strength","tone_shoulder_pivot","tone_shoulder_white","tone_toe_on","tone_toe_strength","tone_toe_pivot","tone_toe_black",
+  "tone_highlight_desat","tone_highlight_start","tone_highlight_cream","tone_shadow_desat","tone_shadow_start",
   "balance_preset","balance_preset_name","save_balance_preset","delete_balance_preset","balance_preset_status"
  };
  for(auto key:{"pick_on_viewer","pick_auto","pick_point","pick_radius","stage","render_device","render_info","auto_metadata","camera_on","neutralise","camera_strength"})children.push_back(key);
@@ -237,13 +243,16 @@ OfxStatus describeContext(OfxImageEffectHandle e) {
 void applyTone(OfxParamSetHandle s,const nss::Tone &t){
  setI(s,"tone_shoulder_on",t.shoulder_on);setD(s,"tone_shoulder_strength",t.shoulder_strength);setD(s,"tone_shoulder_pivot",t.shoulder_pivot);setD(s,"tone_shoulder_white",t.shoulder_white);
  setI(s,"tone_toe_on",t.toe_on);setD(s,"tone_toe_strength",t.toe_strength);setD(s,"tone_toe_pivot",t.toe_pivot);setD(s,"tone_toe_black",t.toe_black);
+ setD(s,"tone_highlight_desat",t.highlight_desat);setD(s,"tone_highlight_start",t.highlight_start);setD(s,"tone_highlight_cream",t.highlight_cream);setD(s,"tone_shadow_desat",t.shadow_desat);setD(s,"tone_shadow_start",t.shadow_start);
 }
 nss::Tone readTone(OfxParamSetHandle s,double time){
  nss::Tone t;t.shoulder_on=integer(s,"tone_shoulder_on",time);t.shoulder_strength=number(s,"tone_shoulder_strength",time);t.shoulder_pivot=number(s,"tone_shoulder_pivot",time);t.shoulder_white=number(s,"tone_shoulder_white",time);
- t.toe_on=integer(s,"tone_toe_on",time);t.toe_strength=number(s,"tone_toe_strength",time);t.toe_pivot=number(s,"tone_toe_pivot",time);t.toe_black=number(s,"tone_toe_black",time);return t;
+ t.toe_on=integer(s,"tone_toe_on",time);t.toe_strength=number(s,"tone_toe_strength",time);t.toe_pivot=number(s,"tone_toe_pivot",time);t.toe_black=number(s,"tone_toe_black",time);
+ t.highlight_desat=number(s,"tone_highlight_desat",time);t.highlight_start=number(s,"tone_highlight_start",time);t.highlight_cream=number(s,"tone_highlight_cream",time);t.shadow_desat=number(s,"tone_shadow_desat",time);t.shadow_start=number(s,"tone_shadow_start",time);return t;
 }
 bool sameTone(const nss::Tone &a,const nss::Tone &b){auto closeTo=[](float x,float y){return std::abs(x-y)<1e-4f;};
- return a.shoulder_on==b.shoulder_on&&a.toe_on==b.toe_on&&closeTo(a.shoulder_strength,b.shoulder_strength)&&closeTo(a.shoulder_pivot,b.shoulder_pivot)&&closeTo(a.shoulder_white,b.shoulder_white)&&closeTo(a.toe_strength,b.toe_strength)&&closeTo(a.toe_pivot,b.toe_pivot)&&closeTo(a.toe_black,b.toe_black);}
+ return a.shoulder_on==b.shoulder_on&&a.toe_on==b.toe_on&&closeTo(a.shoulder_strength,b.shoulder_strength)&&closeTo(a.shoulder_pivot,b.shoulder_pivot)&&closeTo(a.shoulder_white,b.shoulder_white)&&closeTo(a.toe_strength,b.toe_strength)&&closeTo(a.toe_pivot,b.toe_pivot)&&closeTo(a.toe_black,b.toe_black)
+  &&closeTo(a.highlight_desat,b.highlight_desat)&&closeTo(a.highlight_start,b.highlight_start)&&closeTo(a.highlight_cream,b.highlight_cream)&&closeTo(a.shadow_desat,b.shadow_desat)&&closeTo(a.shadow_start,b.shadow_start);}
 nss::Vec3 referenceBase(OfxParamSetHandle s,double t){return {float(number(s,"reference_base_r",t)),float(number(s,"reference_base_g",t)),float(number(s,"reference_base_b",t))};}
 void writeBase(OfxParamSetHandle s,nss::Vec3 b){
  for(float v:{b.x,b.y,b.z})if(!std::isfinite(v)||v<.0001f||v>16.f)throw std::runtime_error("WB base out of range");
@@ -527,7 +536,7 @@ OfxStatus entry(const char *action,const void *handle_,OfxPropertySetHandle in,O
   return kOfxStatReplyDefault;
  }catch(OfxStatus s){return s;}catch(const std::bad_alloc &){return kOfxStatErrMemory;}catch(...){return kOfxStatFailed;}
 }
-OfxPlugin plugin={kOfxImageEffectPluginApi,1,"org.negativescanstudio.complete",0,9012,setHost,entry};
+OfxPlugin plugin={kOfxImageEffectPluginApi,1,"org.negativescanstudio.complete",0,9013,setHost,entry};
 }
 extern "C" {
 #ifdef _WIN32

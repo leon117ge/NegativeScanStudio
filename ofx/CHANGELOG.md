@@ -1,9 +1,32 @@
 # NegativeScan Studio OFX — Changelog
 
-Current local test plugin: **0.90.12** (not pushed/released) · Last published tag: **0.90.6** ([Plugin release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/ofx-v0.90.6)) · [Scanning app changelog](../docs/CHANGELOG.md) · [Versioning policy](../docs/VERSIONING.md)
+Current local test plugin: **0.90.13** (not pushed/released) · Last published tag: **0.90.6** ([Plugin release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/ofx-v0.90.6)) · [Scanning app changelog](../docs/CHANGELOG.md) · [Versioning policy](../docs/VERSIONING.md)
 
 Plugin releases are independent from the Windows scanning app.
 
+
+## 0.90.13 — Tone: highlight and shadow desaturation, highlight cream (local test build)
+
+- New controls in the **Tone** group (English only): `Highlight desaturation`, `Highlight color start (stops)`, `Highlight cream`, `Shadow desaturation`, `Shadow color start (stops)`. They are part of every preset and edits switch the menu to `Custom`.
+- **Default ON** in `Soft cinematic`. Preset values:
+
+| Preset | Highlight desaturation / color start (stops) / cream | Shadow desaturation / color start (stops) |
+|---|---|---|
+| **Soft cinematic** (default) | 0.60 / +0.75 / 1.00 | 0.70 / -2.00 |
+| Gentle | 0.40 / +1.00 / 0.60 | 0.40 / -2.25 |
+| Strong roll-off | 0.75 / +0.50 / 1.00 | 0.80 / -1.75 |
+| Night practicals | 0.50 / +1.00 / 0.80 | 0.50 / -2.50 |
+| Off / Classic 0.90.11 | 0 / +0.75 / 0 | 0 / -2.00 |
+
+- Runs after the 0.90.12 shoulder and toe, on scene-linear values, before the output encoding (all five outputs). Region weight from the RGB mean in stops, `x = log2(mean/0.18)`: highlight weight `w(x - start)`, shadow weight `w(start - x)`, `w(t) = t^2/(1+t^2)` for `t > 0`, else 0. The weight fades in with zero slope (C1); nothing between the shadow and highlight color starts changes. The shadow start is never above the highlight start.
+- Desaturation mixes each pixel toward its own Rec709 luminance `Y`: `c' = c + (hd*w_h + sd*w_s)*(Y - c)`. `Y` and HSV hue are unchanged; values stay non-negative.
+- Cream multiplies R, G, B by `(1 + a, 1 + a/4, 1 - a)` with `a = 0.15*cream*w_h*(1 - saturation)^2`, then rescales so `Y` is unchanged. Neutral highlights turn warm cream; saturated highlights (sky, practicals) keep their hue (at most about 19 degrees HSV move for saturation above 0.3). Mid-tones and shadows get no tint.
+- Luminance is unchanged by the color stage, so luminance ramps behave exactly as in 0.90.12.
+- Off: all three strengths 0 gives output bit-identical to 0.90.12 (checked against a d969a3f build on 1.9 million values for every preset and output); all Tone off still equals 0.90.11.
+- Constants grew from 48 to 56 floats; PTX regenerated (NVRTC 12.0.140, 19 registers, no spills).
+- Measured through the repo `Kodak_2383_D65` LUT with a per-frame gray-world balance (frames 0280 / 0206 / F2 / F5): top 1% saturation 0.117/0.083/0.071/0.031 -> 0.112/0.064/0.068/0.025, top 1% RGB of 0206 203/202/204 -> 205/203/199 and F5 206/207/210 -> 208/207/204 (reference Silbersalz35 graded 197/191/188), bottom 5% saturation 0.746/0.718/0.502/0.834 -> 0.709/0.713/0.449/0.691. Mid-tone luminance unchanged on 0206/F2/F5; the bright 0280 frame rises from 137 to 143 because its mid-tones reach the highlight region.
+- Known limits: the 2383 LUT itself renders neutral blacks cyan (about 11/16/18 of 255), which dominates output shadow saturation, so shadow desaturation removes scene color but cannot neutralize the LUT's black. A viewer gray pick on a bright patch will look slightly cream when Highlight cream is on (by design). Real Resolve and real GPU testing are pending.
+- Tests: `tone_test.cpp` adds color-zero = 0.90.12 bit-for-bit, luminance kept by the color stage, luminance-monotonic hue-line ramps, cream only above the highlight start, desaturation only in the tails, neutral highlights warm, bounded hue move; host test covers the new parameters and presets; PoCL OpenCL runs every preset (all Tone keys); Go parity with Tone off. Plugin label **NegativeScan Studio OFX 0.90.13**, version minor 9013.
 
 ## 0.90.12 — Tone: highlight shoulder and shadow toe (local test build)
 

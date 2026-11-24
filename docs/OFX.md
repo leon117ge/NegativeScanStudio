@@ -1,6 +1,35 @@
-# NegativeScan Studio OFX 0.90.12 (local test build)
+# NegativeScan Studio OFX 0.90.13 (local test build)
 
-Current local test build is **0.90.12** (last published tag: `ofx-v0.90.6`). 0.90.12 adds the optional Tone stage (highlight shoulder and shadow toe, on by default); the inversion math and all earlier numeric defaults remain unchanged. Real Windows Resolve and physical GPU acceptance remain outstanding. [Installation](../ofx/README.md).
+Current local test build is **0.90.13** (last published tag: `ofx-v0.90.6`). 0.90.12 adds the optional Tone stage (highlight shoulder and shadow toe, on by default); the inversion math and all earlier numeric defaults remain unchanged. Real Windows Resolve and physical GPU acceptance remain outstanding. [Installation](../ofx/README.md).
+
+## 0.90.13 Tone color: highlight and shadow desaturation, highlight cream
+
+Request: lower saturation in highlights and shadows and give highlights a cream look, inside the plugin, default on.
+
+| Preset | Highlight desaturation / color start (stops) / cream | Shadow desaturation / color start (stops) |
+|---|---|---|
+| **Soft cinematic** (default) | 0.60 / +0.75 / 1.00 | 0.70 / -2.00 |
+| Gentle | 0.40 / +1.00 / 0.60 | 0.40 / -2.25 |
+| Strong roll-off | 0.75 / +0.50 / 1.00 | 0.80 / -1.75 |
+| Night practicals | 0.50 / +1.00 / 0.80 | 0.50 / -2.50 |
+| Off / Classic 0.90.11 | 0 / +0.75 / 0 | 0 / -2.00 |
+
+- Runs after the 0.90.12 shoulder and toe, on scene-linear values, before the output encoding (all five outputs). Region weight from the RGB mean in stops, `x = log2(mean/0.18)`: highlight weight `w(x - start)`, shadow weight `w(start - x)`, `w(t) = t^2/(1+t^2)` for `t > 0`, else 0. The weight fades in with zero slope (C1); nothing between the shadow and highlight color starts changes. The shadow start is never above the highlight start.
+- Desaturation mixes each pixel toward its own Rec709 luminance `Y`: `c' = c + (hd*w_h + sd*w_s)*(Y - c)`. `Y` and HSV hue are unchanged; values stay non-negative.
+- Cream multiplies R, G, B by `(1 + a, 1 + a/4, 1 - a)` with `a = 0.15*cream*w_h*(1 - saturation)^2`, then rescales so `Y` is unchanged. Neutral highlights turn warm cream; saturated highlights (sky, practicals) keep their hue (at most about 19 degrees HSV move for saturation above 0.3). Mid-tones and shadows get no tint.
+- Luminance is unchanged by the color stage, so luminance ramps behave exactly as in 0.90.12.
+- Off: all three strengths 0 gives output bit-identical to 0.90.12 (checked against a d969a3f build on 1.9 million values for every preset and output); all Tone off still equals 0.90.11.
+
+Evidence (repo 2383 LUT, gray-world balanced, frames 0280 / 0206 / F2 / F5; reference Silbersalz35 graded: top 1% saturation 0.050, top 1% RGB 197/191/188, bottom 5% saturation 0.127):
+
+| Frame | Top 1% sat 0.90.12 -> 0.90.13 | Top 1% RGB 0.90.12 -> 0.90.13 | Bottom 5% sat | Y p50 |
+|---|---|---|---|---|
+| 0280 | 0.117 -> 0.112 | 210/199/187 -> 209/200/186 | 0.746 -> 0.709 | 137 -> 143 |
+| 0206 | 0.083 -> 0.064 | 203/202/204 -> 205/203/199 | 0.718 -> 0.713 | 137 -> 137 |
+| F2 | 0.071 -> 0.068 | 202/196/194 -> 203/197/191 | 0.502 -> 0.449 | 127 -> 127 |
+| F5 | 0.031 -> 0.025 | 206/207/210 -> 208/207/204 | 0.834 -> 0.691 | 100 -> 100 |
+
+Without the gray-world balance (plugin defaults, blue cast on these daylight frames) top 1% saturation drops more: 0.082/0.210/0.333/0.370 -> 0.060/0.123/0.235/0.230. Bottom-5% saturation stays high because the 2383 LUT renders neutral blacks cyan (about 11/16/18); the shadow control only removes scene color.
 
 ## 0.90.12 Tone: highlight shoulder and shadow toe
 

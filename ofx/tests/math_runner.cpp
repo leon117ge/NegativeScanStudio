@@ -5,7 +5,7 @@ int main(int argc,char **argv) {
  if(argc>1){try {nss::Pipeline p;auto m=nss::parseMetadata(nss::readDescription(argv[1]));nss::applyMetadata(p,m);std::cout<<nss::JSON{{"base",{p.density.base_r,p.density.base_g,p.density.base_b}},{"camera_on",p.cameraOn},{"light",m.light? nss::JSON(*m.light):nss::JSON(nullptr)}}.dump()<<"\n";return 0;}catch(const std::exception &e){std::cerr<<e.what()<<"\n";return 2;}}
  std::string line;while(std::getline(std::cin,line)){
   auto j=nss::JSON::parse(line);nss::Pipeline p;p.cameraOn=0;
-  p.tone.shoulder_on=0;p.tone.toe_on=0; // Go reference is the 0.90.11 math; Tone is opt-in here via "tone".
+  p.tone.shoulder_on=0;p.tone.toe_on=0;p.tone.highlight_desat=0;p.tone.highlight_cream=0;p.tone.shadow_desat=0; // Go reference is the 0.90.11 math; Tone is opt-in here via "tone".
 #include "json_params.inc"
   p.stage=j.value("stage",2);p.cameraOn=j.value("camera_on",0);p.cameraStrength=j.value("camera_strength",1.f);if(j.contains("camera"))p.camera=j.at("camera").get<std::array<float,9>>();
   float scale=j.value("gamma_scale",1.f);p.positive.gam_r*=scale;p.positive.gam_g*=scale;p.positive.gam_b*=scale;

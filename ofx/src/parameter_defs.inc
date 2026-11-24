@@ -36,3 +36,8 @@
 {"tone_toe_strength","Toe strength",Kind::Number,1.0,0.0,1.0,0.01,"","tone"},
 {"tone_toe_pivot","Toe start (stops)",Kind::Number,-2.0,-6.0,0.0,0.05,"","tone"},
 {"tone_toe_black","Toe black (stops)",Kind::Number,-4.0,-10.0,-0.5,0.05,"","tone"},
+{"tone_highlight_desat","Highlight desaturation",Kind::Number,0.6,0.0,1.0,0.01,"","tone"},
+{"tone_highlight_start","Highlight color start (stops)",Kind::Number,0.75,-1.0,4.0,0.05,"","tone"},
+{"tone_highlight_cream","Highlight cream",Kind::Number,1.0,0.0,1.0,0.01,"","tone"},
+{"tone_shadow_desat","Shadow desaturation",Kind::Number,0.7,0.0,1.0,0.01,"","tone"},
+{"tone_shadow_start","Shadow color start (stops)",Kind::Number,-2.0,-6.0,0.0,0.05,"","tone"},

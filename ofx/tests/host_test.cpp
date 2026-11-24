@@ -54,7 +54,7 @@ setenv("NSS_BALANCE_PRESETS",presetPath,1);
 std::error_code presetErr;std::filesystem::remove(presetPath,presetErr);std::filesystem::remove(std::string(presetPath)+".tmp",presetErr);
 OfxHost h{nullptr,mock::fetch};OfxGetPlugin(0)->setHost(&h);require(OfxGetNumberOfPlugins()==1&&OfxGetPlugin(1)==nullptr);auto call=OfxGetPlugin(0)->mainEntry;mock::Effect fx;auto e=reinterpret_cast<OfxImageEffectHandle>(&fx);auto bag=[](mock::Bag &b){return reinterpret_cast<OfxPropertySetHandle>(&b);};
 require(call(kOfxActionLoad,nullptr,nullptr,nullptr)==kOfxStatOK);require(call(kOfxActionDescribe,e,nullptr,nullptr)==kOfxStatOK);require(call(kOfxImageEffectActionDescribeInContext,e,nullptr,nullptr)==kOfxStatOK);require(fx.params.values.count("cross")==0);require(fx.params.values.count("cross_strength")==0);require(fx.params.values.count("density_cast_on")==0);require(fx.params.values.count("apply_wb")==0);require(fx.params.values.count("positive_film_wb")==1);require(call(kOfxActionCreateInstance,e,nullptr,nullptr)==kOfxStatOK);
-auto s=reinterpret_cast<OfxParamSetHandle>(&fx.params);require(std::abs(number(s,"positive_bal_r",0)-1.07)<1e-9&&number(s,"positive_bal_g",0)==0&&std::abs(number(s,"positive_bal_b",0)-.67)<1e-9);require(OfxGetPlugin(0)->pluginVersionMinor==9012);require(number(s,"gamma_scale",0)==1.0);require(number(s,"positive_expo",0)==1.0);require(fx.params.values["gamma_scale"].strings[kOfxParamPropParent][0]=="positive");setI(s,"auto_metadata",0);require(number(s,"positive_gam_r",0)==.55);require(number(s,"density_base_r",0)==.5);require(number(s,"density_base_g",0)==.5);require(number(s,"density_base_b",0)==.5);require(integer(s,"positive_film_wb",0)==1);
+auto s=reinterpret_cast<OfxParamSetHandle>(&fx.params);require(std::abs(number(s,"positive_bal_r",0)-1.07)<1e-9&&number(s,"positive_bal_g",0)==0&&std::abs(number(s,"positive_bal_b",0)-.67)<1e-9);require(OfxGetPlugin(0)->pluginVersionMinor==9013);require(number(s,"gamma_scale",0)==1.0);require(number(s,"positive_expo",0)==1.0);require(fx.params.values["gamma_scale"].strings[kOfxParamPropParent][0]=="positive");setI(s,"auto_metadata",0);require(number(s,"positive_gam_r",0)==.55);require(number(s,"density_base_r",0)==.5);require(number(s,"density_base_g",0)==.5);require(number(s,"density_base_b",0)==.5);require(integer(s,"positive_film_wb",0)==1);
 float in[16]={.03,.04,.05,1,.1,.2,.3,1,.4,.3,.2,1,.5,.5,.5,1},out[16]{};
 for(auto *b:{&fx.source.image,&fx.output.image}){auto p=bag(*b);mock::ss(p,kOfxImageEffectPropPixelDepth,0,kOfxBitDepthFloat);mock::ss(p,kOfxImageEffectPropComponents,0,kOfxImageComponentRGBA);mock::ss(p,kOfxImageEffectPropPreMultiplication,0,kOfxImageUnPreMultiplied);mock::si(p,kOfxImagePropRowBytes,0,-32);for(int j=0;j<4;j++)mock::si(p,kOfxImagePropBounds,j,(int[]){10,20,12,22}[j]);}
 mock::sp(bag(fx.source.image),kOfxImagePropData,0,in+8);mock::sp(bag(fx.output.image),kOfxImagePropData,0,out+8);
@@ -171,6 +171,7 @@ require(instance(e)->lastRender.find("pick unavailable")!=std::string::npos);
   "stock","film_type","temperature","positive_expo","gamma_scale","positive_contrast","positive_out_mode",
   "positive_bal_r","positive_bal_g","positive_bal_b",
   "tone_preset","tone_shoulder_on","tone_shoulder_strength","tone_shoulder_pivot","tone_shoulder_white","tone_toe_on","tone_toe_strength","tone_toe_pivot","tone_toe_black",
+  "tone_highlight_desat","tone_highlight_start","tone_highlight_cream","tone_shadow_desat","tone_shadow_start",
   "balance_preset","balance_preset_name","save_balance_preset","delete_balance_preset","balance_preset_status"
  };
  require(visible==expectedVisible);
@@ -300,7 +301,7 @@ require(instance(e)->lastRender.find("pick unavailable")!=std::string::npos);
 {
  auto def=nss::tonePresets[0].tone;
  require(std::string(nss::tonePresets[0].name)=="Soft cinematic"&&integer(s,"tone_preset",0)==0);
- require(sameTone(readTone(s,0),def)&&def.shoulder_on==1&&def.toe_on==1);
+ require(sameTone(readTone(s,0),def)&&def.shoulder_on==1&&def.toe_on==1);require(def.highlight_desat>0&&def.highlight_cream>0&&def.shadow_desat>0);require(fx.params.values["tone_highlight_cream"].strings[kOfxParamPropParent][0]=="tone");
  require(fx.params.values["tone_shoulder_on"].strings[kOfxParamPropParent][0]=="tone");
  require(fx.params.values["tone_preset"].strings[kOfxParamPropChoiceOption]==std::vector<std::string>({"Soft cinematic","Gentle","Strong roll-off","Night practicals","Off / Classic 0.90.11","Custom"}));
  require(readParams(s,0).tone.shoulder_on==1&&readParams(s,0).tone.toe_on==1);
@@ -308,11 +309,13 @@ require(instance(e)->lastRender.find("pick unavailable")!=std::string::npos);
  for(int i=nss::kTonePresetCount-1;i>=0;i--){
   setI(s,"tone_preset",i);mock::ss(bag(ch),kOfxPropName,0,"tone_preset");require(call(kOfxActionInstanceChanged,e,bag(ch),nullptr)==kOfxStatOK);
   require(sameTone(readTone(s,0),nss::tonePresets[i].tone)&&integer(s,"tone_preset",0)==i);
-  auto t=readParams(s,0).tone;require(t.shoulder_on==nss::tonePresets[i].tone.shoulder_on&&t.toe_black==nss::tonePresets[i].tone.toe_black);
+  auto t=readParams(s,0).tone;require(t.shoulder_on==nss::tonePresets[i].tone.shoulder_on&&t.toe_black==nss::tonePresets[i].tone.toe_black);require(t.highlight_desat==nss::tonePresets[i].tone.highlight_desat&&t.highlight_cream==nss::tonePresets[i].tone.highlight_cream&&t.shadow_start==nss::tonePresets[i].tone.shadow_start);
  }
  auto off=nss::tonePresets[nss::kTonePresetCount-1].tone;require(off.shoulder_on==0&&off.toe_on==0);
  setD(s,"tone_shoulder_strength",.5);mock::ss(bag(ch),kOfxPropName,0,"tone_shoulder_strength");require(call(kOfxActionInstanceChanged,e,bag(ch),nullptr)==kOfxStatOK);
  require(integer(s,"tone_preset",0)==nss::kTonePresetCount);
+ setI(s,"tone_preset",0);mock::ss(bag(ch),kOfxPropName,0,"tone_preset");require(call(kOfxActionInstanceChanged,e,bag(ch),nullptr)==kOfxStatOK);
+ setD(s,"tone_highlight_cream",.3);mock::ss(bag(ch),kOfxPropName,0,"tone_highlight_cream");require(call(kOfxActionInstanceChanged,e,bag(ch),nullptr)==kOfxStatOK);require(integer(s,"tone_preset",0)==nss::kTonePresetCount);
  setI(s,"tone_preset",0);mock::ss(bag(ch),kOfxPropName,0,"tone_preset");require(call(kOfxActionInstanceChanged,e,bag(ch),nullptr)==kOfxStatOK);require(sameTone(readTone(s,0),def));
  // Re-entering the preset values by hand keeps the named preset.
  mock::ss(bag(ch),kOfxPropName,0,"tone_toe_on");require(call(kOfxActionInstanceChanged,e,bag(ch),nullptr)==kOfxStatOK);require(integer(s,"tone_preset",0)==0);

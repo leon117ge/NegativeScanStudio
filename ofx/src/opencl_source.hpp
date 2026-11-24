@@ -44,7 +44,7 @@ inline float nss_channel(float value,NSS_PARAMS p,int c){
  return nss_encode(nss_linear(code,p,c),p);
 }
 // Tone stage (0.90.12). Active only for the positive stage and density output.
-inline int nss_tone_active(NSS_PARAMS p){return p[12]!=0.f&&p[1]==0.f&&(p[38]!=0.f||p[42]!=0.f);}
+inline int nss_tone_active(NSS_PARAMS p){return p[12]!=0.f&&p[1]==0.f&&(p[38]!=0.f||p[42]!=0.f||p[48]!=0.f);}
 inline float nss_tone_norm(float r,float g,float b){return (r+g+b)*.33333334f;}
 inline float nss_tone_min(float r,float g,float b){return NSS_MIN(r,NSS_MIN(g,b));}
 // Highlight shoulder: gain applied equally to R,G,B (keeps R:G:B). x=log2(n/0.18).
@@ -65,6 +65,25 @@ inline float nss_toe_offset(float n,NSS_PARAMS p){
  float g=p[44]-p[45]*(1.f-NSS_EXP(-(p[44]-x)/p[45]));
  return p[43]*(.18f*NSS_EXP2(g)-n);
 }
+// Tone color (0.90.13): highlight/shadow desaturation and highlight cream, after shoulder and toe.
+// Region weight from the RGB mean in stops, w(t)=t^2/(1+t^2) for t>0 (zero slope at the start, so C1).
+// Desaturation mixes toward Rec709 luminance Y (Y and HSV hue unchanged). Cream multiplies R,G,B by
+// (1+a, 1+a/4, 1-a), a=0.15*strength*w_highlight*(1-saturation)^2, then rescales so Y is unchanged:
+// near-neutral highlights turn cream, saturated colors keep their hue.
+inline float nss_tone_w(float t){t=NSS_MAX(t,0.f);return t*t/(1.f+t*t);}
+inline float nss_tone_luma(float r,float g,float b){return .2126f*r+.7152f*g+.0722f*b;}
+inline void nss_tone_color(float *r,float *g,float *b,NSS_PARAMS p){
+ float n=nss_tone_norm(*r,*g,*b);
+ if(!(n>p[54])&&!(n<p[55]))return;
+ float x=NSS_LOG2(NSS_MAX(n,1e-30f)/.18f);
+ float wh=nss_tone_w(x-p[50]),ws=nss_tone_w(p[52]-x);
+ float y=nss_tone_luma(*r,*g,*b),wd=p[49]*wh+p[51]*ws;
+ *r+=wd*(y-*r);*g+=wd*(y-*g);*b+=wd*(y-*b);
+ float mx=NSS_MAX(*r,NSS_MAX(*g,*b)),mn=NSS_MIN(*r,NSS_MIN(*g,*b));
+ float f=mx>0.f?1.f-(mx-mn)/mx:0.f,a=p[53]*wh*f*f; // cream fades out on saturated colors
+ if(a>0.f){float cr=*r*(1.f+a),cg=*g*(1.f+.25f*a),cb=*b*(1.f-a),ym=nss_tone_luma(cr,cg,cb);
+  if(ym>0.f){float s=y/ym;*r=cr*s;*g=cg*s;*b=cb*s;}}
+}
 // The build embeds render_math.h before this source.
 __kernel void nss_render(__global const float *source,__global float *dest,__constant const float *p,
  int sx1,int sy1,int sx2,int sy2,int sourceStride,int dx1,int dy1,int dx2,int dy2,int destStride,
@@ -80,7 +99,8 @@ __kernel void nss_render(__global const float *source,__global float *dest,__con
  if(!nss_tone_active(p))v=(float3)(nss_channel(v.x,p,0),nss_channel(v.y,p,1),nss_channel(v.z,p,2));
  else{v=(float3)(nss_linear(nss_code(v.x,p,0),p,0),nss_linear(nss_code(v.y,p,1),p,1),nss_linear(nss_code(v.z,p,2),p,2));
   v*=nss_shoulder_gain(nss_tone_norm(v.x,v.y,v.z),p);float t=nss_toe_offset(nss_tone_min(v.x,v.y,v.z),p);
-  v=(float3)(nss_encode(v.x+t,p),nss_encode(v.y+t,p),nss_encode(v.z+t,p));}
+  float r=v.x+t,g=v.y+t,b=v.z+t;if(p[48]!=0.f)nss_tone_color(&r,&g,&b,p);
+  v=(float3)(nss_encode(r,p),nss_encode(g,p),nss_encode(b,p));}
  if(premult)v*=rgba.w;
  vstore4((float4)(v,rgba.w),0,dest+oi);
 }

@@ -13,7 +13,8 @@ __kernel void nss_render(__global const float *source,__global float *dest,__con
  if(!nss_tone_active(p))v=(float3)(nss_channel(v.x,p,0),nss_channel(v.y,p,1),nss_channel(v.z,p,2));
  else{v=(float3)(nss_linear(nss_code(v.x,p,0),p,0),nss_linear(nss_code(v.y,p,1),p,1),nss_linear(nss_code(v.z,p,2),p,2));
   v*=nss_shoulder_gain(nss_tone_norm(v.x,v.y,v.z),p);float t=nss_toe_offset(nss_tone_min(v.x,v.y,v.z),p);
-  v=(float3)(nss_encode(v.x+t,p),nss_encode(v.y+t,p),nss_encode(v.z+t,p));}
+  float r=v.x+t,g=v.y+t,b=v.z+t;if(p[48]!=0.f)nss_tone_color(&r,&g,&b,p);
+  v=(float3)(nss_encode(r,p),nss_encode(g,p),nss_encode(b,p));}
  if(premult)v*=rgba.w;
  vstore4((float4)(v,rgba.w),0,dest+oi);
 }
