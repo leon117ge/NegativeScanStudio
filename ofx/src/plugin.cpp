@@ -121,16 +121,19 @@ const char *toneHint(const char *key){
  if(k=="tone_toe_strength")return "0 = no toe, 1 = full toe curve.";
  if(k=="tone_toe_pivot")return "Stops below 18% gray (darkest channel) where the toe starts. Above this point nothing changes. Never above Shoulder start.";
  if(k=="tone_toe_black")return "Stops below 18% gray of the lifted black floor. Pure black lands here at full strength.";
- if(k=="tone_highlight_desat")return "Reduces color in bright areas, mixing toward each pixel's own luminance, so brightness and hue stay the same. 0 = off.";
+ if(k=="tone_highlight_desat_on")return "Switch highlight desaturation on or off. Off renders exactly like amount 0.";
+ if(k=="tone_highlight_cream_on")return "Switch the warm cream tint in the highlights on or off. Off renders exactly like amount 0.";
+ if(k=="tone_shadow_desat_on")return "Switch shadow desaturation on or off. Off renders exactly like amount 0.";
+ if(k=="tone_highlight_desat")return "Reduces color in bright areas, mixing toward each pixel's own luminance, so brightness and hue stay the same.";
  if(k=="tone_highlight_start")return "Stops above 18% gray where highlight desaturation and cream begin. They fade in smoothly above this point; nothing changes below it.";
- if(k=="tone_highlight_cream")return "Warm cream tint in the highlights only (more red, a little more green, less blue), with luminance kept the same. 0 = off, 1 = full.";
- if(k=="tone_shadow_desat")return "Reduces color in deep shadows, mixing toward each pixel's own luminance. 0 = off.";
+ if(k=="tone_highlight_cream")return "Warm cream tint in the highlights only (more red, less blue), with luminance kept the same. Applied after highlight desaturation, so desaturated whites turn cream. Near-neutral highlights only; saturated colors keep their hue.";
+ if(k=="tone_shadow_desat")return "Reduces color in deep shadows, mixing toward each pixel's own luminance.";
  if(k=="tone_shadow_start")return "Stops below 18% gray where shadow desaturation begins. It fades in smoothly below this point. Never above Highlight color start.";
  return "";
 }
 OfxStatus describe(OfxImageEffectHandle e) {
  auto p=properties(e);if(interact){OfxPluginEntryPoint *callback=overlayEntry;void *address=nullptr;static_assert(sizeof(callback)==sizeof(address));std::memcpy(&address,&callback,sizeof(address));prop->propSetPointer(p,kOfxImageEffectPluginPropOverlayInteractV1,0,address);}
- prop->propSetString(p,kOfxPropLabel,0,"NegativeScan Studio OFX 0.90.13");prop->propSetString(p,kOfxImageEffectPluginPropGrouping,0,"NegativeScan Studio");prop->propSetString(p,kOfxImageEffectPropSupportedContexts,0,kOfxImageEffectContextFilter);prop->propSetString(p,kOfxImageEffectPropSupportedPixelDepths,0,kOfxBitDepthFloat);prop->propSetString(p,kOfxImageEffectPluginRenderThreadSafety,0,kOfxImageEffectRenderFullySafe);prop->propSetInt(p,kOfxImageEffectPropSupportsTiles,0,1);prop->propSetInt(p,kOfxImageEffectPropSupportsMultiResolution,0,1);prop->propSetInt(p,kOfxImageEffectPluginPropHostFrameThreading,0,0);
+ prop->propSetString(p,kOfxPropLabel,0,"NegativeScan Studio OFX 0.90.14");prop->propSetString(p,kOfxImageEffectPluginPropGrouping,0,"NegativeScan Studio");prop->propSetString(p,kOfxImageEffectPropSupportedContexts,0,kOfxImageEffectContextFilter);prop->propSetString(p,kOfxImageEffectPropSupportedPixelDepths,0,kOfxBitDepthFloat);prop->propSetString(p,kOfxImageEffectPluginRenderThreadSafety,0,kOfxImageEffectRenderFullySafe);prop->propSetInt(p,kOfxImageEffectPropSupportsTiles,0,1);prop->propSetInt(p,kOfxImageEffectPropSupportsMultiResolution,0,1);prop->propSetInt(p,kOfxImageEffectPluginPropHostFrameThreading,0,0);
  prop->propSetString(p,kOfxImageEffectPropOpenCLRenderSupported,0,nss::CLApi::get().available?"true":"false");
  prop->propSetString(p,kOfxImageEffectPropOpenCLSupported,0,"false");
  prop->propSetString(p,kOfxImageEffectPropCudaRenderSupported,0,nss::CudaApi::get().available?"true":"false");
@@ -147,13 +150,14 @@ OfxStatus describeContext(OfxImageEffectHandle e) {
   {"positive","Film & Gamma"},
   {"color_balance","Color balance"},
   {"tone","Tone"},
+  {"tone_color","Tone Color"},
   {"graypick","Viewer gray / white pick"},
   {"density","Density In"},
   {"render","Rendering"}
  };
  for(auto &g:groups){
   auto gp=define(s,g[0],g[1],kOfxParamTypeGroup);
-  if(std::strcmp(g[0],"camera")==0||std::strcmp(g[0],"balance")==0||std::strcmp(g[0],"positive")==0||std::strcmp(g[0],"color_balance")==0||std::strcmp(g[0],"tone")==0||std::strcmp(g[0],"graypick")==0)prop->propSetInt(gp,kOfxParamPropGroupOpen,0,1);
+  if(std::strcmp(g[0],"camera")==0||std::strcmp(g[0],"balance")==0||std::strcmp(g[0],"positive")==0||std::strcmp(g[0],"color_balance")==0||std::strcmp(g[0],"tone")==0||std::strcmp(g[0],"tone_color")==0||std::strcmp(g[0],"graypick")==0)prop->propSetInt(gp,kOfxParamPropGroupOpen,0,1);
   if(std::strcmp(g[0],"graypick")==0||std::strcmp(g[0],"density")==0||std::strcmp(g[0],"render")==0)hideParam(gp);
  }
  // 1. Camera calibration (visible selector; underlying 3x3 matrix & controls preserved as secret params)
@@ -194,12 +198,17 @@ OfxStatus describeContext(OfxImageEffectHandle e) {
  auto isVisibleDef=[](const char *key){
   return std::strcmp(key,"positive_out_mode")==0||std::strcmp(key,"positive_contrast")==0||std::strcmp(key,"positive_expo")==0||std::strcmp(key,"gamma_scale")==0||std::strncmp(key,"positive_bal_",13)==0||std::strncmp(key,"tone_",5)==0;
  };
- // Tone (0.90.12): preset menu first; it only loads the sliders below and never renders by itself.
- auto tonePreset=choiceDef(s,"tone_preset","Tone preset",nss::kTonePresetMenu,0,"tone");
- prop->propSetInt(tonePreset,kOfxParamPropEvaluateOnChange,0,0);
- prop->propSetString(tonePreset,kOfxParamPropHint,0,"Load highlight shoulder, shadow toe, desaturation and cream settings. Soft cinematic is the default. Off / Classic 0.90.11 renders exactly like 0.90.11. Editing a Tone slider switches this menu to Custom.");
+ // Tone and Tone Color (0.90.14): switches first, then the group's preset menu, then the adjustment sliders.
+ // Each preset menu only loads its own group and never renders by itself.
+ auto definePresetMenu=[&](const char *key,const char *label,const char *menu,const char *group,const char *hint){
+  auto m=choiceDef(s,key,label,menu,0,group);prop->propSetInt(m,kOfxParamPropEvaluateOnChange,0,0);prop->propSetString(m,kOfxParamPropHint,0,hint);};
+ bool tonePresetDone=false,toneColorPresetDone=false;
  for(auto &d:defs) {
   const char *grp=std::strncmp(d.key,"positive_bal_",13)==0?"color_balance":d.group;
+  if(d.kind!=Kind::Boolean&&std::strcmp(d.group,"tone")==0&&!tonePresetDone){tonePresetDone=true;
+   definePresetMenu("tone_preset","Tone preset",nss::kTonePresetMenu,"tone","Load highlight shoulder and shadow toe settings (this group only). Soft cinematic is the default. Off / Classic 0.90.11 switches both off. Editing a switch or slider in this group shows Custom.");}
+  if(d.kind!=Kind::Boolean&&std::strcmp(d.group,"tone_color")==0&&!toneColorPresetDone){toneColorPresetDone=true;
+   definePresetMenu("tone_color_preset","Tone color preset",nss::kToneColorPresetMenu,"tone_color","Load highlight desaturation, highlight cream and shadow desaturation settings (this group only). Soft cinematic is the default. Off switches all three off. Editing a switch or slider in this group shows Custom.");}
   OfxPropertySetHandle dp=nullptr;
   if(d.kind==Kind::Number)dp=numberDef(s,d.key,d.label,d.def,d.lo,d.hi,grp);
   else if(d.kind==Kind::Choice)dp=choiceDef(s,d.key,d.label,d.options,int(d.def),grp);
@@ -230,8 +239,8 @@ OfxStatus describeContext(OfxImageEffectHandle e) {
   "metadata_file","load_metadata","metadata_status",
   "stock","film_type","temperature","positive_expo","gamma_scale","positive_contrast","positive_out_mode",
   "positive_bal_r","positive_bal_g","positive_bal_b",
-  "tone_preset","tone_shoulder_on","tone_shoulder_strength","tone_shoulder_pivot","tone_shoulder_white","tone_toe_on","tone_toe_strength","tone_toe_pivot","tone_toe_black",
-  "tone_highlight_desat","tone_highlight_start","tone_highlight_cream","tone_shadow_desat","tone_shadow_start",
+  "tone_shoulder_on","tone_toe_on","tone_preset","tone_shoulder_strength","tone_shoulder_pivot","tone_shoulder_white","tone_toe_strength","tone_toe_pivot","tone_toe_black",
+  "tone_highlight_desat_on","tone_highlight_cream_on","tone_shadow_desat_on","tone_color_preset","tone_highlight_desat","tone_highlight_start","tone_highlight_cream","tone_shadow_desat","tone_shadow_start",
   "balance_preset","balance_preset_name","save_balance_preset","delete_balance_preset","balance_preset_status"
  };
  for(auto key:{"pick_on_viewer","pick_auto","pick_point","pick_radius","stage","render_device","render_info","auto_metadata","camera_on","neutralise","camera_strength"})children.push_back(key);
@@ -240,19 +249,18 @@ OfxStatus describeContext(OfxImageEffectHandle e) {
  for(size_t i=0;i<children.size();i++)prop->propSetString(page,kOfxParamPropPageChild,int(i),children[i].c_str());
  return kOfxStatOK;
 }
-void applyTone(OfxParamSetHandle s,const nss::Tone &t){
- setI(s,"tone_shoulder_on",t.shoulder_on);setD(s,"tone_shoulder_strength",t.shoulder_strength);setD(s,"tone_shoulder_pivot",t.shoulder_pivot);setD(s,"tone_shoulder_white",t.shoulder_white);
- setI(s,"tone_toe_on",t.toe_on);setD(s,"tone_toe_strength",t.toe_strength);setD(s,"tone_toe_pivot",t.toe_pivot);setD(s,"tone_toe_black",t.toe_black);
- setD(s,"tone_highlight_desat",t.highlight_desat);setD(s,"tone_highlight_start",t.highlight_start);setD(s,"tone_highlight_cream",t.highlight_cream);setD(s,"tone_shadow_desat",t.shadow_desat);setD(s,"tone_shadow_start",t.shadow_start);
+// Tone field helpers driven by the generated field table (section 0 = Tone, 1 = Tone Color, -1 = both).
+void applyTone(OfxParamSetHandle s,const nss::Tone &t,int section=-1){
+ for(int i=0;i<nss::kToneFieldCount;i++){auto &f=nss::toneFields[i];if(section>=0&&f.section!=section)continue;
+  if(f.toggle)setI(s,f.key,int(nss::toneGet(t,i)));else setD(s,f.key,nss::toneGet(t,i));}
 }
 nss::Tone readTone(OfxParamSetHandle s,double time){
- nss::Tone t;t.shoulder_on=integer(s,"tone_shoulder_on",time);t.shoulder_strength=number(s,"tone_shoulder_strength",time);t.shoulder_pivot=number(s,"tone_shoulder_pivot",time);t.shoulder_white=number(s,"tone_shoulder_white",time);
- t.toe_on=integer(s,"tone_toe_on",time);t.toe_strength=number(s,"tone_toe_strength",time);t.toe_pivot=number(s,"tone_toe_pivot",time);t.toe_black=number(s,"tone_toe_black",time);
- t.highlight_desat=number(s,"tone_highlight_desat",time);t.highlight_start=number(s,"tone_highlight_start",time);t.highlight_cream=number(s,"tone_highlight_cream",time);t.shadow_desat=number(s,"tone_shadow_desat",time);t.shadow_start=number(s,"tone_shadow_start",time);return t;
+ nss::Tone t;for(int i=0;i<nss::kToneFieldCount;i++){auto &f=nss::toneFields[i];nss::toneSet(t,i,f.toggle?double(integer(s,f.key,time)):number(s,f.key,time));}return t;
 }
-bool sameTone(const nss::Tone &a,const nss::Tone &b){auto closeTo=[](float x,float y){return std::abs(x-y)<1e-4f;};
- return a.shoulder_on==b.shoulder_on&&a.toe_on==b.toe_on&&closeTo(a.shoulder_strength,b.shoulder_strength)&&closeTo(a.shoulder_pivot,b.shoulder_pivot)&&closeTo(a.shoulder_white,b.shoulder_white)&&closeTo(a.toe_strength,b.toe_strength)&&closeTo(a.toe_pivot,b.toe_pivot)&&closeTo(a.toe_black,b.toe_black)
-  &&closeTo(a.highlight_desat,b.highlight_desat)&&closeTo(a.highlight_start,b.highlight_start)&&closeTo(a.highlight_cream,b.highlight_cream)&&closeTo(a.shadow_desat,b.shadow_desat)&&closeTo(a.shadow_start,b.shadow_start);}
+bool sameTone(const nss::Tone &a,const nss::Tone &b,int section=-1){
+ for(int i=0;i<nss::kToneFieldCount;i++){if(section>=0&&nss::toneFields[i].section!=section)continue;if(std::abs(nss::toneGet(a,i)-nss::toneGet(b,i))>=1e-4)return false;}return true;
+}
+int toneSection(const std::string &key){for(auto &f:nss::toneFields)if(key==f.key)return f.section;return -1;}
 nss::Vec3 referenceBase(OfxParamSetHandle s,double t){return {float(number(s,"reference_base_r",t)),float(number(s,"reference_base_g",t)),float(number(s,"reference_base_b",t))};}
 void writeBase(OfxParamSetHandle s,nss::Vec3 b){
  for(float v:{b.x,b.y,b.z})if(!std::isfinite(v)||v<.0001f||v>16.f)throw std::runtime_error("WB base out of range");
@@ -353,11 +361,16 @@ OfxStatus changed(OfxImageEffectHandle e,OfxPropertySetHandle a) {
   catch(...){setS(s,"metadata_status","Cannot read file path");return kOfxStatOK;}
  }else if(key=="tone_preset"){
   int selected=integer(s,"tone_preset",time);
-  if(selected>=0&&selected<nss::kTonePresetCount){Edit edit(s,"Load tone preset");applyTone(s,nss::tonePresets[selected].tone);}
- }else if(key.rfind("tone_",0)==0){
-  // A manual Tone edit no longer matches a named preset.
-  int selected=integer(s,"tone_preset",time);
-  if(selected<0||selected>=nss::kTonePresetCount||!sameTone(nss::tonePresets[selected].tone,readTone(s,time)))setI(s,"tone_preset",nss::kTonePresetCount);
+  if(selected>=0&&selected<nss::kTonePresetCount){Edit edit(s,"Load tone preset");applyTone(s,nss::tonePresets[selected].tone,0);}
+ }else if(key=="tone_color_preset"){
+  int selected=integer(s,"tone_color_preset",time);
+  if(selected>=0&&selected<nss::kToneColorPresetCount){Edit edit(s,"Load tone color preset");applyTone(s,nss::toneColorPresets[selected].tone,1);}
+ }else if(toneSection(key)>=0){
+  // A manual edit no longer matches the group's named preset; the other group's menu is untouched.
+  bool color=toneSection(key)==1;const char *menu=color?"tone_color_preset":"tone_preset";
+  int count=color?nss::kToneColorPresetCount:nss::kTonePresetCount;const nss::TonePreset *rows=color?nss::toneColorPresets:nss::tonePresets;
+  int selected=integer(s,menu,time);
+  if(selected<0||selected>=count||!sameTone(rows[selected].tone,readTone(s,time),color?1:0))setI(s,menu,count);
  }else if(key=="balance_preset"){
   applyBalancePreset(s,time);
  }else if(key=="save_balance_preset"){
@@ -536,7 +549,7 @@ OfxStatus entry(const char *action,const void *handle_,OfxPropertySetHandle in,O
   return kOfxStatReplyDefault;
  }catch(OfxStatus s){return s;}catch(const std::bad_alloc &){return kOfxStatErrMemory;}catch(...){return kOfxStatFailed;}
 }
-OfxPlugin plugin={kOfxImageEffectPluginApi,1,"org.negativescanstudio.complete",0,9013,setHost,entry};
+OfxPlugin plugin={kOfxImageEffectPluginApi,1,"org.negativescanstudio.complete",0,9014,setHost,entry};
 }
 extern "C" {
 #ifdef _WIN32

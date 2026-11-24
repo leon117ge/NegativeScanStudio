@@ -28,13 +28,16 @@ if(j.contains("positive") && j.at("positive").contains("gray_r")) p.positive.gra
 if(j.contains("positive") && j.at("positive").contains("gray_g")) p.positive.gray_g = j.at("positive").at("gray_g").get<float>();
 if(j.contains("positive") && j.at("positive").contains("gray_b")) p.positive.gray_b = j.at("positive").at("gray_b").get<float>();
 if(j.contains("tone") && j.at("tone").contains("shoulder_on")) p.tone.shoulder_on = j.at("tone").at("shoulder_on").get<int>();
+if(j.contains("tone") && j.at("tone").contains("toe_on")) p.tone.toe_on = j.at("tone").at("toe_on").get<int>();
 if(j.contains("tone") && j.at("tone").contains("shoulder_strength")) p.tone.shoulder_strength = j.at("tone").at("shoulder_strength").get<float>();
 if(j.contains("tone") && j.at("tone").contains("shoulder_pivot")) p.tone.shoulder_pivot = j.at("tone").at("shoulder_pivot").get<float>();
 if(j.contains("tone") && j.at("tone").contains("shoulder_white")) p.tone.shoulder_white = j.at("tone").at("shoulder_white").get<float>();
-if(j.contains("tone") && j.at("tone").contains("toe_on")) p.tone.toe_on = j.at("tone").at("toe_on").get<int>();
 if(j.contains("tone") && j.at("tone").contains("toe_strength")) p.tone.toe_strength = j.at("tone").at("toe_strength").get<float>();
 if(j.contains("tone") && j.at("tone").contains("toe_pivot")) p.tone.toe_pivot = j.at("tone").at("toe_pivot").get<float>();
 if(j.contains("tone") && j.at("tone").contains("toe_black")) p.tone.toe_black = j.at("tone").at("toe_black").get<float>();
+if(j.contains("tone") && j.at("tone").contains("highlight_desat_on")) p.tone.highlight_desat_on = j.at("tone").at("highlight_desat_on").get<int>();
+if(j.contains("tone") && j.at("tone").contains("highlight_cream_on")) p.tone.highlight_cream_on = j.at("tone").at("highlight_cream_on").get<int>();
+if(j.contains("tone") && j.at("tone").contains("shadow_desat_on")) p.tone.shadow_desat_on = j.at("tone").at("shadow_desat_on").get<int>();
 if(j.contains("tone") && j.at("tone").contains("highlight_desat")) p.tone.highlight_desat = j.at("tone").at("highlight_desat").get<float>();
 if(j.contains("tone") && j.at("tone").contains("highlight_start")) p.tone.highlight_start = j.at("tone").at("highlight_start").get<float>();
 if(j.contains("tone") && j.at("tone").contains("highlight_cream")) p.tone.highlight_cream = j.at("tone").at("highlight_cream").get<float>();

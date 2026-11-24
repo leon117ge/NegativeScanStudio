@@ -9,11 +9,11 @@
     "--prec-div=true",
     "--prec-sqrt=true"
   ],
-  "source_sha256": "ced634bf55a397bf3adbcb96766fe416b250f05d296daf81dafd30fdb1a5d0c4",
-  "ptx_sha256": "984eb5cab4812689a7562c3e9d10b9cf019872adc7a60defa2ae4c3aaf4baac6",
-  "ptx_bytes": 156255,
+  "source_sha256": "27a3d835dfded8cb1c1d7a323efb0c2b2c1342fe819308799ba6c8528156fe3e",
+  "ptx_sha256": "f0777acbbeaba12a955ce9a18e583920a06d05a035b9564f905299a7071b3223",
+  "ptx_bytes": 156410,
   "real_gpu_executed": false,
   "real_resolve_tested": false,
   "assembly_verified": true,
-  "assembler_output": "ptxas info    : 304 bytes gmem\nptxas info    : Compiling entry function 'nss_render_cuda' for 'sm_52'\nptxas info    : Function properties for nss_render_cuda\n    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads\nptxas info    : Used 19 registers, 620 bytes cmem[0], 308 bytes cmem[2]\n"
+  "assembler_output": "ptxas info    : 304 bytes gmem\nptxas info    : Compiling entry function 'nss_render_cuda' for 'sm_52'\nptxas info    : Function properties for nss_render_cuda\n    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads\nptxas info    : Used 18 registers, 620 bytes cmem[0], 308 bytes cmem[2]\n"
 }

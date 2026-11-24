@@ -1,9 +1,25 @@
 # NegativeScan Studio OFX — Changelog
 
-Current local test plugin: **0.90.13** (not pushed/released) · Last published tag: **0.90.6** ([Plugin release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/ofx-v0.90.6)) · [Scanning app changelog](../docs/CHANGELOG.md) · [Versioning policy](../docs/VERSIONING.md)
+Current local test plugin: **0.90.14** (not pushed/released) · Last published tag: **0.90.6** ([Plugin release](https://github.com/leon117ge/NegativeScanStudio/releases/tag/ofx-v0.90.6)) · [Scanning app changelog](../docs/CHANGELOG.md) · [Versioning policy](../docs/VERSIONING.md)
 
 Plugin releases are independent from the Windows scanning app.
 
+
+## 0.90.14 — Separate Tone Color group with switches and presets, stronger cream after desaturation (local test build)
+
+- UI: the color controls are a new, separate **Tone Color** group. Each group is laid out as switches, then its own preset menu, then the sliders:
+  - **Tone**: `Highlight shoulder`, `Shadow toe` (switches) -> `Tone preset` -> `Shoulder strength`, `Shoulder start (stops)`, `Shoulder white (stops)`, `Toe strength`, `Toe start (stops)`, `Toe black (stops)`.
+  - **Tone Color**: `Highlight desaturation`, `Highlight cream`, `Shadow desaturation` (switches, new) -> `Tone color preset` (new) -> `Highlight desaturation amount`, `Highlight color start (stops)`, `Highlight cream amount`, `Shadow desaturation amount`, `Shadow color start (stops)`.
+- `Tone preset` loads only shoulder/toe; `Tone color preset` loads only the color group. Editing a switch or slider sets only its own group's menu to `Custom`. Switch off renders bit for bit like amount 0.
+- Tone color presets: `Soft cinematic` (default; 0.60 / +0.75 / 1.00, shadow 0.70 / -2.00), `Gentle` (0.40 / +1.00 / 0.60, 0.40 / -2.25), `Strong` (0.75 / +0.50 / 1.00, 0.80 / -1.75), `Night practicals` (0.50 / +1.00 / 0.80, 0.50 / -2.50), `Off` (all three switches off), `Custom`. Tone presets unchanged except that they no longer carry color values.
+- Existing 0.90.12/0.90.13 projects: the new switches default ON, the old single Tone preset index now drives shoulder/toe only, and the new color menu starts at `Soft cinematic`.
+- Cream now runs **after** highlight desaturation and is measured on the desaturated pixel, so desaturation can no longer cancel it: with `Highlight desaturation amount` 1 the top highlights become warm cream with cream on and exactly neutral (R = G = B) with cream off.
+- Cream is stronger and warmer: R, G, B are multiplied by `(1 + a, 1, 1 - 0.3a)` with `a = 0.40*cream*w_h*max(1 - 2*saturation, 0)^2` (0.90.13: `(1 + a, 1 + a/4, 1 - a)`, `a = 0.15*cream*w_h*(1 - saturation)^2`), then rescaled so Rec709 `Y` is unchanged. It fades out completely at HSV saturation 0.5, so sky and practicals keep their hue (max 15 degrees HSV move for saturation above 0.3, was 19).
+- Region weight is now a smoothstep over 1.5 stops past each color start (`u = clamp(t/1.5, 0, 1)`, `w = u^2(3 - 2u)`), still C1 at the start, but it reaches full strength (0.90.13's `t^2/(1+t^2)` never reached 1, so amount 1 never fully desaturated). Applies to highlight and shadow desaturation and to cream.
+- New default measured through the repo `Kodak_2383_D65` LUT with per-frame gray-world balance (frames 0280 / 0206 / F2 / F5), top 1% RGB: 210/200/187, 207/203/198, 206/196/190, 213/205/201 (0.90.13: 0206 205/203/199, F5 208/207/204; color off: 0206 203/202/204, F5 206/207/210; reference Silbersalz35 graded 197/191/188). Top 1% saturation 0.110/0.063/0.079/0.056; mid-tone luminance unchanged on 0206/F2/F5. Highlight desaturation 1 with cream on: 0206 211/202/191, F5 217/204/194; with cream off: 0206 203/204/196, F5 206/207/202 (the residual blue dip is the 2383 LUT's own rendering of neutral highlights).
+- Defaults otherwise equal 0.90.13 (desaturation 0.60 from +0.75, cream 1.00, shadow 0.70 from -2.00), but the default look is warmer because cream and the region weight changed.
+- Tests: `tone_test.cpp` adds desaturation 1 + cream off = neutral and + cream on = warm (R > G > B, (R-B)/R >= 0.05) above the highlight start; all earlier tone checks pass (off = 0.90.11 and color zero = 0.90.12 bit for bit, kernel vs reference worst 7.2e-7, ramps, hue, cream only above start, desaturation only in the tails). Host test checks the two groups, definition order, per-group presets and per-group Custom. PoCL OpenCL runs 9 tone/color preset pairings on every output (344 cases, max abs 8.4e-5). PTX regenerated (NVRTC 12.0.140, 18 registers, no spills). Plugin label **NegativeScan Studio OFX 0.90.14**, version minor 9014.
+- Known limits: not yet run in Resolve or on a real GPU. A viewer gray pick on a bright patch looks cream when Highlight cream is on (by design). The 2383 LUT still renders neutral blacks cyan and neutral highlights slightly yellow.
 
 ## 0.90.13 — Tone: highlight and shadow desaturation, highlight cream (local test build)
 

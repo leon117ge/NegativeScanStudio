@@ -96,6 +96,15 @@ int main(){
     ++neutralChecked;float h=hue(r,g,b);if(h>0.f&&h<60.f&&r>g&&g>b&&std::fabs(luma(r,g,b)-n)<=2e-6f*n)++warm;}}
   std::cout<<"  cream: "<<warm<<"/"<<neutralChecked<<" neutral highlights warm; max hue move on saturated patches "<<creamShift<<" deg\n";
   expect(neutralChecked>0&&warm==neutralChecked,"neutral highlights turn warm");expect(creamShift<20.f,"cream hue move bounded (saturation > 0.3)");}
+ // 4c. Cream runs after desaturation: Highlight desaturation 1 gives neutral whites with cream off, warm cream with it on.
+ {Pipeline p;p.cameraOn=0;p.tone=tonePresets[0].tone;p.tone.highlight_desat=1;p.positive.out_mode=4;auto c=toneConstants(p.tone);
+  Pipeline o=p;o.tone.highlight_cream_on=0;Prepared on(p),off(o);float worstOff=0,minWarm=1;
+  for(int i=0;i<=40;i++){float n=.18f*std::exp2(c.hs+1.55f+i*.05f);for(auto t:{Vec3{1.3f,1.f,.7f},Vec3{.7f,1.f,1.3f},Vec3{1.f,1.2f,.8f}}){
+   float r=n*t.x,g=n*t.y,b=n*t.z,r2=r,g2=g,b2=b;nss_tone_color(&r,&g,&b,off.values.data());nss_tone_color(&r2,&g2,&b2,on.values.data());
+   worstOff=std::fmax(worstOff,(std::fmax(r,std::fmax(g,b))-std::fmin(r,std::fmin(g,b)))/r);
+   minWarm=std::fmin(minWarm,(r2-b2)/r2);expect(r2>g2&&g2>b2,"desat 1 + cream gives warm white");}}
+  std::cout<<"  desat 1: cream off spread "<<worstOff<<", cream on min (R-B)/R "<<minWarm<<"\n";
+  expect(worstOff<1e-5f,"desat 1 + cream off is neutral");expect(minWarm>.05f,"desat 1 + cream on is visibly warm");}
  // 5. C1 joins: slope in stops is 1 on both sides of each pivot.
  for(int pr=0;pr<kTonePresetCount-1;pr++){Pipeline p;p.tone=tonePresets[pr].tone;Prepared q(p);const float *k=q.values.data();auto c=toneConstants(p.tone);
   auto curve=[&](float x){float n=.18f*std::exp2(x);float g=nss_shoulder_gain(n,k);n*=g;n+=nss_toe_offset(n,k);return std::log2(n/.18f);};

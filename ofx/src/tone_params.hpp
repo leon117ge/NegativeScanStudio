@@ -3,13 +3,16 @@
 namespace nss {
 struct Tone {
  int shoulder_on=1;
+ int toe_on=1;
  float shoulder_strength=1.0f;
  float shoulder_pivot=0.75f;
  float shoulder_white=2.2f;
- int toe_on=1;
  float toe_strength=1.0f;
  float toe_pivot=-2.0f;
  float toe_black=-4.0f;
+ int highlight_desat_on=1;
+ int highlight_cream_on=1;
+ int shadow_desat_on=1;
  float highlight_desat=0.6f;
  float highlight_start=0.75f;
  float highlight_cream=1.0f;
@@ -17,13 +20,81 @@ struct Tone {
  float shadow_start=-2.0f;
 };
 struct TonePreset {const char *name;Tone tone;};
+// Shape presets ("Tone preset"): only the Tone group fields are applied. Color fields hold the paired color row.
 inline constexpr TonePreset tonePresets[]={
- {"Soft cinematic",{1,1.0f,0.75f,2.2f,1,1.0f,-2.0f,-4.0f,0.6f,0.75f,1.0f,0.7f,-2.0f}},
- {"Gentle",{1,0.6f,1.0f,2.6f,1,0.6f,-2.0f,-3.8f,0.4f,1.0f,0.6f,0.4f,-2.25f}},
- {"Strong roll-off",{1,1.0f,0.5f,1.8f,1,1.0f,-1.75f,-3.6f,0.75f,0.5f,1.0f,0.8f,-1.75f}},
- {"Night practicals",{1,1.0f,1.0f,2.4f,1,0.5f,-2.5f,-4.0f,0.5f,1.0f,0.8f,0.5f,-2.5f}},
- {"Off / Classic 0.90.11",{0,1.0f,0.75f,2.2f,0,1.0f,-2.0f,-4.0f,0.0f,0.75f,0.0f,0.0f,-2.0f}}
+ {"Soft cinematic",{1,1,1.0f,0.75f,2.2f,1.0f,-2.0f,-4.0f,1,1,1,0.6f,0.75f,1.0f,0.7f,-2.0f}},
+ {"Gentle",{1,1,0.6f,1.0f,2.6f,0.6f,-2.0f,-3.8f,1,1,1,0.4f,1.0f,0.6f,0.4f,-2.25f}},
+ {"Strong roll-off",{1,1,1.0f,0.5f,1.8f,1.0f,-1.75f,-3.6f,1,1,1,0.75f,0.5f,1.0f,0.8f,-1.75f}},
+ {"Night practicals",{1,1,1.0f,1.0f,2.4f,0.5f,-2.5f,-4.0f,1,1,1,0.5f,1.0f,0.8f,0.5f,-2.5f}},
+ {"Off / Classic 0.90.11",{0,0,1.0f,0.75f,2.2f,1.0f,-2.0f,-4.0f,0,0,0,0.6f,0.75f,1.0f,0.7f,-2.0f}}
+};
+// Color presets ("Tone color preset"): only the Tone Color group fields are applied.
+inline constexpr TonePreset toneColorPresets[]={
+ {"Soft cinematic",{1,1,1.0f,0.75f,2.2f,1.0f,-2.0f,-4.0f,1,1,1,0.6f,0.75f,1.0f,0.7f,-2.0f}},
+ {"Gentle",{1,1,0.6f,1.0f,2.6f,0.6f,-2.0f,-3.8f,1,1,1,0.4f,1.0f,0.6f,0.4f,-2.25f}},
+ {"Strong",{1,1,1.0f,0.5f,1.8f,1.0f,-1.75f,-3.6f,1,1,1,0.75f,0.5f,1.0f,0.8f,-1.75f}},
+ {"Night practicals",{1,1,1.0f,1.0f,2.4f,0.5f,-2.5f,-4.0f,1,1,1,0.5f,1.0f,0.8f,0.5f,-2.5f}},
+ {"Off",{0,0,1.0f,0.75f,2.2f,1.0f,-2.0f,-4.0f,0,0,0,0.6f,0.75f,1.0f,0.7f,-2.0f}}
 };
 inline constexpr int kTonePresetCount=int(sizeof(tonePresets)/sizeof(tonePresets[0]));
+inline constexpr int kToneColorPresetCount=int(sizeof(toneColorPresets)/sizeof(toneColorPresets[0]));
 inline constexpr const char *kTonePresetMenu="Soft cinematic|Gentle|Strong roll-off|Night practicals|Off / Classic 0.90.11|Custom";
+inline constexpr const char *kToneColorPresetMenu="Soft cinematic|Gentle|Strong|Night practicals|Off|Custom";
+// Field table: parameter key, group (0 = Tone, 1 = Tone Color), switch flag.
+struct ToneField {const char *key;int section;int toggle;};
+inline constexpr ToneField toneFields[]={
+ {"tone_shoulder_on",0,1},
+ {"tone_toe_on",0,1},
+ {"tone_shoulder_strength",0,0},
+ {"tone_shoulder_pivot",0,0},
+ {"tone_shoulder_white",0,0},
+ {"tone_toe_strength",0,0},
+ {"tone_toe_pivot",0,0},
+ {"tone_toe_black",0,0},
+ {"tone_highlight_desat_on",1,1},
+ {"tone_highlight_cream_on",1,1},
+ {"tone_shadow_desat_on",1,1},
+ {"tone_highlight_desat",1,0},
+ {"tone_highlight_start",1,0},
+ {"tone_highlight_cream",1,0},
+ {"tone_shadow_desat",1,0},
+ {"tone_shadow_start",1,0}
+};
+inline constexpr int kToneFieldCount=int(sizeof(toneFields)/sizeof(toneFields[0]));
+inline double toneGet(const Tone &t,int i){switch(i){
+ case 0:return t.shoulder_on;
+ case 1:return t.toe_on;
+ case 2:return t.shoulder_strength;
+ case 3:return t.shoulder_pivot;
+ case 4:return t.shoulder_white;
+ case 5:return t.toe_strength;
+ case 6:return t.toe_pivot;
+ case 7:return t.toe_black;
+ case 8:return t.highlight_desat_on;
+ case 9:return t.highlight_cream_on;
+ case 10:return t.shadow_desat_on;
+ case 11:return t.highlight_desat;
+ case 12:return t.highlight_start;
+ case 13:return t.highlight_cream;
+ case 14:return t.shadow_desat;
+ case 15:return t.shadow_start;
+ }return 0;}
+inline void toneSet(Tone &t,int i,double v){switch(i){
+ case 0:t.shoulder_on=int(v);break;
+ case 1:t.toe_on=int(v);break;
+ case 2:t.shoulder_strength=float(v);break;
+ case 3:t.shoulder_pivot=float(v);break;
+ case 4:t.shoulder_white=float(v);break;
+ case 5:t.toe_strength=float(v);break;
+ case 6:t.toe_pivot=float(v);break;
+ case 7:t.toe_black=float(v);break;
+ case 8:t.highlight_desat_on=int(v);break;
+ case 9:t.highlight_cream_on=int(v);break;
+ case 10:t.shadow_desat_on=int(v);break;
+ case 11:t.highlight_desat=float(v);break;
+ case 12:t.highlight_start=float(v);break;
+ case 13:t.highlight_cream=float(v);break;
+ case 14:t.shadow_desat=float(v);break;
+ case 15:t.shadow_start=float(v);break;
+ }}
 }

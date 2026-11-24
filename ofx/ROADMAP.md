@@ -1,6 +1,11 @@
 # NegativeScan Studio OFX — Roadmap
 
-Current local test plugin: **0.90.13** (last published tag: **0.90.6**) · [Plugin changelog](CHANGELOG.md) · [Scanning app roadmap](../docs/ROADMAP.md) · [Versioning](../docs/VERSIONING.md)
+Current local test plugin: **0.90.14** (last published tag: **0.90.6**) · [Plugin changelog](CHANGELOG.md) · [Scanning app roadmap](../docs/ROADMAP.md) · [Versioning](../docs/VERSIONING.md)
+
+## Implemented in 0.90.14 (local test build, Resolve pending)
+
+- Separate Tone Color group: three switches, its own preset menu, then sliders; Tone keeps shoulder/toe with switches, preset, sliders. Each preset menu only loads its own group.
+- Cream applied after highlight desaturation, stronger (0.40, warm R/B axis), fades out by saturation 0.5; smoothstep region weight reaches full strength.
 
 ## Implemented in 0.90.13 (local test build, Resolve pending)
 

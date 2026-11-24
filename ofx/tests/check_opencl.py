@@ -21,8 +21,10 @@ for stage,mode,contrast,gray in itertools.product([0,1],range(5),range(4),range(
   cases.append(dict(stage=stage,pixels=pixels.tolist(),density={'base_r':.5,'base_g':.5,'base_b':.5},positive={'out_mode':mode,'contrast':contrast,'gray_on':gray},premult=premult))
 for di,trans in itertools.product([0,1],[0,1]):
  cases.append(dict(stage=1,pixels=pixels.tolist(),camera_on=1,camera=[1.1,-.1,0,0,1.02,-.02,.01,-.01,1],camera_strength=.7,density={'base_r':.6,'base_g':.5,'base_b':.35,'in_di':di,'out_trans':trans,'clamp01':0,'ev_stops':-.5,'blk_r':.001},positive={'film_wb':0,'out_mode':4,'gam_r':.45,'gam_g':.54,'gam_b':.53},premult=1))
-# Tone (0.90.12): base cases run with Tone off (0.90.11 math); every preset runs on every output.
-presets=json.loads((root/'docs/data/ofx_tone_presets.json').read_text())['presets']
+# Tone (0.90.12+): base cases run with Tone off (0.90.11 math); every preset runs on every output.
+# 0.90.14: shape presets and color presets are separate lists; run every pairing of row i (plus each color preset with shape Off).
+_tp=json.loads((root/'docs/data/ofx_tone_presets.json').read_text())
+presets=[{**a,**b} for a,b in zip(_tp['presets'],_tp['color_presets'])]+[{**_tp['presets'][-1],**b} for b in _tp['color_presets'][:-1]]
 tone_keys=[c['key'] for c in json.loads((root/'docs/data/ofx_tone_presets.json').read_text())['controls']]
 for c in cases:c.setdefault('tone',{k:presets[-1][k] for k in tone_keys})
 for preset in presets:

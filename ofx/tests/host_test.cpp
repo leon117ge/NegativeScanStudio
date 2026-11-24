@@ -9,7 +9,7 @@
 static void require(bool value){if(!value){std::cerr<<"Host test assertion failed\n";std::abort();}}
 namespace mock {
 struct Bag { std::map<std::string,std::vector<int>> ints;std::map<std::string,std::vector<double>> doubles;std::map<std::string,std::vector<std::string>> strings;std::map<std::string,std::vector<void*>> pointers;std::string type; };
-struct Set {std::map<std::string,Bag> values;};
+struct Set {std::map<std::string,Bag> values;std::vector<std::string> order;};
 struct Clip {Bag props,image;OfxRectD requested{};bool requestedRegion=false;};
 struct Effect {Bag props;Set params;Clip source,output;};
 template<class T,class H>T *ptr(H h){return reinterpret_cast<T*>(h);}
@@ -32,7 +32,7 @@ OfxStatus cp(OfxImageClipHandle c,OfxPropertySetHandle *p){*p=reinterpret_cast<O
 OfxStatus image(OfxImageClipHandle c,OfxTime,const OfxRectD *region,OfxPropertySetHandle *p){auto clip=ptr<Clip>(c);clip->requestedRegion=region!=nullptr;if(region)clip->requested=*region;*p=reinterpret_cast<OfxPropertySetHandle>(&ptr<Clip>(c)->image);return kOfxStatOK;}
 OfxStatus release(OfxPropertySetHandle){return kOfxStatOK;}
 int abort_(OfxImageEffectHandle){return 0;}
-OfxStatus pd(OfxParamSetHandle set,const char*t,const char*k,OfxPropertySetHandle *p){auto &b=ptr<Set>(set)->values[k];b.type=t;*p=reinterpret_cast<OfxPropertySetHandle>(&b);return kOfxStatOK;}
+OfxStatus pd(OfxParamSetHandle set,const char*t,const char*k,OfxPropertySetHandle *p){if(!ptr<Set>(set)->values.count(k))ptr<Set>(set)->order.push_back(k);auto &b=ptr<Set>(set)->values[k];b.type=t;*p=reinterpret_cast<OfxPropertySetHandle>(&b);return kOfxStatOK;}
 OfxStatus ph(OfxParamSetHandle set,const char*k,OfxParamHandle *h,OfxPropertySetHandle *p){auto &m=ptr<Set>(set)->values;auto a=m.find(k);if(a==m.end())return kOfxStatErrUnknown;*h=reinterpret_cast<OfxParamHandle>(&a->second);if(p)*p=reinterpret_cast<OfxPropertySetHandle>(&a->second);return kOfxStatOK;}
 OfxStatus value(OfxParamHandle h,va_list ap){auto b=ptr<Bag>(h);if(b->type==kOfxParamTypeDouble2D){auto x=va_arg(ap,double*),y=va_arg(ap,double*);get(b->doubles,kOfxParamPropDefault,0,x);return get(b->doubles,kOfxParamPropDefault,1,y);}if(b->type==kOfxParamTypeDouble)return get(b->doubles,kOfxParamPropDefault,0,va_arg(ap,double*));if(b->type==kOfxParamTypeString){auto p=va_arg(ap,char**);*p=b->strings[kOfxParamPropDefault][0].data();return kOfxStatOK;}return get(b->ints,kOfxParamPropDefault,0,va_arg(ap,int*));}
 OfxStatus pv(OfxParamHandle h,...){va_list ap;va_start(ap,h);auto r=value(h,ap);va_end(ap);return r;}
@@ -54,7 +54,7 @@ setenv("NSS_BALANCE_PRESETS",presetPath,1);
 std::error_code presetErr;std::filesystem::remove(presetPath,presetErr);std::filesystem::remove(std::string(presetPath)+".tmp",presetErr);
 OfxHost h{nullptr,mock::fetch};OfxGetPlugin(0)->setHost(&h);require(OfxGetNumberOfPlugins()==1&&OfxGetPlugin(1)==nullptr);auto call=OfxGetPlugin(0)->mainEntry;mock::Effect fx;auto e=reinterpret_cast<OfxImageEffectHandle>(&fx);auto bag=[](mock::Bag &b){return reinterpret_cast<OfxPropertySetHandle>(&b);};
 require(call(kOfxActionLoad,nullptr,nullptr,nullptr)==kOfxStatOK);require(call(kOfxActionDescribe,e,nullptr,nullptr)==kOfxStatOK);require(call(kOfxImageEffectActionDescribeInContext,e,nullptr,nullptr)==kOfxStatOK);require(fx.params.values.count("cross")==0);require(fx.params.values.count("cross_strength")==0);require(fx.params.values.count("density_cast_on")==0);require(fx.params.values.count("apply_wb")==0);require(fx.params.values.count("positive_film_wb")==1);require(call(kOfxActionCreateInstance,e,nullptr,nullptr)==kOfxStatOK);
-auto s=reinterpret_cast<OfxParamSetHandle>(&fx.params);require(std::abs(number(s,"positive_bal_r",0)-1.07)<1e-9&&number(s,"positive_bal_g",0)==0&&std::abs(number(s,"positive_bal_b",0)-.67)<1e-9);require(OfxGetPlugin(0)->pluginVersionMinor==9013);require(number(s,"gamma_scale",0)==1.0);require(number(s,"positive_expo",0)==1.0);require(fx.params.values["gamma_scale"].strings[kOfxParamPropParent][0]=="positive");setI(s,"auto_metadata",0);require(number(s,"positive_gam_r",0)==.55);require(number(s,"density_base_r",0)==.5);require(number(s,"density_base_g",0)==.5);require(number(s,"density_base_b",0)==.5);require(integer(s,"positive_film_wb",0)==1);
+auto s=reinterpret_cast<OfxParamSetHandle>(&fx.params);require(std::abs(number(s,"positive_bal_r",0)-1.07)<1e-9&&number(s,"positive_bal_g",0)==0&&std::abs(number(s,"positive_bal_b",0)-.67)<1e-9);require(OfxGetPlugin(0)->pluginVersionMinor==9014);require(number(s,"gamma_scale",0)==1.0);require(number(s,"positive_expo",0)==1.0);require(fx.params.values["gamma_scale"].strings[kOfxParamPropParent][0]=="positive");setI(s,"auto_metadata",0);require(number(s,"positive_gam_r",0)==.55);require(number(s,"density_base_r",0)==.5);require(number(s,"density_base_g",0)==.5);require(number(s,"density_base_b",0)==.5);require(integer(s,"positive_film_wb",0)==1);
 float in[16]={.03,.04,.05,1,.1,.2,.3,1,.4,.3,.2,1,.5,.5,.5,1},out[16]{};
 for(auto *b:{&fx.source.image,&fx.output.image}){auto p=bag(*b);mock::ss(p,kOfxImageEffectPropPixelDepth,0,kOfxBitDepthFloat);mock::ss(p,kOfxImageEffectPropComponents,0,kOfxImageComponentRGBA);mock::ss(p,kOfxImageEffectPropPreMultiplication,0,kOfxImageUnPreMultiplied);mock::si(p,kOfxImagePropRowBytes,0,-32);for(int j=0;j<4;j++)mock::si(p,kOfxImagePropBounds,j,(int[]){10,20,12,22}[j]);}
 mock::sp(bag(fx.source.image),kOfxImagePropData,0,in+8);mock::sp(bag(fx.output.image),kOfxImagePropData,0,out+8);
@@ -170,8 +170,8 @@ require(instance(e)->lastRender.find("pick unavailable")!=std::string::npos);
   "metadata_file","load_metadata","metadata_status",
   "stock","film_type","temperature","positive_expo","gamma_scale","positive_contrast","positive_out_mode",
   "positive_bal_r","positive_bal_g","positive_bal_b",
-  "tone_preset","tone_shoulder_on","tone_shoulder_strength","tone_shoulder_pivot","tone_shoulder_white","tone_toe_on","tone_toe_strength","tone_toe_pivot","tone_toe_black",
-  "tone_highlight_desat","tone_highlight_start","tone_highlight_cream","tone_shadow_desat","tone_shadow_start",
+  "tone_shoulder_on","tone_toe_on","tone_preset","tone_shoulder_strength","tone_shoulder_pivot","tone_shoulder_white","tone_toe_strength","tone_toe_pivot","tone_toe_black",
+  "tone_highlight_desat_on","tone_highlight_cream_on","tone_shadow_desat_on","tone_color_preset","tone_highlight_desat","tone_highlight_start","tone_highlight_cream","tone_shadow_desat","tone_shadow_start",
   "balance_preset","balance_preset_name","save_balance_preset","delete_balance_preset","balance_preset_status"
  };
  require(visible==expectedVisible);
@@ -297,28 +297,43 @@ require(instance(e)->lastRender.find("pick unavailable")!=std::string::npos);
  require(recovered.valid&&recovered.slots[0].name=="Recovered");
  require(stringParam(s,"balance_preset_status")=="Saved 'Recovered' in slot 1");
 }
-// Tone (0.90.12): defaults ON with the first preset, menu applies presets, manual edit -> Custom.
+// Tone and Tone Color (0.90.14): two groups, each switches -> preset -> sliders; each preset only loads its own group.
 {
  auto def=nss::tonePresets[0].tone;
- require(std::string(nss::tonePresets[0].name)=="Soft cinematic"&&integer(s,"tone_preset",0)==0);
- require(sameTone(readTone(s,0),def)&&def.shoulder_on==1&&def.toe_on==1);require(def.highlight_desat>0&&def.highlight_cream>0&&def.shadow_desat>0);require(fx.params.values["tone_highlight_cream"].strings[kOfxParamPropParent][0]=="tone");
- require(fx.params.values["tone_shoulder_on"].strings[kOfxParamPropParent][0]=="tone");
+ require(std::string(nss::tonePresets[0].name)=="Soft cinematic"&&std::string(nss::toneColorPresets[0].name)=="Soft cinematic");
+ require(integer(s,"tone_preset",0)==0&&integer(s,"tone_color_preset",0)==0);
+ require(sameTone(readTone(s,0),def)&&sameTone(nss::toneColorPresets[0].tone,def));
+ require(def.shoulder_on==1&&def.toe_on==1&&def.highlight_desat_on==1&&def.highlight_cream_on==1&&def.shadow_desat_on==1);
+ require(def.highlight_desat==.6f&&def.highlight_cream==1.f&&def.shadow_desat==.7f&&def.highlight_start==.75f&&def.shadow_start==-2.f); // = 0.90.13 defaults
+ require(fx.params.values["tone"].type==kOfxParamTypeGroup&&fx.params.values["tone_color"].type==kOfxParamTypeGroup);
+ require(fx.params.values["tone_color"].strings[kOfxPropLabel][0]=="Tone Color");
+ for(auto k:{"tone_shoulder_on","tone_toe_on","tone_preset","tone_shoulder_strength","tone_toe_black"})require(fx.params.values[k].strings[kOfxParamPropParent][0]=="tone");
+ for(auto k:{"tone_highlight_desat_on","tone_highlight_cream_on","tone_shadow_desat_on","tone_color_preset","tone_highlight_desat","tone_shadow_start"})require(fx.params.values[k].strings[kOfxParamPropParent][0]=="tone_color");
  require(fx.params.values["tone_preset"].strings[kOfxParamPropChoiceOption]==std::vector<std::string>({"Soft cinematic","Gentle","Strong roll-off","Night practicals","Off / Classic 0.90.11","Custom"}));
- require(readParams(s,0).tone.shoulder_on==1&&readParams(s,0).tone.toe_on==1);
+ require(fx.params.values["tone_color_preset"].strings[kOfxParamPropChoiceOption]==std::vector<std::string>({"Soft cinematic","Gentle","Strong","Night practicals","Off","Custom"}));
+ // Definition order (what Resolve shows): switches, then preset, then sliders, Tone before Tone Color.
+ std::vector<std::string> toneOrder;for(auto &k:fx.params.order)if(k.rfind("tone",0)==0)toneOrder.push_back(k);
+ require(toneOrder==std::vector<std::string>({"tone","tone_color","tone_shoulder_on","tone_toe_on","tone_preset","tone_shoulder_strength","tone_shoulder_pivot","tone_shoulder_white","tone_toe_strength","tone_toe_pivot","tone_toe_black",
+  "tone_highlight_desat_on","tone_highlight_cream_on","tone_shadow_desat_on","tone_color_preset","tone_highlight_desat","tone_highlight_start","tone_highlight_cream","tone_shadow_desat","tone_shadow_start"}));
  mock::Bag ch;mock::ss(bag(ch),kOfxPropChangeReason,0,kOfxChangeUserEdited);mock::sd(bag(ch),kOfxPropTime,0,0);
- for(int i=nss::kTonePresetCount-1;i>=0;i--){
-  setI(s,"tone_preset",i);mock::ss(bag(ch),kOfxPropName,0,"tone_preset");require(call(kOfxActionInstanceChanged,e,bag(ch),nullptr)==kOfxStatOK);
-  require(sameTone(readTone(s,0),nss::tonePresets[i].tone)&&integer(s,"tone_preset",0)==i);
-  auto t=readParams(s,0).tone;require(t.shoulder_on==nss::tonePresets[i].tone.shoulder_on&&t.toe_black==nss::tonePresets[i].tone.toe_black);require(t.highlight_desat==nss::tonePresets[i].tone.highlight_desat&&t.highlight_cream==nss::tonePresets[i].tone.highlight_cream&&t.shadow_start==nss::tonePresets[i].tone.shadow_start);
- }
- auto off=nss::tonePresets[nss::kTonePresetCount-1].tone;require(off.shoulder_on==0&&off.toe_on==0);
- setD(s,"tone_shoulder_strength",.5);mock::ss(bag(ch),kOfxPropName,0,"tone_shoulder_strength");require(call(kOfxActionInstanceChanged,e,bag(ch),nullptr)==kOfxStatOK);
- require(integer(s,"tone_preset",0)==nss::kTonePresetCount);
- setI(s,"tone_preset",0);mock::ss(bag(ch),kOfxPropName,0,"tone_preset");require(call(kOfxActionInstanceChanged,e,bag(ch),nullptr)==kOfxStatOK);
- setD(s,"tone_highlight_cream",.3);mock::ss(bag(ch),kOfxPropName,0,"tone_highlight_cream");require(call(kOfxActionInstanceChanged,e,bag(ch),nullptr)==kOfxStatOK);require(integer(s,"tone_preset",0)==nss::kTonePresetCount);
- setI(s,"tone_preset",0);mock::ss(bag(ch),kOfxPropName,0,"tone_preset");require(call(kOfxActionInstanceChanged,e,bag(ch),nullptr)==kOfxStatOK);require(sameTone(readTone(s,0),def));
+ auto fire=[&](const char *k){mock::ss(bag(ch),kOfxPropName,0,k);require(call(kOfxActionInstanceChanged,e,bag(ch),nullptr)==kOfxStatOK);};
+ // Tone preset loads only shoulder/toe; the color group stays as it was.
+ for(int i=nss::kTonePresetCount-1;i>=0;i--){auto before=readTone(s,0);setI(s,"tone_preset",i);fire("tone_preset");auto now=readTone(s,0);
+  require(sameTone(now,nss::tonePresets[i].tone,0)&&sameTone(now,before,1)&&integer(s,"tone_preset",0)==i&&integer(s,"tone_color_preset",0)==0);}
+ // Tone color preset loads only the color group.
+ for(int i=nss::kToneColorPresetCount-1;i>=0;i--){setI(s,"tone_preset",2);fire("tone_preset");auto before=readTone(s,0);setI(s,"tone_color_preset",i);fire("tone_color_preset");auto now=readTone(s,0);
+  require(sameTone(now,nss::toneColorPresets[i].tone,1)&&sameTone(now,before,0)&&integer(s,"tone_color_preset",0)==i&&integer(s,"tone_preset",0)==2);
+  auto t=readParams(s,0).tone;require(t.highlight_cream_on==nss::toneColorPresets[i].tone.highlight_cream_on&&t.shadow_start==nss::toneColorPresets[i].tone.shadow_start);}
+ auto off=nss::toneColorPresets[nss::kToneColorPresetCount-1].tone;require(off.highlight_desat_on==0&&off.highlight_cream_on==0&&off.shadow_desat_on==0);
+ setI(s,"tone_preset",0);fire("tone_preset");setI(s,"tone_color_preset",0);fire("tone_color_preset");require(sameTone(readTone(s,0),def));
+ // Editing a slider or switch sets only its own group's menu to Custom.
+ setD(s,"tone_shoulder_strength",.5);fire("tone_shoulder_strength");require(integer(s,"tone_preset",0)==nss::kTonePresetCount&&integer(s,"tone_color_preset",0)==0);
+ setI(s,"tone_highlight_cream_on",0);fire("tone_highlight_cream_on");require(integer(s,"tone_color_preset",0)==nss::kToneColorPresetCount&&integer(s,"tone_preset",0)==nss::kTonePresetCount);
+ setI(s,"tone_preset",0);fire("tone_preset");require(integer(s,"tone_color_preset",0)==nss::kToneColorPresetCount&&readTone(s,0).highlight_cream_on==0);
+ setI(s,"tone_highlight_cream_on",1);fire("tone_highlight_cream_on");require(integer(s,"tone_color_preset",0)==nss::kToneColorPresetCount); // menu stays Custom until a preset is chosen
+ setI(s,"tone_color_preset",0);fire("tone_color_preset");require(sameTone(readTone(s,0),def));
  // Re-entering the preset values by hand keeps the named preset.
- mock::ss(bag(ch),kOfxPropName,0,"tone_toe_on");require(call(kOfxActionInstanceChanged,e,bag(ch),nullptr)==kOfxStatOK);require(integer(s,"tone_preset",0)==0);
+ fire("tone_toe_on");require(integer(s,"tone_preset",0)==0);fire("tone_shadow_desat");require(integer(s,"tone_color_preset",0)==0);
 }
 require(call(kOfxActionDestroyInstance,e,nullptr,nullptr)==kOfxStatOK);std::cout<<"PASS: exported entrypoints, describe/create, RGBA render, negative stride, nonzero origin, Resolve source auto-read, load snapshot/manual override, immediate gamma/base, noncompounding WB/sign, viewer point neutralization/ROI, color balance presets, tone presets\n";return 0;
 }

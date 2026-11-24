@@ -66,11 +66,12 @@ inline float nss_toe_offset(float n,NSS_PARAMS p){
  return p[43]*(.18f*NSS_EXP2(g)-n);
 }
 // Tone color (0.90.13): highlight/shadow desaturation and highlight cream, after shoulder and toe.
-// Region weight from the RGB mean in stops, w(t)=t^2/(1+t^2) for t>0 (zero slope at the start, so C1).
+// Region weight from the RGB mean in stops: smoothstep over 1.5 stops past the start (C1, reaches 1).
 // Desaturation mixes toward Rec709 luminance Y (Y and HSV hue unchanged). Cream multiplies R,G,B by
-// (1+a, 1+a/4, 1-a), a=0.15*strength*w_highlight*(1-saturation)^2, then rescales so Y is unchanged:
-// near-neutral highlights turn cream, saturated colors keep their hue.
-inline float nss_tone_w(float t){t=NSS_MAX(t,0.f);return t*t/(1.f+t*t);}
+// (1+a, 1, 1-0.3a), a=0.4*strength*w_highlight*max(1-2*saturation,0)^2, measured AFTER desaturation (so
+// desaturation cannot cancel it), then rescales so Y is unchanged: near-neutral highlights turn warm
+// cream, saturated colors keep their hue.
+inline float nss_tone_w(float t){float u=NSS_MIN(NSS_MAX(t*(1.f/1.5f),0.f),1.f);return u*u*(3.f-2.f*u);}
 inline float nss_tone_luma(float r,float g,float b){return .2126f*r+.7152f*g+.0722f*b;}
 inline void nss_tone_color(float *r,float *g,float *b,NSS_PARAMS p){
  float n=nss_tone_norm(*r,*g,*b);
@@ -80,8 +81,8 @@ inline void nss_tone_color(float *r,float *g,float *b,NSS_PARAMS p){
  float y=nss_tone_luma(*r,*g,*b),wd=p[49]*wh+p[51]*ws;
  *r+=wd*(y-*r);*g+=wd*(y-*g);*b+=wd*(y-*b);
  float mx=NSS_MAX(*r,NSS_MAX(*g,*b)),mn=NSS_MIN(*r,NSS_MIN(*g,*b));
- float f=mx>0.f?1.f-(mx-mn)/mx:0.f,a=p[53]*wh*f*f; // cream fades out on saturated colors
- if(a>0.f){float cr=*r*(1.f+a),cg=*g*(1.f+.25f*a),cb=*b*(1.f-a),ym=nss_tone_luma(cr,cg,cb);
+ float f=mx>0.f?NSS_MAX(1.f-2.f*(mx-mn)/mx,0.f):0.f,a=p[53]*wh*f*f; // cream fades out by saturation 0.5
+ if(a>0.f){float cr=*r*(1.f+a),cg=*g,cb=*b*(1.f-.3f*a),ym=nss_tone_luma(cr,cg,cb);
   if(ym>0.f){float s=y/ym;*r=cr*s;*g=cg*s;*b=cb*s;}}
 }
 // The build embeds render_math.h before this source.

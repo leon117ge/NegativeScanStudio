@@ -6,7 +6,7 @@ Quit Resolve, back up your project, and remove the previous bundle. Copy the ent
 Auto uses CUDA or OpenCL buffers when offered by the host. CPU fallback is available. No extra CUDA/OpenCL DLL is bundled or required for CPU use. Keep the whole bundle together. Scanning app binaries are unchanged.
 
 ## Controls
-All UI labels, statuses, and prompts are in English. The inversion math and all earlier numerical defaults are unchanged from 0.90.6; 0.90.12 added the optional Tone stage (on by default) after the inversion; 0.90.13 adds highlight/shadow desaturation and highlight cream to it.
+All UI labels, statuses, and prompts are in English. The inversion math and all earlier numerical defaults are unchanged from 0.90.6; 0.90.12 added the optional Tone stage (on by default) after the inversion; 0.90.13 added highlight/shadow desaturation and highlight cream; 0.90.14 moves those into a separate Tone Color group with switches and its own presets, and makes the cream stronger.
 
 1. **Camera calibration**
    - **X-T3**: Uses the pending X-T3 matrix from loaded `nss.scan/1` metadata, or falls back to the default X-T3 trichrome matrix (`DefaultXT3Trichrome`).
@@ -34,33 +34,36 @@ All UI labels, statuses, and prompts are in English. The inversion math and all 
    - **Save** / **Delete**: Save stores the current slider values in `%APPDATA%\NegativeScanStudio\balance_presets.json` (shared across all projects; `NSS_BALANCE_PRESETS` can override the path). Delete removes the selected slot. A missing or corrupt file is treated as empty.
    - **Preset status**: Lists saved slot names, or a short result after Save/Delete. Use this list if the host does not refresh the dropdown labels.
 
-5. **Tone** (new in 0.90.12, color controls in 0.90.13, on by default)
-   - **Tone preset**: `Soft cinematic` (default), `Gentle`, `Strong roll-off`, `Night practicals`, `Off / Classic 0.90.11`, `Custom`. Choosing a preset sets the controls below; editing a control shows `Custom`.
-   - **Highlight shoulder**, **Shoulder strength**, **Shoulder start (stops)**, **Shoulder white (stops)**: soft roll-off of bright areas. One gain is applied to R, G and B, so colors keep their hue and nothing clips.
-   - **Shadow toe**, **Toe strength**, **Toe start (stops)**, **Toe black (stops)**: lifts deep shadows to a soft neutral floor. The same small amount is added to R, G and B, so hue is kept and the deepest shadows desaturate a little.
-   - **Highlight desaturation**, **Highlight color start (stops)**, **Highlight cream**: bright areas lose some color toward their own luminance, and near-neutral highlights get a warm cream tint. Brightness is unchanged; mid-tones and shadows get no tint.
-   - **Shadow desaturation**, **Shadow color start (stops)**: deep shadows lose some color toward their own luminance.
-   - Stops are relative to 18% gray after Exposure and balance. `Off / Classic 0.90.11` renders exactly like 0.90.11. Works with every Output setting; it is designed for Cineon into a Kodak 2383 LUT.
+5. **Tone** (new in 0.90.12, on by default): switches, then preset, then sliders.
+   - **Highlight shoulder**, **Shadow toe**: on/off switches.
+   - **Tone preset**: `Soft cinematic` (default), `Gentle`, `Strong roll-off`, `Night practicals`, `Off / Classic 0.90.11`, `Custom`. Loads only this group; editing a control here shows `Custom`.
+   - **Shoulder strength**, **Shoulder start (stops)**, **Shoulder white (stops)**: soft roll-off of bright areas. One gain is applied to R, G and B, so colors keep their hue and nothing clips.
+   - **Toe strength**, **Toe start (stops)**, **Toe black (stops)**: lifts deep shadows to a soft neutral floor. The same small amount is added to R, G and B, so hue is kept and the deepest shadows desaturate a little.
 
-Color settings per preset:
-
-| Preset | Highlight desaturation / color start (stops) / cream | Shadow desaturation / color start (stops) |
-|---|---|---|
-| **Soft cinematic** (default) | 0.60 / +0.75 / 1.00 | 0.70 / -2.00 |
-| Gentle | 0.40 / +1.00 / 0.60 | 0.40 / -2.25 |
-| Strong roll-off | 0.75 / +0.50 / 1.00 | 0.80 / -1.75 |
-| Night practicals | 0.50 / +1.00 / 0.80 | 0.50 / -2.50 |
-| Off / Classic 0.90.11 | 0 / +0.75 / 0 | 0 / -2.00 |
-
-Shoulder and toe per preset:
-
-| Preset | Shoulder on / strength / start / white (stops) | Toe on / strength / start / black (stops) |
+| Tone preset | Shoulder on / strength / start / white (stops) | Toe on / strength / start / black (stops) |
 |---|---|---|
 | **Soft cinematic** (default) | on / 1.00 / +0.75 / +2.20 | on / 1.00 / -2.00 / -4.00 |
 | Gentle | on / 0.60 / +1.00 / +2.60 | on / 0.60 / -2.00 / -3.80 |
 | Strong roll-off | on / 1.00 / +0.50 / +1.80 | on / 1.00 / -1.75 / -3.60 |
 | Night practicals | on / 1.00 / +1.00 / +2.40 | on / 0.50 / -2.50 / -4.00 |
 | Off / Classic 0.90.11 | off | off |
+
+6. **Tone Color** (separate group since 0.90.14, on by default): switches, then preset, then sliders.
+   - **Highlight desaturation**, **Highlight cream**, **Shadow desaturation**: on/off switches. Off renders exactly like amount 0.
+   - **Tone color preset**: `Soft cinematic` (default), `Gentle`, `Strong`, `Night practicals`, `Off`, `Custom`. Loads only this group; editing a control here shows `Custom`.
+   - **Highlight desaturation amount**, **Highlight color start (stops)**: bright areas lose color toward their own luminance, reaching full strength 1.5 stops above the start. Brightness is unchanged.
+   - **Highlight cream amount**: warm cream tint (more red, less blue, luminance kept) on near-neutral highlights, applied after desaturation, so fully desaturated whites turn cream. Saturated colors (sky, practicals) keep their hue.
+   - **Shadow desaturation amount**, **Shadow color start (stops)**: deep shadows lose color toward their own luminance.
+
+| Tone color preset | Highlight desaturation / color start (stops) / cream | Shadow desaturation / color start (stops) |
+|---|---|---|
+| **Soft cinematic** (default) | on 0.60 / +0.75 / on 1.00 | on 0.70 / -2.00 |
+| Gentle | on 0.40 / +1.00 / on 0.60 | on 0.40 / -2.25 |
+| Strong | on 0.75 / +0.50 / on 1.00 | on 0.80 / -1.75 |
+| Night practicals | on 0.50 / +1.00 / on 0.80 | on 0.50 / -2.50 |
+| Off | all three off | |
+
+   Stops are relative to 18% gray after Exposure and balance. Both groups off renders exactly like 0.90.11. Works with every Output setting; designed for Cineon into a Kodak 2383 LUT.
 
 Technical parameters (18 matrix coefficients, camera strength, individual channel gammas, Density In constants, black subtraction, white code, gray-pick handle, pipeline stage, and render engine selection) are hidden via OFX `kOfxParamPropSecret` with all parameter IDs and defaults preserved for existing project compatibility.
 
