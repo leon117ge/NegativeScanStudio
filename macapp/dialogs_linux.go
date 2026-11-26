@@ -20,6 +20,8 @@ func nativePick(title string, kind pickKind, start string, exts []string) (strin
 		args = append(args, "--save")
 	case pickFolder:
 		args = append(args, "--directory")
+	case pickOpenMulti:
+		args = append(args, "--multiple", "--separator=\n")
 	}
 	if start != "" {
 		args = append(args, "--filename="+start)

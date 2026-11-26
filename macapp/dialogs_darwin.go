@@ -10,9 +10,9 @@ package main
 #include <stdlib.h>
 #include <string.h>
 
-// nssPick runs an NSOpenPanel (kind 0 file, 2 folder) or NSSavePanel
-// (kind 1) on the main thread and returns the chosen path (malloc'd) or
-// NULL. It is called from a goroutine, never from the main thread, so
+// nssPick runs an NSOpenPanel (kind 0 file, 2 folder, 3 several files)
+// or NSSavePanel (kind 1) on the main thread and returns the chosen path,
+// or the paths separated by newlines for kind 3 (malloc'd), or NULL. It is called from a goroutine, never from the main thread, so
 // dispatch_sync cannot deadlock; Gio's main run loop services the block.
 static char *nssPick(int kind, const char *title, const char *start, const char *exts) {
 	__block char *out = NULL;
@@ -27,10 +27,10 @@ static char *nssPick(int kind, const char *title, const char *start, const char 
 				p.canCreateDirectories = YES;
 			} else {
 				NSOpenPanel *o = [NSOpenPanel openPanel];
-				o.canChooseFiles = kind == 0;
+				o.canChooseFiles = kind == 0 || kind == 3;
 				o.canChooseDirectories = kind == 2;
 				o.canCreateDirectories = kind == 2;
-				o.allowsMultipleSelection = NO;
+				o.allowsMultipleSelection = kind == 3;
 				p = o;
 			}
 			p.title = t;
@@ -53,8 +53,16 @@ static char *nssPick(int kind, const char *title, const char *start, const char 
 				if (types.count > 0) p.allowedContentTypes = types;
 			}
 			[NSApp activateIgnoringOtherApps:YES];
-			if ([p runModal] == NSModalResponseOK && p.URL.path) {
-				out = strdup(p.URL.path.fileSystemRepresentation);
+			if ([p runModal] == NSModalResponseOK) {
+				if (kind == 3) {
+					NSMutableArray<NSString *> *ps = [NSMutableArray array];
+					for (NSURL *u in ((NSOpenPanel *)p).URLs) {
+						if (u.path) [ps addObject:u.path];
+					}
+					if (ps.count > 0) out = strdup([ps componentsJoinedByString:@"\n"].fileSystemRepresentation);
+				} else if (p.URL.path) {
+					out = strdup(p.URL.path.fileSystemRepresentation);
+				}
 			}
 		}
 	});

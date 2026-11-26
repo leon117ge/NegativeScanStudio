@@ -8,6 +8,7 @@ const (
 	pickOpen pickKind = iota
 	pickSave
 	pickFolder
+	pickOpenMulti // several files: the answer is the paths joined by newlines
 )
 
 // pickPath shows a native file dialog on its own goroutine (the panel runs
