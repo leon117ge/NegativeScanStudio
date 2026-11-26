@@ -26,6 +26,10 @@ ARCHFLAGS=${ARCHFLAGS-"-arch arm64 -mmacosx-version-min=13.0 -ffp-contract=off"}
 LIBCXX=${LIBCXX:--lc++}
 JOBS=$(sysctl -n hw.ncpu 2>/dev/null || nproc)
 
+# Runs each line of a file as a shell command, $JOBS at a time; fails if any fails.
+# (No xargs -I: BSD xargs limits the replacement to 255 bytes.)
+runall() { tr '\n' '\0' < "$1" | xargs -0 -n 1 -P "$JOBS" sh -c; }
+
 mkdir -p "$WORK" "$OUT"
 cd "$WORK"
 
@@ -48,7 +52,7 @@ cd "$SRC/zlib-${ZLIB_VERSION}"
 for f in adler32 compress crc32 deflate gzclose gzlib gzread gzwrite infback inffast inflate inftrees trees uncompr zutil; do
 	echo "$CC $ARCHFLAGS -O2 -DHAVE_UNISTD_H -DHAVE_STDARG_H -c $f.c -o $SRC/zobj/$f.o" >> "$SRC/zcmds.txt"
 done
-xargs -P "$JOBS" -I{} sh -c '{}' < "$SRC/zcmds.txt"
+runall "$SRC/zcmds.txt"
 rm -f "$OUT/libz.a"
 ar rcs "$OUT/libz.a" "$SRC"/zobj/*.o
 ranlib "$OUT/libz.a"
@@ -62,7 +66,7 @@ for o in $objs; do
 	[ -z "$src" ] && { echo "missing source for $o"; exit 1; }
 	echo "$CXX $ARCHFLAGS -O3 -I. -I$SRC/zlib-${ZLIB_VERSION} -w -DUSE_ZLIB -DLIBRAW_NODLL -c $src -o $SRC/obj/$o.o" >> "$SRC/cmds.txt"
 done
-xargs -P "$JOBS" -I{} sh -c '{}' < "$SRC/cmds.txt"
+runall "$SRC/cmds.txt"
 n=$(ls "$SRC"/obj/*.o | wc -l | tr -d ' ')
 want=$(echo $objs | wc -w | tr -d ' ')
 [ "$n" = "$want" ] || { echo "built $n of $want objects"; exit 1; }
