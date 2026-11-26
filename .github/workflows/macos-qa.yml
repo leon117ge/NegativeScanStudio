@@ -2,8 +2,11 @@
 # parity of the OFX plugin math. A Windows x64 job builds the plugin math with
 # MinGW-w64 g++ (the shipped Windows toolchain family, same flags as
 # ofx/build.sh) and records the Windows golden. The macOS arm64 job builds the
-# same code with Apple clang (same flags as the macOS bundle) and compares
-# against that fresh golden and against the committed one in ci/qa/golden/.
+# same code with Apple clang (same flags as the macOS bundle) on macos-15 and
+# macos-26 (macos-14 is retired) and compares against that fresh golden and
+# against the committed one in ci/qa/golden/.
+# Inputs are synthetic only. Real-image parity (the 0206 scan) runs locally on
+# the box or the user's Mac; never commit any user scan to this public repo.
 # Test-only: no release, no tag, no signing identity, no secrets.
 name: macOS QA parity
 on:
@@ -67,7 +70,11 @@ jobs:
           path: build/qa/ofx_cpu_windows_x64.json
 
   macos-parity:
-    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15, macos-26]
+    runs-on: ${{ matrix.runner }}
     needs: windows-golden
     steps:
       - uses: actions/checkout@v4
@@ -82,7 +89,7 @@ jobs:
       - name: Run parity cases on macOS
         run: |
           python3 ci/qa/parity.py run build/qa/math_runner build/qa/ofx_cpu_macos_arm64.json \
-            --label "macos-arm64 Apple clang (CI macos-15)" --meta "compiler=$(clang++ --version | head -1)" \
+            --label "macos-arm64 Apple clang (CI ${{ matrix.runner }})" --meta "compiler=$(clang++ --version | head -1)" \
             --meta "flags=-arch arm64 $CXXFLAGS_REF" --meta "commit=$GITHUB_SHA"
           python3 ci/qa/parity.py run build/qa/math_runner_nofma build/qa/ofx_cpu_macos_arm64_nofma.json \
             --label "macos-arm64 Apple clang -ffp-contract=off (diagnostic)" --meta "commit=$GITHUB_SHA"
@@ -112,5 +119,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: nss-ofx-parity-macos-reports
+          name: nss-ofx-parity-reports-${{ matrix.runner }}
           path: build/qa/*.json

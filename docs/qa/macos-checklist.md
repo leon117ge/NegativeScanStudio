@@ -13,7 +13,8 @@ How to use it:
   Record what the **On failure** line asks for, then go on with the next section
   unless the step says **STOP**.
 - Put everything you capture in one folder, `~/Desktop/nss-qa-<version>/`.
-  Zip it and attach it to the report.
+  Zip it and attach it to the report. Leave scan images and renders out of
+  anything that goes into the repo (see 3.3).
 - Commands are for Terminal (zsh). `$V` is the version under test, for example
   `V=0.90.16`. Paths with spaces are quoted.
 - Each section header says which work item delivers the part under test.
@@ -199,6 +200,9 @@ mark 3.2 to 3.5 `blocked` and report it.
 - [ ] **3.3** Render a parity frame with Metal:
   - Use the same source as the Windows tests if you have it (the `0206` scan
     TIFF). If not, use any 16-bit scan TIFF and record its name.
+  - Scans and renders stay on the Mac or the box. Never commit them to the
+    repo, attach them to a GitHub issue or PR, or upload them as a CI
+    artifact. The repo is public, and public CI uses synthetic data only.
   - Use one node with NegativeScan Studio OFX at its defaults, then a second
     node with NSS Print 2383 at its defaults.
   - On the Deliver page, render a single frame: Format **TIFF**, Codec **RGB 16
@@ -227,7 +231,7 @@ mark 3.2 to 3.5 `blocked` and report it.
   python3 compare_frames.py frame-windows-cpu.tif frame-cpu.tif --json parity-mac-vs-windows.json
   ```
   Expect: `PASS` with the same limits. CI already gates this case on synthetic
-  inputs (workflow `macOS QA parity`).
+  inputs (workflow `macOS QA parity`, on macos-15 and macos-26).
 - [ ] **3.7** Playback speed. With GPU mode Metal, set the timeline to a 4K or 6K
   scan clip at 24 fps and loop it, with both plugins on.
   - Write down the fps from the Color page viewer's playback indicator, with

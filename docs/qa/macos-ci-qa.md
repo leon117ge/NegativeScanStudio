@@ -5,6 +5,14 @@ W10 cover them. Neither one signs anything, publishes a release, creates a tag,
 or uses a secret. `macos-build-checks` only needs the read-only `GITHUB_TOKEN`
 to download artifacts.
 
+Runners: `macos-15` and `macos-26` (arm64), because `macos-14` is retired.
+Windows uses `windows-2022`.
+
+**Test data policy.** Public CI uses synthetic inputs only. Real-image parity
+with the 0206 scan, or with any other user scan, runs locally only, on the box
+or on the user's Mac. Never commit a user scan, or a render made from one, to
+this public repo, and never upload one as a CI artifact.
+
 ## 1. OFX CPU parity, macOS arm64 vs Windows x64 (`.github/workflows/macos-qa.yml`)
 
 **What runs**
@@ -16,7 +24,7 @@ the same headers as `plugin.cpp`. The workflow builds it twice:
 | Job | Runner | Compiler and flags |
 |---|---|---|
 | `windows-golden` | windows-2022 | MinGW-w64 `g++ -std=c++17 -O3 -fno-math-errno -fno-trapping-math -static`, the same family and flags as the shipped `ofx/build.sh` |
-| `macos-parity` | macos-15 (arm64) | Apple `clang++ -arch arm64` with the same flags as the macOS bundle in `macos-arm64-proof.yml` |
+| `macos-parity` | matrix: macos-15 and macos-26 (arm64) | Apple `clang++ -arch arm64` with the same flags as the macOS bundle in `macos-arm64-proof.yml` |
 
 **Inputs**
 
@@ -102,9 +110,10 @@ gate.
 
 ## 2. Checks on every Mac build (`.github/workflows/macos-build-checks.yml`, `ci/qa/check_mac_build.py`)
 
-`check_mac_build.py ARTIFACT --product ofx|print2383|app [--expect-version X] [--repo .] [--probe probe.json]`
+`check_mac_build.py ARTIFACT --product ofx|print2383|app [--expect-version X] [--repo SRC] [--probe probe.json] [--mode enforce|report]`
 takes a bundle, an `.app`, a folder, a zip (nested zips are opened too) or a
-DMG.
+DMG. `--mode enforce` (the default) exits 1 on any FAIL. `--mode report`
+prints the same verdict and exits 0.
 
 **CJK.** It checks:
 - file names
@@ -129,6 +138,17 @@ and Hangul. Any hit is a FAIL.
 - the version in the artifact file name
 - `--expect-version`
 
+**Layout and binaries.** An OFX artifact must contain the `*.ofx.bundle`
+folder itself, not a bare `Contents/`. It also needs:
+- `Contents/Info.plist` with `CFBundlePackageType` `BNDL`
+- the `CFBundleExecutable` in `Contents/MacOS`
+- no `Win64` folder
+
+Every Mach-O must have an arm64 slice and a code signature. An ad-hoc
+signature is a WARN until a Developer ID exists (PLAN.md Q1). A missing
+signature is a FAIL. On the macOS runner the workflow also runs
+`codesign --verify --deep --strict`, `codesign -dv`, `file` and `lipo -archs`.
+
 **Docs** (with `--repo`):
 - The product changelog has a `## <version>` entry (`## v<version>` for the app)
   that mentions macOS.
@@ -136,18 +156,61 @@ and Hangul. Any hit is a FAIL.
   quarantine or `Install.command` note.
 - Neither file contains CJK.
 
-The checker exits 1 on any FAIL. `ci/qa/test_check_mac_build.py` is its self-test
-and must catch `-beta`, a version mismatch, CJK in a text file, in a file name,
-and in a Mach-O `__cstring`.
+`ci/qa/test_check_mac_build.py` is the checker's self-test. It must catch:
+- a `-beta` suffix
+- a version mismatch
+- a wrong `--expect-version`
+- CJK in a text file, in a file name, and in a Mach-O `__cstring` (macOS only)
+- a bare `Contents/` without the bundle folder
 
-**Calling it from a Mac build workflow** (W1/W2/W3/P5):
+It also checks that report mode exits 0.
+
+**Calling it from a Mac build workflow** (W1/W2/W3/P5). Use it as a local
+reusable workflow (`workflow_call`), which works on any branch. Before
+`qa/macos-parity` is merged, reference it as
+`leon117ge/NegativeScanStudio/.github/workflows/macos-build-checks.yml@qa/macos-parity`.
 
 ```yaml
   checks:
-    needs: build            # the job that uploads the Mac artifact
+    needs: build                       # the job that uploads the Mac artifact
+    permissions: {contents: read, actions: read}
     uses: ./.github/workflows/macos-build-checks.yml
     with:
       artifact-name: NegativeScanStudio-ofx-macos-arm64
-      product: ofx
-      expect-version: 0.90.16
+      product: ofx                     # ofx, print2383 or app
+      expected-version: ${{ needs.build.outputs.version }}
+      runner: macos-15                 # or macos-26
+      # mode: auto (default) | report | enforce
 ```
+
+Inputs:
+
+| Input | Meaning |
+|---|---|
+| `artifact-name` | Required. The artifact that holds the Mac build. |
+| `product` | Required. `ofx`, `print2383` or `app`. |
+| `expected-version` | The version the build must carry. Empty means the versions only have to agree with each other. |
+| `run-id` | Empty means the calling run. |
+| `runner` | `macos-15` or `macos-26`. |
+| `source-ref` | Whose docs and changelog are checked. Empty means the calling commit. |
+| `qa-ref` | Where `ci/qa/` comes from. The default is `qa/macos-parity`. |
+| `mode` | Explained below. |
+
+The job output `result` is `PASS` or `FAIL`.
+
+Versions are never hard-coded. The caller passes them, and the lead assigns
+the final numbers at merge. The tentative numbers, used in docs and examples
+only, are NSS OFX 0.90.16, Print 2383 0.1.5, and the next plain app version
+v1.xx. 0.90.15 is reserved.
+
+**Mode.** In `auto`, the default, the workflow reports on branch pushes: the
+verdict goes to the job summary and a warning, and the job stays green. It
+enforces, which means the job fails on any FAIL, when the calling ref is a
+release tag: `refs/tags/v*` (app), `refs/tags/ofx-v*` (plugin) or
+`refs/tags/print2383-v*`. `mode: enforce` forces failing at any time, and
+`mode: report` never fails. Any build tagged for release must therefore pass.
+
+`macos-build-checks-selftest.yml` runs on pushes to `qa/macos-parity`. It
+calls the reusable workflow in report mode on the W2 Metal artifacts from run
+45807551550 (macos-15 and macos-26), and once more against the tentative
+0.90.16.
