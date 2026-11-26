@@ -23,6 +23,11 @@ NSS_LEVELING_FIXTURE="$BUILD/leveling" go test ./hdrscan -run TestScanMetadataUs
 "$BUILD/cuda_contract"
 "$CXX" -std=c++17 -O3 -fno-math-errno -fno-trapping-math -Iofx/vendor/openfx/include -Iofx/vendor/opencl ofx/tests/overlay_test.cpp -o "$BUILD/overlay_test"
 "$BUILD/overlay_test"
+# Metal (macOS) contract on any OS: embedded MSL source check, then the exact kernel as host C++
+# behind a mocked Metal API. Real Metal runs in .github/workflows/macos-metal.yml.
+python3 ofx/tests/check_metal_source.py "$BUILD"
+"$CXX" -std=c++17 -O3 -fno-math-errno -fno-trapping-math -Wno-attributes -Iofx/vendor/openfx/include -Iofx/vendor/opencl -Iofx/tests/metal_stub -I"$BUILD" ofx/tests/metal_contract.cpp -o "$BUILD/metal_contract"
+"$BUILD/metal_contract"
 python3 ofx/tests/check_metadata.py "$BUILD" "$SCAN"
 python3 ofx/tests/check_parity.py "$BUILD" "$SCAN"
 if [[ "${NSS_TEST_OPENCL:-0}" == 1 ]]; then

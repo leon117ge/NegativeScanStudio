@@ -1,0 +1,6 @@
+// Host C++ stand-in for <metal_stdlib>: lets the exact embedded MSL kernel (metal_source.hpp)
+// compile and run as C++ in metal_contract.cpp. Tests only; this is NOT a Metal emulator.
+#pragma once
+#include <cmath>
+namespace metal {namespace precise {using std::exp;using std::exp2;using std::log;using std::log2;using std::pow;using std::tanh;using std::fmin;using std::fmax;}}
+struct uint2 {unsigned x,y;};
