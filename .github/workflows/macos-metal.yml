@@ -94,7 +94,7 @@ jobs:
           build/metal/metal_plugin_test | tee build/metal/parity.txt
       - name: Existing native unit tests (CPU-only build, unchanged)
         run: |
-          for t in tone_test overlay_test; do
+          for t in tone_test overlay_test metal_retry_test; do
             clang++ $CXXFLAGS_COMMON ofx/tests/$t.cpp -o build/metal/$t
             build/metal/$t
           done
