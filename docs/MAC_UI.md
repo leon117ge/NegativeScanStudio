@@ -20,7 +20,9 @@ the same titles, rows and control order. Ported so far:
 | Camera & Light | Camera | ported (cards Camera and Meter the clear film base, live view, log) |
 | Camera & Light | Light | ported (RGB Light Air, Channels, Auto film-base leveling, Scan config presets, Faults, last leveling captures, 500T illuminant, log) |
 | HDR Scan | White light scan | ported (live view, Capture and merge card) |
-| HDR Scan | Trichrome, Mono trichrome, Focus check | placeholders |
+| HDR Scan | Trichrome | ported (live view, Trichrome scan card, film-base metadata) |
+| HDR Scan | Mono trichrome | ported (Hikrobot live view with centre marks, camera card, Mono trichrome capture card) |
+| HDR Scan | Focus check | placeholder |
 | Crop & Merge | Crop, Merge files, Remove hairs, Batch RAW to TIFF | ported (crop, merge, dust / hair removal, batch RAW to TIFF) |
 | Convert | | placeholder |
 
@@ -70,10 +72,10 @@ automatic film-base leveling exactly as Windows does. The page logic is
 
 Differences from Windows, and why:
 
-- The Mono trichrome page is not on macOS yet. The Hikrobot leveling exposure comes from
-  the shared `HikExposureUS` setting, falling back to the best-quality scan preset.
-  "Auto-meter each channel" is read from the settings file. The exposure is a plain
-  field in us instead of a spin box.
+- Since group (c) the Hikrobot leveling exposure is the Mono trichrome page's Exposure
+  field (`monoScanExposureUS`, as on Windows), falling back to the best-quality scan
+  preset only without that page; "Auto-meter each channel" is the page's check box. The
+  exposure is a plain field in us instead of a spin box.
 - Leveling metadata (the Camera card switch "Film base for metadata: Last leveling") and
   the film-stock comparison of frame 0 stay disabled until the film-base DB increment.
   The leveling itself, its records and the handoff work.
@@ -152,6 +154,71 @@ Differences from Windows, and why:
 - Yes/No walk dialogs are OK/Cancel in-window dialogs, as on the other Gio
   pages.
 - The `--dust` command-line tool is not ported.
+
+## Trichrome and Mono trichrome (W9 group c)
+
+HDR Scan > Trichrome and Mono trichrome are ported with the same layout,
+labels, tooltips, control order and behaviour as Windows. The page logic is
+`macapp/hdrctl/tri.go` and `mono.go` (with `levelmeta.go`, `hik.go`); the
+layouts are `triview.go` and `monoview.go`.
+
+- Trichrome (X-T3 and the RGB Light Air): the shared live view, the status
+  lines (camera, frame 0 lock, light now, scan values, output), Mode (one
+  shot per channel or HDR bracket per channel), Bracket per channel, Capture
+  trichrome / Stop, Meter base, Send base to Develop, the Film base metadata
+  check box with the last leveling line, a progress bar and the result box.
+  A scan reads the light (20), switches R, G and B on one at a time with the
+  leveling / Apply values (`rgblight.ChannelSwitch`), shoots each channel's
+  bracket with `hdrscan.Session.CaptureTrichrome` on the camera worker,
+  restores the light and frame 0, and merges with `hdrscan.ProcessTrichrome`
+  in the background while the next frame can be scanned. Stop deletes the
+  partial RAFs of that frame and restores the light.
+- Mono trichrome (Hikrobot MV-CS240-90UM through the W7 `hikcam` backend, or
+  the simulator): the letterboxed live view with the centre / flatness marks
+  (`focusmark`, display only), the camera card (SDK line, device list and
+  Refresh, Connect, Preset, Pixel format, Exposure with the leveled / not
+  leveled line, Gain, Black level, Trigger, gamma, full frame, ROI, Apply camera
+  settings) and the capture card (light, values, output, CA correction,
+  Auto-meter each channel, Mode, HDR bracket, Frames per exposure, Capture /
+  Stop, status, progress, report). Capture applies the settings, runs
+  `monocap.Capture` (settle check, native mono HDR merge, frame averaging) and
+  `hdrscan.ProcessMonoTrichrome` (CA correction, movement check) on the
+  Hikrobot worker goroutine. The Exposure field is the shared Hikrobot exposure
+  of Light leveling.
+- Without `MvCameraControl.framework` the SDK line says why, the device list is
+  the simulator only and nothing crashes; leveling with the Hikrobot camera
+  reports the same error.
+- Camera and light I/O never runs on the main thread: the X-T3 on the camera
+  worker, the Hikrobot camera on its `hikcam.Controller`, the light on its
+  worker; results come back through `UI.Post`. The Mono and Light pages share
+  one Hikrobot camera; starting one page's preview or leveling stops the other
+  preview first.
+- Film base metadata ("Last leveling"): Trichrome and Mono trichrome write the
+  accepted leveling result into the scan metadata when the scan values match
+  it, as on Windows.
+- Copied declarations are checked by `TestCopiedTrichromeDeclsMatchWindows`.
+
+Golden tests (`hdrctl/tri_test.go`, `mono_test.go`) run the page and the
+literal Windows sequence on the same simulated light and camera and compare
+every camera call with the light state at that moment, the light commands, the
+exposures, the file names (shot time masked) and the merged TIFF byte for byte
+(only the metadata creation time masked): Trichrome single and 0 / +2 / +3 EV,
+Mono trichrome single, the default 0 / +2 / +3 / +5 EV bracket, two frames per
+exposure and Auto-meter each channel.
+
+Differences from Windows, and why:
+
+- The SDK status (a dlopen of the framework) is read on the Hikrobot worker
+  when the page starts, not on the UI thread, so a slow load never blocks the
+  window.
+- The Hikrobot exposure metadata of a Mono capture is computed on the UI
+  goroutine before the capture instead of on the worker; the fields and the
+  written TIFF are the same (golden test).
+- Number edits are text fields with the Windows ranges and decimals applied
+  when editing ends.
+- The centre-mark arm lengths are in dp, so they scale on Retina screens.
+- Send base to Develop shows the same "Film base" message as Windows
+  (Convert does not take a scanned film-base reference).
 
 ## Threading model
 
