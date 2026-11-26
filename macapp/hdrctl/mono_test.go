@@ -28,6 +28,11 @@ type recHik struct {
 	s     *hikcam.Sim
 	light *rgblight.SimDevice
 	log   []string
+
+	// slowSwitch delays the first grab after the light's on state changed
+	// (a loaded machine); lastOn is the light at the previous grab.
+	slowSwitch time.Duration
+	lastOn     [3]bool
 }
 
 func newRecHik(light *rgblight.SimDevice) *recHik {
@@ -36,7 +41,13 @@ func newRecHik(light *rgblight.SimDevice) *recHik {
 
 func (r *recHik) reset() {
 	r.mu.Lock()
-	r.s, r.log = hikcam.OpenSim(), nil
+	r.s, r.log, r.slowSwitch, r.lastOn = hikcam.OpenSim(), nil, 0, [3]bool{}
+	r.mu.Unlock()
+}
+
+func (r *recHik) setSlowSwitch(d time.Duration) {
+	r.mu.Lock()
+	r.slowSwitch = d
 	r.mu.Unlock()
 }
 
@@ -71,6 +82,15 @@ func (r *recHik) Grab(d time.Duration) (*hikcam.Frame, error) {
 	f, err := r.sim().Grab(d)
 	if err == nil {
 		r.rec("grab %.0f us %.2f dB %dx%d", f.ExposureUS, f.GainDB, f.W, f.H)
+		on, _ := r.light.Lights()
+		r.mu.Lock()
+		slow := r.slowSwitch
+		if on == r.lastOn {
+			slow = 0
+		}
+		r.lastOn = on
+		r.mu.Unlock()
+		time.Sleep(slow)
 	}
 	return f, err
 }
@@ -260,7 +280,9 @@ func windowsMonoScan(t *testing.T, c *Ctl, cam hikcam.Device) string {
 	opt.Cam = cam
 	opt.Light = sw
 	opt.Settle = settle
-	opt.SettleTimeout = max(monocap.DefaultSettleTimeout, 4*settle)
+	// Windows: max(monocap.DefaultSettleTimeout, 4*settle); the test floor
+	// is the same one the page's capture uses
+	opt.SettleTimeout = max(monocap.DefaultSettleTimeout, 4*settle, m.settleTimeoutMin)
 	opt.BaseUS = baseUS
 	opt.MeterEach = meterEach
 	opt.MeterBox = box
@@ -312,7 +334,16 @@ func TestMonoGoldenMatchesWindows(t *testing.T) {
 		br     int
 		fpe    string
 		meterE bool
-	}{{"single", 0, 0, "1", false}, {"hdr-default", 1, monoBracketDefault, "1", false}, {"hdr-2frames", 1, 0, "2", false}, {"metered", 1, 0, "1", true}} {
+		// slow: the page's first grab after each light switch takes longer
+		// than monocap.DefaultSettleTimeout (a loaded machine)
+		slow bool
+	}{
+		{"single", 0, 0, "1", false, false},
+		{"hdr-default", 1, monoBracketDefault, "1", false, false},
+		{"hdr-2frames", 1, 0, "2", false, false},
+		{"metered", 1, 0, "1", true, false},
+		{"metered-slow-grab", 1, 0, "1", true, true},
+	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h, c, l := newLightCtl(t)
 			connectSim(t, h, l)
@@ -325,7 +356,17 @@ func TestMonoGoldenMatchesWindows(t *testing.T) {
 			m.MeterEachChanged()
 			m.ExpText = "12000"
 			m.ExposureEdited()
+			// monocap ends the light settle check after SettleTimeout of wall
+			// clock even when the frames have not been compared yet; on a
+			// loaded machine one settle grab can take longer than the 3 s
+			// default, and that run then meters a different frame. The
+			// simulator's light is stable after two grabs, so a high floor
+			// (on both sides) leaves only the frame-based outcome.
+			m.settleTimeoutMin = 10 * time.Minute
 			rec := newRecHik(l.sim)
+			if tc.slow {
+				rec.setSlowSwitch(monocap.DefaultSettleTimeout + 300*time.Millisecond)
+			}
 			m.hik.setCam(rec)
 			if b := m.Buttons(); !b.Capture {
 				t.Fatalf("not ready: %s", m.WhyText)
@@ -340,6 +381,10 @@ func TestMonoGoldenMatchesWindows(t *testing.T) {
 				t.Fatalf("result: %s\n%s", m.RepText, m.LogText())
 			}
 			macOut := strings.Fields(strings.SplitN(m.RepText[strings.Index(m.RepText, "Saved "):], "  (", 2)[0])[1]
+			// let the live view the page restarts after the capture show a
+			// frame, so its calls are always recorded and always split off
+			seq := m.FrameSeq
+			h.pump(t, "live view after the capture", 60*time.Second, func() bool { return m.FrameSeq > seq })
 			stopMonoWorker(m)
 			macCalls := rec.calls()
 			macLight := append([]byte(nil), l.sim.Received()[lb:]...)
@@ -355,8 +400,12 @@ func TestMonoGoldenMatchesWindows(t *testing.T) {
 			winLight := l.sim.Received()[lb:]
 			winLight = winLight[:len(winLight)-countTrailingReads(winLight)]
 
-			// the page's preview start after the capture is not part of it
-			macCalls = trimAfterLastStop(macCalls)
+			// the page restarts the live view after the capture (Windows
+			// does too); it is not part of the capture sequence
+			macCalls, after := splitAtCaptureStop(macCalls)
+			if !isLivePreviewRun(after) {
+				t.Fatalf("calls after the capture are not a live view run: %q", after)
+			}
 			if !reflect.DeepEqual(macCalls, winCalls) {
 				t.Fatalf("camera calls differ (%d / %d):\nmac %q\nwin %q", len(macCalls), len(winCalls), macCalls, winCalls)
 			}
@@ -406,11 +455,39 @@ func countTrailingReads(b []byte) int {
 	return n
 }
 
-func trimAfterLastStop(calls []string) []string {
-	for i := len(calls) - 1; i >= 0; i-- {
-		if strings.HasPrefix(calls[i], "stop grab") {
-			return calls[:i+1]
+// splitAtCaptureStop splits the recorded calls after the capture's own
+// StopGrab, which is the first one: monocap.Capture never stops the grab,
+// and the live view the page starts afterwards runs on the same worker, so
+// it cannot begin before the capture job has returned. The live view may
+// have run a whole start / grab / stop cycle by the time the test reads the
+// calls, so the last StopGrab is not the capture's.
+func splitAtCaptureStop(calls []string) (capture, after []string) {
+	for i, s := range calls {
+		if strings.HasPrefix(s, "stop grab") {
+			return calls[:i+1], calls[i+1:]
 		}
 	}
-	return calls
+	return calls, nil
+}
+
+// isLivePreviewRun accepts nothing, or a live view start (free-run live
+// settings, then StartGrab) followed only by grabs and at most a final
+// StopGrab.
+func isLivePreviewRun(calls []string) bool {
+	if len(calls) == 0 {
+		return true
+	}
+	if len(calls) < 2 || !strings.HasPrefix(calls[0], "apply ") || !strings.Contains(calls[0], "SoftwareTrigger:false") {
+		return false
+	}
+	for i, s := range calls[1:] {
+		switch {
+		case i == 0 && strings.HasPrefix(s, "start grab"):
+		case i > 0 && strings.HasPrefix(s, "grab "):
+		case i > 0 && i == len(calls)-2 && strings.HasPrefix(s, "stop grab"):
+		default:
+			return false
+		}
+	}
+	return true
 }

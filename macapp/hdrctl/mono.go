@@ -52,6 +52,12 @@ type Mono struct {
 
 	loading, optsLoaded bool // saved capture options: being restored / restored
 
+	// settleTimeoutMin raises the light settle-check timeout of a capture
+	// (monocap.Options.SettleTimeout). It is 0 in the app, so the timeout
+	// is the Windows one; the golden tests raise it so a loaded machine
+	// cannot end the check on the wall clock instead of on stable frames.
+	settleTimeoutMin time.Duration
+
 	// ---- controls (the Gio page binds to these) ----
 	DevItems  []string
 	DevIdx    int
@@ -773,6 +779,7 @@ func (m *Mono) Capture() {
 			settle = time.Duration(ms) * time.Millisecond
 		}
 	}
+	settleTimeout := max(monocap.DefaultSettleTimeout, 4*settle, m.settleTimeoutMin)
 	correct := m.CA
 	meterEach := h.hikMeterEach()
 	baseUS := h.sharedHikExposure()
@@ -859,7 +866,7 @@ func (m *Mono) Capture() {
 		opt.Cam = cam
 		opt.Light = light
 		opt.Settle = settle
-		opt.SettleTimeout = max(monocap.DefaultSettleTimeout, 4*settle)
+		opt.SettleTimeout = settleTimeout
 		opt.BaseUS = baseUS
 		opt.MeterEach = meterEach
 		opt.MeterBox = box
