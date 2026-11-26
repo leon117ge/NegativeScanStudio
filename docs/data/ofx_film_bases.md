@@ -1,6 +1,6 @@
 # Film white balance: visible slider Base loaders (OFX 0.90.3)
 
-Table source: [ofx_film_bases.json](ofx_film_bases.json), which generates `ofx/src/film_bases.hpp`, the dropdown and the defaults. Each stock has **at most one, and only a measured, Base entry**; each supported stock keeps one target slot, and no numbers are invented for unmeasured stocks. Currently there is only **500T Base**; other stocks will get a `\u003cStock\u003e Base` after they are measured, and multiple Bases will not be created per color temperature/gamma. `None` is a reset action, not a stock.
+Table source: [ofx_film_bases.json](ofx_film_bases.json), which generates `ofx/src/film_bases.hpp`, the dropdown and the defaults. Each stock has **at most one, and only a measured, Base entry**; each supported stock keeps one target slot, and no numbers are invented for unmeasured stocks. Currently there is only **500T Base**; other stocks will get a `<Stock> Base` after they are measured, and multiple Bases will not be created per color temperature/gamma. `None` is a reset action, not a stock.
 
 | UI loader | Red balance / stops | Green | Blue |
 |---|---:|---:|---:|

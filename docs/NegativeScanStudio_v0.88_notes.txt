@@ -1,7 +1,7 @@
 NegativeScan Studio v0.88
 
 Usage:
-1. Connect the camera in Camera, then go to Camera \u0026 Light \u003e Light.
+1. Connect the camera in Camera, then go to Camera & Light > Light.
 2. The light page now has the shared live view; click Start live view (if not already started) and drag the small orange box directly onto clean film base. Camera/Light/White light/Trichrome share the box.
 3. In Rectangle mode, leveling is blocked until a box is actually drawn; Reset to Auto clears the shared box and restores auto detection. A box from the old v0.87 must be redrawn once, so that the original default center box is not mistaken for a manual selection.
 4. When leveling finishes, it shows the film base linear R/G/B (after the matrix when a camera profile is enabled) and the light's R/G/B brightness.

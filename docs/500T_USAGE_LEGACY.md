@@ -3,7 +3,7 @@
 This is an approximate model derived from the Kodak data sheet, not a measured white balance for this roll.
 If an 85 filter was used when shooting, or the light source was mixed, LED or fluorescent, do not apply the unfiltered daylight preset directly.
 
-1. Finish film base leveling in Camera \u0026 Light \u003e Light, and write the film base RGB into the DCTL with the original button.
+1. Finish film base leveling in Camera & Light > Light, and write the film base RGB into the DCTL with the original button.
 2. Keep the light unchanged. Expand **Colour cast** on the left.
 3. Pick the light source the negative was shot under. For unfiltered daylight, first pick **500T @ 5500K**.
    For tungsten, pick **3200K**; its offset is zero. The custom range is 2500–10000K.
