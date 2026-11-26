@@ -21,7 +21,7 @@ jobs:
           # ofx/build-mac.sh stamps Info.plist from ofx/mac/Info.plist.in (real version, macOS 13.0);
           # the old placeholder ci/macos/Info.plist (0.0.0) is retired.
           set -o pipefail
-          NSS_METAL=0 ofx/build-mac.sh build | tee build-mac.log
+          NSS_METAL=0 bash ofx/build-mac.sh build | tee build-mac.log
           grep -qx 'engine=CPU' build-mac.log
           B=build/NegativeScanStudio.ofx.bundle/Contents
           plutil -p "$B/Info.plist"

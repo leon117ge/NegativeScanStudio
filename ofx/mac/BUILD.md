@@ -2,7 +2,7 @@
 
 Test builds only, not released yet.
 
-- `ofx/build-mac.sh [out]` (on a Mac with the Xcode command line tools) builds
+- `bash ofx/build-mac.sh [out]` (on a Mac with the Xcode command line tools) builds
   `NegativeScanStudio.ofx.bundle` for arm64 with the CPU render path, signs it ad hoc and
   zips it with `Install.command` and `README-macOS.txt` (all at the zip root) as
   `NegativeScanStudio_OFX_v<version>_macOS_arm64.zip`. The version comes from plugin.cpp
