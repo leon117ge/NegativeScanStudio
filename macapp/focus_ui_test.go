@@ -32,7 +32,7 @@ func TestFocusCheckPage(t *testing.T) {
 		os.MkdirAll(s.dir, 0o755)
 	}
 	u.hdr.Cfg.OutDir = t.TempDir()
-	u.hdr.Start()
+	startHDR(u)
 	l, m, f := u.hdr.Light, u.hdr.Mono, u.hdr.Focus
 	s.pump("pages ready", func() bool {
 		return strings.Contains(f.LogText(), "Focus check ready") && strings.Contains(m.LogText(), "Mono trichrome page ready") && len(l.PortItems) >= 2

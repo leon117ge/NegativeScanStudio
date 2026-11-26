@@ -23,6 +23,16 @@ func newLightCtl(t *testing.T) (*testHost, *Ctl, *Light) {
 	isolate(t)
 	h := newHost()
 	c := New(h)
+	// No real camera scan in tests. On macOS ListDevices is the
+	// ImageCaptureCore scan, which starts its ICDeviceBrowser on the main
+	// queue and waits up to 5 s for the enumeration. A go test binary runs
+	// no main run loop, so the scan only finishes when the camera worker
+	// goroutine happens to run on the main thread (then it pumps the run
+	// loop itself); otherwise it waits the full 5 s. Connect is queued
+	// behind it on the same worker, so the Trichrome tests' 5 s connect
+	// waits failed on macos-26. These pages use the simulators, so no list
+	// is scanned, as on Linux; the ICC tests cover the listing.
+	c.ListDevices = nil
 	c.Start()
 	l := c.Light
 	h.pump(t, "light page ready", 5*time.Second, func() bool { return strings.Contains(l.LogText(), "Light page ready") })

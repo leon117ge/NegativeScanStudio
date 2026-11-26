@@ -110,7 +110,7 @@ func newTriRig(t *testing.T) *triRig {
 	c.Cfg.OutDir, c.Cfg.Roll = r.out, "golden"
 	l.SettleText = "20"
 	c.Connect()
-	h.pump(t, "camera connect", 5*time.Second, func() bool { return c.Connected() && !c.Busy })
+	h.pump(t, "camera connect", 30*time.Second, func() bool { return c.Connected() && !c.Busy })
 	t.Cleanup(func() {
 		c.Disconnect()
 		for len(h.q) > 0 {
@@ -171,7 +171,7 @@ func TestTriReasonsAndButtons(t *testing.T) {
 	h.scene = "mock.raf"
 	c.OpenSim = func(string, *camera.Logger) (camera.Device, error) { return r.cam, nil }
 	c.Connect()
-	h.pump(t, "connect", 5*time.Second, func() bool { return c.Connected() && !c.Busy })
+	h.pump(t, "connect", 30*time.Second, func() bool { return c.Connected() && !c.Busy })
 	tr.Buttons()
 	if tr.WhyText != "Capture disabled: frame 0 not locked" || !tr.Buttons().Meter || tr.CamText == "Camera: not connected" {
 		t.Fatalf("unlocked: %q", tr.WhyText)
@@ -202,7 +202,7 @@ func TestTriReasonsAndButtons(t *testing.T) {
 		t.Fatal(h.messages)
 	}
 	c.Disconnect()
-	h.pump(t, "disconnect", 5*time.Second, func() bool { return !c.Connected() })
+	h.pump(t, "disconnect", 30*time.Second, func() bool { return !c.Connected() })
 }
 
 var shotRE = regexp.MustCompile(`golden_\d{8}_\d{6}_\d{4}`)
