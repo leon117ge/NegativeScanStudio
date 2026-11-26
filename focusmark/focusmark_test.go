@@ -185,7 +185,7 @@ func TestSimPreviewAndCapture(t *testing.T) {
 	label("Fit  -  centre, corners and edge midpoints (10% inset)", 10, 18)
 	label("200 % at the optical centre  -  mark stays on the true centre", panelW+10, 18)
 
-	out := "/workspace/mono_center_mark.png"
+	out := filepath.Join(t.TempDir(), "mono_center_mark.png")
 	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +202,7 @@ func TestSimPreviewAndCapture(t *testing.T) {
 	}
 
 	// Also write the raw capture (no overlay) next to it for comparison.
-	cf, err := os.Create("/tmp/mono_capture_no_overlay.png")
+	cf, err := os.Create(filepath.Join(filepath.Dir(out), "mono_capture_no_overlay.png"))
 	if err != nil {
 		t.Fatal(err)
 	}
