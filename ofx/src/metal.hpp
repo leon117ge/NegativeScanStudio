@@ -21,9 +21,8 @@ struct MetalStatus {
 private:
  std::mutex mutex;std::string last;
 };
-// Test-only fault injection. The encode path honours this only when compiled with
-// -DNSS_TEST_HOOKS (test and CI test targets). A release build ignores it, and the
-// hook strings must not appear in the shipped binary.
+// Test-only fault injection. MetalApi::fault exists only when compiled with -DNSS_TEST_HOOKS
+// (test and CI test targets); a release build has neither the member nor the hook strings.
 enum MetalFault:int {kMetalFaultNone=0,kMetalFaultNoDevice=1,kMetalFaultCompile=2,kMetalFaultPipeline=3,kMetalFaultEncode=4};
 struct MetalApi {
  bool available=false;
@@ -38,7 +37,10 @@ struct MetalApi {
  // Wait for work already committed to the host queue. Used only by the CPU fallback and the
  // optional viewer gray picker, never by the normal Metal render.
  bool (*drain)(void *queue)=nullptr;
+#ifdef NSS_TEST_HOOKS
+ // Test builds only: a release MetalApi has no fault member at all.
  std::atomic<int> fault{kMetalFaultNone};
+#endif
  std::atomic<int> pipelineBuilds{0};
  static MetalApi &get();
 };

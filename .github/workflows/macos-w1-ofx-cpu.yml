@@ -37,7 +37,9 @@ jobs:
           echo "Comparing against $WIN_BASE_REF at $BASE"
           git worktree add -q ../base "$BASE"
           for d in ../base .; do (cd "$d" && python3 ofx/tools/generate.py >/dev/null && python3 ofx/tools/cuda_source.py >/dev/null); done
-          (cd ../base && x86_64-w64-mingw32-g++-posix -std=c++17 -E -P $INC ofx/src/plugin.cpp) | grep -v '^[[:space:]]*$' > /tmp/win_base.ii
+          # The one intended Windows difference: MetalApi::fault (test-only fault injection, never read
+          # on Windows) now exists only under NSS_TEST_HOOKS (W4 review LOW-4), so drop it from the base.
+          (cd ../base && x86_64-w64-mingw32-g++-posix -std=c++17 -E -P $INC ofx/src/plugin.cpp) | grep -v '^[[:space:]]*$' | grep -v -x '[[:space:]]*std::atomic<int> fault{kMetalFaultNone};' > /tmp/win_base.ii
           x86_64-w64-mingw32-g++-posix -std=c++17 -E -P $INC ofx/src/plugin.cpp | grep -v '^[[:space:]]*$' > /tmp/win_head.ii
           if cmp -s /tmp/win_base.ii /tmp/win_head.ii; then echo "PASS: Windows preprocessed plugin.cpp is identical to $WIN_BASE_REF (blank lines ignored)"; else diff /tmp/win_base.ii /tmp/win_head.ii | head -n 80; echo "FAIL: Windows source changed"; exit 1; fi
       - name: Windows plugin still builds (ofx/build.sh)

@@ -99,6 +99,15 @@ void setLastRender(Instance *i,const std::string &text){std::lock_guard<std::mut
 bool metalAvailable(){try{return nss::MetalApi::get().available;}catch(...){return false;}}
 // Stop offering Metal for this instance after a failure; later frames come as CPU buffers.
 void withdrawMetal(OfxImageEffectHandle e,Instance *i){i->metalWithdrawn=true;OfxPropertySetHandle p=nullptr;if(effect->getPropertySet(e,&p)==kOfxStatOK&&p)prop->propSetString(p,kOfxImageEffectPropMetalRenderSupported,0,"false");}
+#if NSS_MAC_RENDER_UI
+// macOS: decide once whether this instance offers Metal (createInstance), then again only when
+// render_device or pick_auto changes. CPU selected or the auto gray pick on means the host sends
+// CPU buffers, so render never drains the host queue for those frames.
+void offerMetal(OfxImageEffectHandle e,Instance *i,double time){
+ bool on=false;try{auto s=params(e);on=integer(s,"render_device",time)==0&&integer(s,"pick_auto",time)==0&&metalAvailable()&&!i->metalWithdrawn;}catch(...){on=false;}
+ OfxPropertySetHandle p=nullptr;if(effect->getPropertySet(e,&p)==kOfxStatOK&&p)prop->propSetString(p,kOfxImageEffectPropMetalRenderSupported,0,on?"true":"false");
+}
+#endif
 Pipeline readParams(OfxParamSetHandle set,double time) {
  Pipeline p;
 #include "read_params.inc"
@@ -369,6 +378,10 @@ void deleteBalancePreset(OfxParamSetHandle s,double time){
  showBalancePresets(s,file,std::string("Deleted '")+name+"'");
 }
 OfxStatus changed(OfxImageEffectHandle e,OfxPropertySetHandle a) {
+#if NSS_MAC_RENDER_UI
+ // Any change reason (user, plugin, undo): the Metal offer follows render_device and pick_auto.
+ if(auto name=str(a,kOfxPropName);name=="render_device"||name=="pick_auto"){double t=0;prop->propGetDouble(a,kOfxPropTime,0,&t);offerMetal(e,instance(e),t);}
+#endif
  if(str(a,kOfxPropChangeReason)!=kOfxChangeUserEdited)return kOfxStatReplyDefault;
  auto s=params(e);auto key=str(a,kOfxPropName);double time=0;prop->propGetDouble(a,kOfxPropTime,0,&time);
  if(key=="load_metadata") {
@@ -446,7 +459,9 @@ OfxStatus changed(OfxImageEffectHandle e,OfxPropertySetHandle a) {
   bool automatic=integer(s,"render_device",time)==0;
   prop->propSetString(properties(e),kOfxImageEffectPropOpenCLRenderSupported,0,automatic&&nss::CLApi::get().available?"true":"false");
   prop->propSetString(properties(e),kOfxImageEffectPropCudaRenderSupported,0,automatic&&nss::CudaApi::get().available?"true":"false");
+#if !NSS_MAC_RENDER_UI
   prop->propSetString(properties(e),kOfxImageEffectPropMetalRenderSupported,0,automatic&&metalAvailable()&&!instance(e)->metalWithdrawn?"true":"false");
+#endif
  }else if(key=="render_info"){
   auto i=instance(e);std::string text;{std::lock_guard<std::mutex> lock(i->mutex);text=i->lastRender;}
   // macOS: the last render plus the Metal state. Windows/Linux: the 0.90.14 text (CUDA, OpenCL).
@@ -594,6 +609,9 @@ OfxStatus entry(const char *action,const void *handle_,OfxPropertySetHandle in,O
   if(!std::strcmp(action,kOfxActionCreateInstance)) {
    auto i=std::make_unique<Instance>();check(effect->clipGetHandle(e,kOfxImageEffectSimpleSourceClipName,&i->src,nullptr));check(effect->clipGetHandle(e,kOfxImageEffectOutputClipName,&i->dst,nullptr));check(prop->propSetPointer(properties(e),kOfxPropInstanceData,0,i.get()));i.release();
    try{auto s=params(e);showBalancePresets(s,nss::loadBalancePresets());}catch(...){}
+#if NSS_MAC_RENDER_UI
+   offerMetal(e,instance(e),0);
+#endif
    return kOfxStatOK;
   }
   if(!std::strcmp(action,kOfxActionDestroyInstance)){delete instance(e);prop->propSetPointer(properties(e),kOfxPropInstanceData,0,nullptr);return kOfxStatOK;}

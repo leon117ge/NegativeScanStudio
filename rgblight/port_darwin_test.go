@@ -311,3 +311,33 @@ func TestDarwinRealLight(t *testing.T) {
 	}
 	t.Logf("light: %s; state %+v", in, st)
 }
+
+// A descriptor select(2) cannot hold (>= FD_SETSIZE) is an error, never a panic.
+func TestWaitFDAboveFDSetSize(t *testing.T) {
+	if fdSetSize != 1024 {
+		t.Fatalf("FD_SETSIZE %d, want 1024 on macOS", fdSetSize)
+	}
+	for _, fd := range []int{-1, fdSetSize, fdSetSize + 500} {
+		if _, err := waitFD(fd, false, time.Millisecond); err != errFDTooHigh {
+			t.Fatalf("waitFD(%d): %v", fd, err)
+		}
+	}
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	defer w.Close()
+	hi := fdSetSize + 100
+	if err := unix.Dup2(int(r.Fd()), hi); err != nil {
+		t.Skipf("cannot dup to fd %d (open file limit): %v", hi, err)
+	}
+	p := &unixPort{fd: hi, name: "pipe"}
+	if _, err := p.Read(make([]byte, 4)); err == nil || !errors.Is(err, errFDTooHigh) {
+		t.Fatalf("Read on fd %d: %v", hi, err)
+	}
+	if _, err := p.Write([]byte{1}); err != nil {
+		t.Logf("Write on fd %d: %v", hi, err)
+	}
+	p.Close()
+}

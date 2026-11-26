@@ -10,6 +10,7 @@ Core packages only; the Mac UI is not built yet. Capture sequence, timing and im
 
 - **LibRaw on darwin/arm64.** `rawconv` links a static LibRaw 0.22.1 + zlib 1.3.1 built from pinned, sha256-checked sources by `ci/macos/build_libraw.sh` (same version and flags as the Windows and Linux libraries). CI decodes a public sample RAF on macOS, Linux and Windows and compares the 16-bit output.
 - **RGB Light Air on macOS, no driver.** The light (USB 0483:5740, STM32 virtual COM port) uses the built-in macOS CDC-ACM driver and appears as `/dev/cu.usbmodem*`. `rgblight` opens the `cu.*` node (never `tty.*`) at 115200 8N1 raw with DTR/RTS on, exclusive access and the same 20 ms read wait as on Windows, and tags ports by USB VID/PID through IOKit (or `ioreg` without cgo).
+- **No select() panic on a high descriptor.** The macOS serial port waits with select(2) (poll(2) does not support device nodes on macOS); a descriptor at or above FD_SETSIZE (1024) now returns an error instead of panicking in `FdSet.Set` (W4 review LOW-6).
 - **`cmd/rgblightports`** light tool: `list`, `info`, `status`, `on`/`off r|g|b|all`, `brightness r|g|b|all N`, `setall R G B`, with `-port`, `-raw` (serial log) and `-sim`.
 
 ## v1.13

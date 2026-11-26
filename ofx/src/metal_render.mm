@@ -19,6 +19,7 @@
 #import <Metal/Metal.h>
 #include "metal.hpp"
 #include "metal_source.hpp"
+#include "metal_retry.hpp"
 #include <algorithm>
 #include <cstdint>
 #include <map>
@@ -52,7 +53,9 @@ id<MTLComputePipelineState> buildPipeline(id<MTLDevice> device,NSString *source,
 }
 // One compiled pipeline (or the compile error) per MTLDevice. Resolve can hand different devices
 // to different nodes (multi-GPU, eGPU), so the cache key is the device's registry ID.
-struct CacheEntry {id<MTLDevice> device;id<MTLComputePipelineState> pipeline;std::string error;};
+// A failed build is kept only until its retry time (metal_retry.hpp), so a transient failure does
+// not disable Metal on that device until the host restarts.
+struct CacheEntry {id<MTLDevice> device;id<MTLComputePipelineState> pipeline;std::string error;nss::MetalRetry retry;};
 std::mutex cacheMutex;
 std::map<uint64_t,CacheEntry> &cache(){static auto *entries=new std::map<uint64_t,CacheEntry>();return *entries;}
 id<MTLComputePipelineState> pipelineFor(id<MTLDevice> device,std::string &error
@@ -72,10 +75,15 @@ id<MTLComputePipelineState> pipelineFor(id<MTLDevice> device,std::string &error
  std::lock_guard<std::mutex> lock(cacheMutex);
  auto &entry=cache()[device.registryID];
  if(entry.pipeline)return entry.pipeline;
- if(!entry.error.empty()){error=entry.error;return nil;}
- entry.device=device;
+ auto now=nss::MetalRetry::Clock::now();
+ if(!entry.retry.allow(now)){error=entry.error;return nil;}
+ entry.device=device;entry.error.clear();
  entry.pipeline=buildPipeline(device,@(nss::metalSource),@"nss_render_metal",entry.error);
- if(!entry.pipeline)error=entry.error;
+ if(!entry.pipeline){
+  entry.retry.failed(now);
+  if(entry.retry.exhausted())entry.error+=" (gave up after "+std::to_string(nss::MetalRetry::kMaxAttempts)+" attempts; CPU until the host restarts)";
+  error=entry.error;
+ }
  return entry.pipeline;
 }
 // Bytes a buffer must hold for rows*stride floats where only the last row may be short.

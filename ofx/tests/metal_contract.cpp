@@ -3,6 +3,10 @@
 // Covers the Metal property, render routing, no-wait encode, CPU fallback and withdrawal on
 // every forced failure, async command-buffer errors, private buffers and the picker.
 // NOT Metal execution: metal_plugin_test.cpp runs the real Metal path on macOS CI.
+// The fault-injection member MetalApi::fault exists only in test builds (ofx/src/metal.hpp).
+#ifndef NSS_TEST_HOOKS
+#define NSS_TEST_HOOKS 1
+#endif
 // The Metal contract is a Metal build: Render engine reads 'Auto (Metal)|CPU' when the macOS UI is on
 // (ofx/src/platform.hpp). Set here so the mock build needs no -DNSS_METAL (which would link metal_render.mm).
 #ifndef NSS_RENDER_AUTO_METAL
@@ -79,7 +83,10 @@ static double worst(OfxParamSetHandle s,const Frame &f,const int *window,bool pr
 static std::string lastRender(OfxImageEffectHandle e){std::lock_guard<std::mutex> lock(instance(e)->mutex);return instance(e)->lastRender;}
 struct Plugin {
  mock::Effect fx;OfxImageEffectHandle e=reinterpret_cast<OfxImageEffectHandle>(&fx);OfxParamSetHandle s=nullptr;
- Plugin(){require(entry(kOfxActionDescribe,e,nullptr,nullptr)==kOfxStatOK);require(entry(kOfxImageEffectActionDescribeInContext,e,nullptr,nullptr)==kOfxStatOK);
+ Plugin():Plugin(0,0){}
+ // renderDevice/pickAuto: values saved in a project, present before createInstance (a reopened project).
+ Plugin(int renderDevice,int pickAuto){require(entry(kOfxActionDescribe,e,nullptr,nullptr)==kOfxStatOK);require(entry(kOfxImageEffectActionDescribeInContext,e,nullptr,nullptr)==kOfxStatOK);
+  s=params(e);setI(s,"render_device",renderDevice);setI(s,"pick_auto",pickAuto);
   require(entry(kOfxActionCreateInstance,e,nullptr,nullptr)==kOfxStatOK);s=params(e);setI(s,"auto_metadata",0);setI(s,"camera_on",0);}
  ~Plugin(){entry(kOfxActionDestroyInstance,e,nullptr,nullptr);}
  std::string metalProp(){return str(properties(e),kOfxImageEffectPropMetalRenderSupported);}
@@ -151,7 +158,26 @@ int main(){
  {Plugin p;Frame f;for(size_t i=0;i<f.in.size();i+=4){f.in[i]=f.in[i+1]=f.in[i+2]=.3f;}attach(p.fx,f);int window[4]={100,50,137,61};auto a=metalArgs(window);setD(p.s,"tone_highlight_cream",0);
   setI(p.s,"pick_auto",1);mock::Bag changed;mock::ss(bag(changed),kOfxPropName,0,"pick_auto");mock::ss(bag(changed),kOfxPropChangeReason,0,kOfxChangeUserEdited);check(entry(kOfxActionInstanceChanged,p.e,bag(changed),nullptr));setD(p.s,"pick_radius",2);check(param->paramSetValue(handle(p.s,"pick_point"),110.5,55.5));
   int drained=fake::drains,before=fake::encodes;require(entry(kOfxImageEffectActionRender,p.e,bag(a),nullptr)==kOfxStatOK);require(fake::drains==drained+1&&fake::encodes==before+1);
-  require(lastRender(p.e).find("pick unavailable")==std::string::npos);require(std::abs(f.out[0]-f.out[1])<2e-5f&&std::abs(f.out[1]-f.out[2])<2e-5f);}
+  require(lastRender(p.e).find("pick unavailable")==std::string::npos);require(std::abs(f.out[0]-f.out[1])<2e-5f&&std::abs(f.out[1]-f.out[2])<2e-5f);
+  // macOS: the gray pick turned Metal off for this instance, so the host's next frames are CPU buffers.
+  require(!NSS_MAC_RENDER_UI||p.metalProp()=="false");}
+#if NSS_MAC_RENDER_UI
+ // 8b. Decided once (macOS): a reopened project with CPU selected or the auto gray pick on never
+ // offers Metal, so no frame drains the host queue; render_device/pick_auto changes for any reason
+ // (user, plugin, undo) refresh the offer.
+ {Plugin p(1,0);require(p.metalProp()=="false");}
+ {Plugin p(0,0);require(p.metalProp()=="true");}
+ {Plugin p(0,1);require(p.metalProp()=="false");Frame f;attach(p.fx,f);int window[4]={100,50,137,61};
+  Bag cpuArgs;mock::sd(bag(cpuArgs),kOfxPropTime,0,0);for(int c=0;c<4;c++)mock::si(bag(cpuArgs),kOfxImageEffectPropRenderWindow,c,window[c]);mock::sp(bag(p.fx.source.image),kOfxImagePropData,0,f.in.data());mock::sp(bag(p.fx.output.image),kOfxImagePropData,0,f.out.data());
+  int drained=fake::drains,before=fake::encodes;for(int r=0;r<3;r++)require(entry(kOfxImageEffectActionRender,p.e,bag(cpuArgs),nullptr)==kOfxStatOK);require(fake::drains==drained&&fake::encodes==before);
+  mock::Bag changed;mock::ss(bag(changed),kOfxPropName,0,"pick_auto");mock::ss(bag(changed),kOfxPropChangeReason,0,kOfxChangePluginEdited);
+  setI(p.s,"pick_auto",0);entry(kOfxActionInstanceChanged,p.e,bag(changed),nullptr);require(p.metalProp()=="true");
+  setI(p.s,"pick_auto",1);entry(kOfxActionInstanceChanged,p.e,bag(changed),nullptr);require(p.metalProp()=="false");
+  setI(p.s,"pick_auto",0);entry(kOfxActionInstanceChanged,p.e,bag(changed),nullptr);require(p.metalProp()=="true");
+  mock::Bag dev;mock::ss(bag(dev),kOfxPropName,0,"render_device");mock::ss(bag(dev),kOfxPropChangeReason,0,kOfxChangePluginEdited);
+  setI(p.s,"render_device",1);entry(kOfxActionInstanceChanged,p.e,bag(dev),nullptr);require(p.metalProp()=="false");}
+ std::cout<<"  macOS: Metal offer decided at createInstance and refreshed only by render_device/pick_auto changes; CPU and gray-pick frames do not drain\n";
+#endif
  // 9. Rendering controls and Show render engine, per platform (this file is built both ways by test.sh).
  message=&messages;
  {Plugin p;auto device=p.fx.params.values["render_device"],info=p.fx.params.values["render_info"],group=p.fx.params.values["render"];

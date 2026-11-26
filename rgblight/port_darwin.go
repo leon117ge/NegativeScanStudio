@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unsafe"
 
 	"golang.org/x/sys/unix"
 )
@@ -201,7 +202,9 @@ func (p *unixPort) Write(b []byte) (int, error) {
 			if left <= 0 {
 				return done, fmt.Errorf("short write (%d of %d bytes)", done, len(b))
 			}
-			waitFD(p.fd, true, left)
+			if _, err := waitFD(p.fd, true, left); err == errFDTooHigh {
+				return done, fmt.Errorf("%s: %w", p.name, err)
+			}
 		default:
 			return done, fmt.Errorf("%s: write: %w", p.name, err)
 		}
@@ -218,9 +221,19 @@ func (p *unixPort) Close() error {
 	return unix.Close(p.fd)
 }
 
+// fdSetSize is FD_SETSIZE (1024 on macOS): select(2) cannot watch a higher
+// descriptor and unix.FdSet.Set would index out of range (panic).
+const fdSetSize = int(unsafe.Sizeof(unix.FdSet{})) * 8
+
+var errFDTooHigh = fmt.Errorf("file descriptor above FD_SETSIZE (%d): too many open files for select", fdSetSize)
+
 // waitFD waits until fd is readable (or writable) or d passes. It returns
-// the number of ready descriptors (0 on timeout).
+// the number of ready descriptors (0 on timeout). poll(2) is not an option on
+// macOS (no device nodes), so a descriptor select cannot hold is an error.
 func waitFD(fd int, write bool, d time.Duration) (int, error) {
+	if fd < 0 || fd >= fdSetSize {
+		return 0, errFDTooHigh
+	}
 	var set unix.FdSet
 	set.Zero()
 	set.Set(fd)
