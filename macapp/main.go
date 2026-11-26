@@ -44,7 +44,7 @@ func main() {
 	go func() {
 		defer crashlog.Main()
 		w := new(app.Window)
-		w.Option(app.Title(appstate.AppVersion), app.Size(unit.Dp(1280), unit.Dp(860)), app.MinSize(unit.Dp(640), unit.Dp(420)))
+		w.Option(app.Title(appstate.AppVersion), app.Size(unit.Dp(1280), unit.Dp(800)), app.MinSize(unit.Dp(1024), unit.Dp(640)))
 		code := 0
 		if err := run(w, selftest); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -70,6 +70,8 @@ func run(w *app.Window, selftest bool) error {
 	for {
 		switch e := w.Event().(type) {
 		case app.DestroyEvent:
+			u.drain()
+			u.hdr.Shutdown() // switch the light off and disconnect (Windows: lightui.shutdown on Closing)
 			return e.Err
 		case app.FrameEvent:
 			gtx := app.NewContext(&ops, e)
