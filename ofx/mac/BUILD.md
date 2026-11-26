@@ -22,7 +22,9 @@ Test builds only, not released yet.
 - Math flags match the Windows build; `-ffp-contract=off` keeps `a*b+c` as two rounded
   operations as on x64 (no fused multiply-add). No chip-specific `-mcpu`.
 - CI: `.github/workflows/macos-w1-ofx-cpu.yml` (macos-15 and macos-26), then the shared
-  `macos-build-checks.yml` (CJK, versions, docs) on the uploaded zip. It checks that the Windows source is
+  `macos-build-checks.yml` (CJK, versions, docs) on the zip uploaded by the same run (an empty
+  `run-id` means the calling run). It reports on branch pushes and fails the job on release tags
+  (`mode: auto`; `report` and `enforce` override). The W1 workflow itself checks that the Windows source is
   unchanged, renders the parity variants with the Windows x64 build on a Windows runner,
   then on a macOS arm64 runner builds and inspects the bundle, runs the native tests,
   runs `Install.command` on a quarantined copy and loads the installed binary, and

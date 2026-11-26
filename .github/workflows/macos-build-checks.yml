@@ -1,15 +1,25 @@
 # Release gate for every macOS build (PLAN.md item W10): CJK scan of everything
 # shipped, plain and consistent version numbers, and docs/changelog entries.
 #
-# Use it three ways:
-#  1. From a build workflow, as a job after the job that uploads the artifact:
+# Use it two ways:
+#  1. From a build workflow, as a job after the job that uploads the artifact
+#     (workflow_call). With an empty run-id the artifact comes from the calling
+#     run itself:
 #       checks:
 #         needs: build
 #         uses: ./.github/workflows/macos-build-checks.yml
 #         with: {artifact-name: NegativeScanStudio-ofx-macos-arm64, product: ofx, expect-version: 0.90.16}
-#  2. By hand (Actions tab, once this file is on the default branch): pick a run id.
-#  3. On push to qa/macos-parity it checks the proof artifact of run 45801932421
-#     in report mode (that proof bundle carries a placeholder 0.0.0 Info.plist).
+#  2. By hand (Actions tab, once this file is on the default branch): give the
+#     run id that uploaded the artifact.
+#
+# Under workflow_call, github.event_name, github.ref and github.run_id are the
+# caller's. This file therefore never looks at event_name: the run to download
+# from is only ever inputs.run-id (empty = this run), and the mode comes from
+# inputs.mode plus the calling ref.
+#
+# Mode: auto (default) enforces on release tags (refs/tags/v*, refs/tags/ofx-v*,
+# refs/tags/print2383-v*) and reports everywhere else. report never fails the
+# job; enforce always fails it on a FAIL.
 # Test-only: no release, no tag, no secrets beyond the read-only GITHUB_TOKEN.
 name: macOS build checks
 on:
@@ -18,29 +28,33 @@ on:
       artifact-name: {type: string, required: true}
       product: {type: string, required: true, description: 'ofx, print2383 or app'}
       expect-version: {type: string, required: false, default: ''}
-      run-id: {type: string, required: false, default: '', description: 'empty = artifact of the calling run'}
-      enforce: {type: boolean, required: false, default: true}
+      run-id: {type: string, required: false, default: '', description: 'run that uploaded the artifact; empty = the calling run'}
+      mode: {type: string, required: false, default: 'auto', description: 'auto, report or enforce'}
+    outputs:
+      result:
+        description: 'PASS or FAIL'
+        value: ${{ jobs.check.outputs.result }}
   workflow_dispatch:
     inputs:
-      run-id: {description: 'Workflow run that produced the Mac artifact', required: true, default: '45801932421'}
-      artifact-name: {description: 'Artifact name', required: true, default: 'NegativeScanStudio-ofx-macos-arm64-proof'}
+      run-id: {description: 'Workflow run that uploaded the Mac artifact', required: true}
+      artifact-name: {description: 'Artifact name', required: true, default: 'NegativeScanStudio-ofx-macos-arm64'}
       product: {description: 'ofx, print2383 or app', required: true, default: 'ofx'}
       expect-version: {description: 'Version the build must carry (empty = must only be consistent)', required: false, default: ''}
-      enforce: {description: 'Fail the job on a FAIL', type: boolean, default: true}
-  push:
-    branches: [qa/macos-parity]
-    paths: ['ci/qa/check_mac_build.py', 'ci/qa/ofx_version_probe.c', '.github/workflows/macos-build-checks.yml']
+      mode: {description: 'auto, report or enforce', required: false, default: 'auto'}
 permissions:
   contents: read
   actions: read
 jobs:
   check:
     runs-on: macos-15
+    outputs:
+      result: ${{ steps.check.outputs.result }}
     env:
-      RUN_ID: ${{ inputs.run-id || (github.event_name == 'push' && '45801932421') || '' }}
-      ARTIFACT: ${{ inputs.artifact-name || 'NegativeScanStudio-ofx-macos-arm64-proof' }}
-      PRODUCT: ${{ inputs.product || 'ofx' }}
+      RUN_ID: ${{ inputs.run-id }}
+      ARTIFACT: ${{ inputs.artifact-name }}
+      PRODUCT: ${{ inputs.product }}
       EXPECT: ${{ inputs.expect-version }}
+      MODE_IN: ${{ inputs.mode || 'auto' }}
     steps:
       - uses: actions/checkout@v4
       - name: Download artifact from another run
@@ -57,12 +71,33 @@ jobs:
         with:
           name: ${{ env.ARTIFACT }}
           path: mac-artifact
+      - name: Unpack zipped packages (the W1 artifact holds the release zip)
+        run: |
+          mkdir -p mac-unpacked
+          find mac-artifact -type f -name '*.zip' | while read -r z; do
+            echo "unpack: $z"; ditto -x -k "$z" "mac-unpacked/$(basename "$z" .zip)"
+          done
+          find mac-artifact mac-unpacked -maxdepth 4 | sort
+      - name: Decide mode
+        id: mode
+        run: |
+          case "$MODE_IN" in
+            report|enforce) mode="$MODE_IN" ;;
+            auto)
+              case "$GITHUB_REF" in
+                refs/tags/v*|refs/tags/ofx-v*|refs/tags/print2383-v*) mode=enforce ;;
+                *) mode=report ;;
+              esac ;;
+            *) echo "::error::mode must be auto, report or enforce (got '$MODE_IN')"; exit 1 ;;
+          esac
+          echo "ref $GITHUB_REF, run ${RUN_ID:-$GITHUB_RUN_ID (this run)} -> $mode mode"
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
       - name: OFX version probe (OfxGetPlugin)
         if: env.PRODUCT != 'app'
         run: |
           clang -arch arm64 -Iofx/vendor/openfx/include ci/qa/ofx_version_probe.c -o probe
           : > probe.json
-          find mac-artifact -path '*Contents/MacOS/*' -type f -name '*.ofx' | while read -r bin; do
+          find mac-artifact mac-unpacked -path '*Contents/MacOS/*' -type f -name '*.ofx' | while read -r bin; do
             echo "probe: $bin"; ./probe "$bin" | tee -a probe.json
           done
           # keep only the first plugin binary's JSON line for --probe
@@ -70,23 +105,31 @@ jobs:
       - name: Signature and architecture (report)
         continue-on-error: true
         run: |
-          find mac-artifact -type f \( -name '*.ofx' -o -perm -u+x \) | while read -r f; do
+          find mac-artifact mac-unpacked -type f \( -name '*.ofx' -o -perm -u+x \) | while read -r f; do
             if file "$f" | grep -q Mach-O; then
               file "$f"; lipo -archs "$f" || true
               codesign -dv --verbose=2 "$f" 2>&1 | grep -E 'Identifier|Signature|TeamIdentifier|flags' || true
             fi
           done
       - name: CJK, version and docs checks
-        continue-on-error: ${{ github.event_name == 'push' || (inputs.enforce == false) }}
+        id: check
         run: |
-          args=(mac-artifact --product "$PRODUCT" --repo . --report build-checks.json)
+          # Zipped packages are passed as files, so the version in the file name is
+          # checked and nested zips are opened; otherwise the artifact folder.
+          targets=(); while IFS= read -r z; do targets+=("$z"); done < <(find mac-artifact -type f -name '*.zip' | sort)
+          [ ${#targets[@]} -eq 0 ] && targets=(mac-artifact)
+          args=("${targets[@]}" --product "$PRODUCT" --repo . --report build-checks.json)
           [ -n "$EXPECT" ] && args+=(--expect-version "$EXPECT")
           [ -s probe1.json ] && args+=(--probe probe1.json)
-          python3 ci/qa/check_mac_build.py "${args[@]}"
+          rc=0
+          python3 ci/qa/check_mac_build.py "${args[@]}" || rc=$?
+          if [ "$rc" -eq 0 ]; then echo "result=PASS" >> "$GITHUB_OUTPUT"; else echo "result=FAIL" >> "$GITHUB_OUTPUT"; fi
+          if [ "$rc" -ne 0 ] && [ "${{ steps.mode.outputs.mode }}" = enforce ]; then exit "$rc"; fi
+          if [ "$rc" -ne 0 ]; then echo "::warning::Mac build checks FAIL (report mode, not blocking). See the log."; fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: mac-build-checks-${{ env.PRODUCT }}-${{ github.run_id }}
+          name: mac-build-checks-${{ env.PRODUCT }}-${{ env.ARTIFACT }}-${{ github.run_attempt }}
           path: |
             build-checks.json
             probe.json
