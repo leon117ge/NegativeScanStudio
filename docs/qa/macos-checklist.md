@@ -345,12 +345,35 @@ rgblightports [-port P] [-raw] [-sim] [command [args]...]   (default command: li
 
 Flags go before the commands. Commands chain left to right in one session.
 
+How the tool reports (confirmed by Dev Engineer on `05e973c` with `-sim -raw`;
+the behaviour on a real light is still to be confirmed by this checklist):
+
+- Everything, errors included, goes to **stdout**. Only the `-raw` hex log and
+  the go tool's own messages go to stderr.
+- Every command except `list` prints `port: <name>` as its first line.
+- `status` prints one line,
+  `state: R <on|off> <1..100>, G <on|off> <n>, B <on|off> <n>, mode <..>, speed <..>, focus <..>`,
+  and then `telemetry: {...}` only if the light has sent telemetry. Ignore
+  `telemetry:` lines when you compare results.
+- `on`, `off` and `brightness` print `on all: ok`, `off g: ok`,
+  `brightness r 50: ok`.
+- Enable and brightness are independent. `off` keeps the stored brightness.
+  `brightness` on a channel that is off changes the value and leaves it off.
+- A chain stops at the first error. Commands before it have already been
+  applied. Commands after it, a trailing `status` included, do not run.
+  Always check the state after an error with a **separate** `status` run.
+- Errors exit with code 1. Under `go run`, the go tool also prints
+  `exit status 1` to stderr.
+- A real light may start in any state. On hardware, compare each `state:` line
+  with the first one you took (the baseline, S0). Check what changed, not the
+  absolute values. `mode`, `speed` and `focus` must stay as in S0 throughout.
+
 > **Needs 05e973c pushed.** The pushed head `fceae3a` only has `list` and
 > `-probe`. `info`, `status`, `on`, `off`, `brightness`, `setall`, `-port`,
 > `-raw` and `-sim` come with commit `05e973c`, which is not pushed yet. Until
-> it is, run 6.1 to 6.4, the Go test 6.10 (already on `fceae3a`) and the app
-> steps 6.11 and 6.12, and mark 6.0 and 6.5 to 6.9 `not in build`. Record the commit you tested
-> (`git rev-parse --short HEAD`).
+> it is, run 6.1 to 6.4, the Go test 6.12 (already on `fceae3a`) and the app
+> steps 6.13 and 6.14, and mark 6.0 and 6.5 to 6.11 `not in build`. Record the
+> commit you tested (`git rev-parse --short HEAD`).
 
 - [ ] **6.0** Build the tool and do a dry run on the simulated light, before
   anything is plugged in:
@@ -359,11 +382,36 @@ Flags go before the commands. Commands chain left to right in one session.
   git rev-parse --short HEAD | tee ~/Desktop/nss-qa-$V/light-commit.txt
   go build -o ~/Desktop/nss-qa-$V/rgblightports ./cmd/rgblightports
   cd ~/Desktop/nss-qa-$V
-  ./rgblightports -sim info status on all brightness g 33 setall 30 40 50 status off all status 2>&1 | tee light-sim.txt
+  ./rgblightports -sim status on all status off g status brightness all 1 status \
+    brightness r 50 status brightness b 100 status > light-sim.txt; echo "exit $?"
+  S='mode sequential, speed fast, focus mixed'
+  printf '%s\n' \
+    "state: R off 50, G off 50, B off 50, $S" \
+    "on all: ok" \
+    "state: R on 50, G on 50, B on 50, $S" \
+    "off g: ok" \
+    "state: R on 50, G off 50, B on 50, $S" \
+    "brightness all 1: ok" \
+    "state: R on 1, G off 1, B on 1, $S" \
+    "brightness r 50: ok" \
+    "state: R on 50, G off 1, B on 1, $S" \
+    "brightness b 100: ok" \
+    "state: R on 50, G off 1, B on 100, $S" > light-sim-expected.txt
+  grep -v -e '^port: ' -e '^telemetry: ' light-sim.txt | diff light-sim-expected.txt - && echo SIM-MATCH
   ```
-  You can also run it from source with `go run ./cmd/rgblightports ...` in the
-  repo folder. The rest of this section uses the built `./rgblightports`.
-  Expect: every command succeeds, and the final status shows all channels off.
+  You can also run the tool from source with `go run ./cmd/rgblightports ...`
+  in the repo folder. The rest of this section uses the built `./rgblightports`.
+  Expect:
+  - `exit 0`.
+  - The first line of `light-sim.txt` is `port: <sim port name>`.
+  - The other lines are exactly the expected file, so the last line printed
+    is `SIM-MATCH`. The simulated light starts with all channels off at 50,
+    `mode sequential`, `speed fast` and `focus mixed`.
+  - Then check that a refused value sends nothing:
+    `./rgblightports -sim -raw brightness r 0 > sim-refuse.txt 2> sim-refuse-raw.log; echo "exit $?"`.
+    Expect `exit 1`, the error line from 6.7 in `sim-refuse.txt`, and no TX
+    frame in `sim-refuse-raw.log`.
+
   This shows that the tool works before any hardware is involved.
 - [ ] **6.1** Plug in the light and check that macOS sees it:
   ```sh
@@ -404,58 +452,120 @@ Flags go before the commands. Commands chain left to right in one session.
   Expect: `info` shows the model, serial, hardware, firmware and protocol
   (RGBAIR API 1.3), and `status` shows the state of all three channels. Record
   the firmware and protocol in the report.
-- [ ] **6.5** On and off, per channel and for all channels:
+- [ ] **6.5** On and off, per channel and for all channels. Take the
+  baseline first, then run the chain:
   ```sh
+  ./rgblightports -port $P status > light-s0.txt
   ./rgblightports -port $P off all status \
     on r status off r status \
     on g status off g status \
     on b status off b status \
-    on all status off all status 2>&1 | tee light-onoff.txt
+    on all status off all status > light-onoff.txt; echo "exit $?"
   ```
-  Expect: only the named LEDs light up and then go dark. Each `status` that
-  follows matches the last command. `all` switches all three channels.
+  Expect:
+  - `exit 0`, and `port: $P` on the first line of both files.
+  - Each switch prints its line (`off all: ok`, `on r: ok`, `off r: ok`, and so
+    on), followed by a `state:` line.
+  - After `off all`, all three are `off`. After `on r`, only R is `on`. After
+    `off r`, all are `off` again. The same holds for G and B. After `on all`,
+    all three are `on`, and after the final `off all`, all are `off`.
+  - Every brightness value equals the one in S0, because on/off does not change
+    brightness. `mode`, `speed` and `focus` equal S0.
+  - Only the named LEDs light up and go dark.
 - [ ] **6.6** Brightness 1, 50 and 100 on each channel and on all channels:
   ```sh
   for ch in r g b all; do
-    ./rgblightports -port $P on $ch brightness $ch 1 status brightness $ch 50 status brightness $ch 100 status off $ch
-  done 2>&1 | tee light-brightness.txt
+    ./rgblightports -port $P on all brightness $ch 1 status brightness $ch 50 status brightness $ch 100 status
+  done > light-brightness.txt
+  ./rgblightports -port $P off g brightness g 20 status >> light-brightness.txt
+  ./rgblightports -port $P off all status >> light-brightness.txt
   ```
-  Expect: each step is visibly dimmer or brighter, and each `status` shows the
-  value just set for that channel.
-- [ ] **6.7** Brightness outside the range is refused:
-  ```sh
-  ./rgblightports -raw -port $P status brightness r 0;   echo "exit $?"
-  ./rgblightports -raw -port $P status brightness r 101; echo "exit $?"
-  ./rgblightports -port $P status
-  ```
-  Save all the output as `light-range.txt`.
   Expect:
-  - Both values are refused with an error, because the valid range is 1 to
-    100. A channel is turned off with `off`, not with brightness 0.
-  - The `-raw` log shows no command 01 frame for the refused value.
-  - The last `status` is unchanged.
-
-  Record the exit codes.
-- [ ] **6.8** Set all channels at once:
+  - Each step prints `brightness <ch> <n>: ok` and then a `state:` line in
+    which only the named channel's number has changed, to exactly `<n>`. For
+    `all`, all three numbers change. Every channel stays `on`.
+  - The LEDs are visibly dimmer at 1 and brightest at 100.
+  - `off g brightness g 20` gives `G off 20`. The value is stored, and the
+    channel stays off.
+  - The final `off all` gives all three `off`, and the numbers are kept.
+- [ ] **6.7** Brightness outside the range is refused. Run each refused value
+  on its own, then take `status` in a separate run:
   ```sh
-  ./rgblightports -port $P setall 30 40 50 status 2>&1 | tee light-setall.txt
+  ./rgblightports -port $P status > light-range-before.txt
+  ./rgblightports -raw -port $P brightness r 0   > light-range-r0.txt   2> light-range-r0-raw.log;   echo "exit $?"
+  ./rgblightports -raw -port $P brightness g 101 > light-range-g101.txt 2> light-range-g101-raw.log; echo "exit $?"
+  ./rgblightports -raw -port $P brightness all 0 > light-range-all0.txt 2> light-range-all0-raw.log; echo "exit $?"
+  ./rgblightports -port $P status > light-range-after.txt
   ```
-  Expect: all three channels light up, and `status` shows them on at
-  30 / 40 / 50. The tool confirms `setall` with a command 20 read.
-- [ ] **6.9** Run the chained example and capture the raw serial log:
+  Expect:
+  - `exit 1` for each refused value.
+  - Stdout is `port: $P`, then exactly
+    `error: brightness: R: brightness 0 is outside 1..100 (turn a channel off with its enable flag)`.
+    For `g 101` the line is `error: brightness: G: brightness 101 is outside 1..100 (turn a channel off with its enable flag)`.
+    For `all 0`, it fails on R first, so the line is the same as for `r 0`.
+  - Each `-raw` log has **no TX frame** at all. The value is checked before any
+    I/O, so no command 01 is sent.
+  - The `state:` line in `light-range-after.txt` is identical to the one in
+    `light-range-before.txt`.
+
+  Then show that a chain stops at the error:
+  ```sh
+  ./rgblightports -port $P off r on r brightness r 0 status > light-range-chain.txt; echo "exit $?"
+  ./rgblightports -port $P status >> light-range-chain.txt
+  ```
+  Expect:
+  - `exit 1`.
+  - The first run prints `port: $P`, `off r: ok`, `on r: ok`, then the error
+    line, and **no** `state:` line.
+  - The separate `status` run shows R `on`. The commands before the error were
+    applied.
+- [ ] **6.8** A non-numeric brightness is refused:
+  ```sh
+  ./rgblightports -port $P brightness r x > light-badvalue.txt; echo "exit $?"
+  ```
+  Expect: `exit 1`, and the last line is exactly `error: brightness: bad value "x"`.
+  A separate `status` run is unchanged.
+- [ ] **6.9** A missing argument is refused:
+  ```sh
+  ./rgblightports -port $P brightness r > light-missingarg.txt;      echo "exit $?"
+  ./rgblightports -port $P setall 30 40 >> light-missingarg.txt;      echo "exit $?"
+  ```
+  Expect: `exit 1` for both. Each last line has the form
+  `error: <cmd>: needs N argument(s)`, for example
+  `error: brightness: needs 2 argument(s)` and `error: setall: needs 3 argument(s)`.
+  Record the exact lines. Nothing is printed to stderr.
+- [ ] **6.10** Set all channels at once:
+  ```sh
+  ./rgblightports -port $P setall 30 40 50 status > light-setall.txt; echo "exit $?"
+  ```
+  Expect:
+  - `exit 0`.
+  - The `state:` line reads `R on 30, G on 40, B on 50`, with `mode`, `speed`
+    and `focus` as in S0. The tool confirms `setall` with a command 20 read.
+  - All three channels light up.
+- [ ] **6.11** Run the chained example and capture the raw serial log:
   ```sh
   ./rgblightports -raw -port $P info status on all brightness g 33 status off all status \
-    > light-chain.txt 2> light-serial.log
+    > light-chain.txt 2> light-serial.log; echo "exit $?"
   ```
+  This chain has no failing command, so every `status` in it runs.
   Expect:
-  - The steps run in order in one session.
-  - G reads 33 after the brightness step, and everything is off at the end.
+  - `exit 0`.
+  - The lines appear in order: `port: $P`, the info, a `state:` line, then
+    `on all: ok` and `brightness g 33: ok`.
+  - The next `state:` line has all three `on` and `G ... 33`. R and B keep
+    their values from the first `state:` line.
+  - Then `off all: ok`, and a final `state:` line with all three `off` and G
+    still 33.
   - `light-serial.log` has the hex bytes sent and received for each command.
 
-  **On failure in any of 6.4 to 6.9:** repeat the failing command with `-raw`,
-  and attach the stderr capture. For example:
+  **On failure in any of 6.4 to 6.11:** repeat the failing command on its own
+  with `-raw`, and attach both captures. Errors are on stdout and the hex log
+  is on stderr:
   `./rgblightports -raw -port $P <commands> > light-fail.txt 2> light-fail-raw.log`.
-- [ ] **6.10** Run the real-light Go test from the repo folder:
+  If a chain stopped early, the lines after the error are missing on purpose.
+  Re-run the remaining commands separately.
+- [ ] **6.12** Run the real-light Go test from the repo folder:
   ```sh
   cd ~/src/NegativeScanStudio
   NSS_RGBLIGHT_PORT=$P go test -v -run RealLight ./rgblight 2>&1 | tee ~/Desktop/nss-qa-$V/light-gotest.txt
@@ -463,11 +573,11 @@ Flags go before the commands. Commands chain left to right in one session.
   Expect: `TestDarwinRealLight` passes, not skipped. It checks that the port is
   tagged `0483:5740` and logs the light info and state. Without
   `NSS_RGBLIGHT_PORT`, the test is skipped, which does not count as a pass.
-- [ ] **6.11** Unplug the light while the app is connected.
+- [ ] **6.13** Unplug the light while the app is connected.
   Expect: a clear "disconnected" message, no hang and no crash. After you plug
   it back in and reconnect, status works again. The port number may change,
   so the app must find the port again.
-- [ ] **6.12** Film-base leveling with the X-T3 (Light page): run Auto leveling
+- [ ] **6.14** Film-base leveling with the X-T3 (Light page): run Auto leveling
   once.
   Expect: it converges as on Windows. Record the final codes and the time it
   took.
