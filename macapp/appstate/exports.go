@@ -26,6 +26,8 @@ var (
 	BracketItems      = bracketItems
 	AlignItems        = alignItems
 	MergeItems        = mergeItems
+	AlignModes        = alignModes
+	MergeModes        = mergeModes
 	DustItems         = dustItems
 	AreaItems         = []string{"Auto: find the base (rebate, gaps, sprocket area)", "Rectangle drawn on the image"}
 	TIFFItems         = []string{"Delete (keep only the HDR)", "Keep all frame TIFFs"}
