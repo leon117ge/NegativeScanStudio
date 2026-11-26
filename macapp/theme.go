@@ -407,6 +407,9 @@ func (f *Field) Layout(gtx layout.Context, th *Theme, cue, tip string) (layout.D
 }
 
 func fieldBox(gtx layout.Context, focused bool, w layout.Widget) layout.Dimensions {
+	// Honour the caller's minimum size so a Flexed field fills the row
+	// like a walk LineEdit; Gio's Stack would otherwise shrink to the text.
+	minX, minY := gtx.Constraints.Min.X, max(gtx.Constraints.Min.Y, gtx.Dp(24))
 	return layout.Stack{}.Layout(gtx,
 		layout.Expanded(func(gtx layout.Context) layout.Dimensions {
 			edge := cFieldLine
@@ -417,8 +420,14 @@ func fieldBox(gtx layout.Context, focused bool, w layout.Widget) layout.Dimensio
 			return layout.Dimensions{Size: gtx.Constraints.Min}
 		}),
 		layout.Stacked(func(gtx layout.Context) layout.Dimensions {
-			gtx.Constraints.Min.Y = gtx.Dp(24)
-			return layout.Inset{Left: 6, Right: 6, Top: 4, Bottom: 4}.Layout(gtx, w)
+			d := layout.Inset{Left: 6, Right: 6, Top: 4, Bottom: 4}.Layout(gtx, w)
+			if d.Size.X < minX {
+				d.Size.X = minX
+			}
+			if d.Size.Y < minY {
+				d.Size.Y = minY
+			}
+			return d
 		}))
 }
 
