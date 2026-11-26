@@ -4,6 +4,7 @@ package rawconv
 #cgo CFLAGS: -I${SRCDIR}/../third_party/libraw/include -DLIBRAW_NODLL
 #cgo windows LDFLAGS: -L${SRCDIR}/../third_party/libraw/lib/windows_amd64 -lraw -lz -lws2_32 -static -lstdc++ -lm
 #cgo linux LDFLAGS: -L${SRCDIR}/../third_party/libraw/lib/linux_amd64 -lraw -lz -lstdc++ -lm
+#cgo darwin,arm64 LDFLAGS: -L${SRCDIR}/../third_party/libraw/lib/darwin_arm64 -lraw -lz -lc++ -lm
 #include <stdlib.h>
 #include <string.h>
 #include "libraw/libraw.h"
