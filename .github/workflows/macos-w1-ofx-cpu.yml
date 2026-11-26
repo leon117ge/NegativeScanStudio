@@ -13,6 +13,8 @@ env:
   WIN_FLAGS: -std=c++17 -O3 -fno-math-errno -fno-trapping-math -static -static-libgcc -static-libstdc++
   MAC_FLAGS: -arch arm64 -mmacosx-version-min=13.0 -std=c++17 -O3 -fno-math-errno -fno-trapping-math -ffp-contract=off
   INC: -Iofx/vendor/openfx/include -Iofx/vendor/opencl
+  # Minimum macOS 13.0 everywhere (build-mac.sh, Info.plist.in, check_mac_build.py, check_mac_minos.py).
+  MACOSX_DEPLOYMENT_TARGET: '13.0'
   # The Windows translation unit must equal this ref's (W1 changes nothing on Windows).
   # Use origin/main for W1 alone; after merging W2 (Metal), use origin/feat/metal-render.
   WIN_BASE_REF: origin/main
@@ -135,7 +137,7 @@ jobs:
           clang++ $MAC_FLAGS ofx/tests/tone_test.cpp -o $T/tone_test && $T/tone_test
           clang++ $MAC_FLAGS $INC ofx/tests/host_test.cpp -o $T/host_test && $T/host_test build/fixtures/metadata-fixture.tiff build/fixtures/plain-old-scan.tiff
           clang++ $MAC_FLAGS $INC ofx/tests/overlay_test.cpp -o $T/overlay_test && $T/overlay_test
-          clang++ -arch arm64 -std=c++17 -O0 $INC ofx/tests/leveling_metadata_test.cpp -o $T/leveling_metadata_test
+          clang++ -arch arm64 -mmacosx-version-min=13.0 -std=c++17 -O0 $INC ofx/tests/leveling_metadata_test.cpp -o $T/leveling_metadata_test
           $T/leveling_metadata_test build/fixtures/leveling-false.tiff build/fixtures/leveling-true.tiff build/fixtures/metadata-fixture.tiff
           # The CUDA backend is compiled out of the Mac plugin; build it here anyway so its
           # contract test keeps running on arm64 (mock driver, no GPU).

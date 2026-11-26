@@ -17,6 +17,8 @@ jobs:
         os: [macos-15, macos-26]
     runs-on: ${{ matrix.os }}
     env:
+      # Minimum macOS 13.0 everywhere (ofx/build-mac.sh, ofx/mac/Info.plist.in, check_mac_minos.py).
+      MACOSX_DEPLOYMENT_TARGET: '13.0'
       CXXFLAGS_COMMON: -arch arm64 -mmacosx-version-min=13.0 -std=c++17 -O3 -fno-math-errno -fno-trapping-math -ffp-contract=off -fvisibility=hidden -Wall -Wextra -Wno-unused-parameter -Iofx/vendor/openfx/include -Iofx/vendor/opencl
     steps:
       - uses: actions/checkout@v4

@@ -33,7 +33,7 @@ jobs:
         run: |
           mkdir -p build/tests
           for t in tone_test overlay_test cuda_contract; do
-            clang++ -arch arm64 -std=c++17 -O3 -fno-math-errno -fno-trapping-math -Iofx/vendor/openfx/include -Iofx/vendor/opencl \
+            clang++ -arch arm64 -mmacosx-version-min=13.0 -std=c++17 -O3 -fno-math-errno -fno-trapping-math -Iofx/vendor/openfx/include -Iofx/vendor/opencl \
               ofx/tests/$t.cpp -o build/tests/$t
             build/tests/$t
           done
@@ -57,7 +57,7 @@ jobs:
           ls -l build/metal
       - name: Metal vs CPU parity
         run: |
-          clang++ -arch arm64 -std=c++17 -O2 -fobjc-arc -fno-math-errno -fno-trapping-math ci/macos/metal_parity.mm \
+          clang++ -arch arm64 -mmacosx-version-min=13.0 -std=c++17 -O2 -fobjc-arc -fno-math-errno -fno-trapping-math ci/macos/metal_parity.mm \
             -framework Metal -framework Foundation -o build/metal/metal_parity
           build/metal/metal_parity build/metal/nss_render.metallib
   go-core:
