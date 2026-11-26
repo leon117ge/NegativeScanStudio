@@ -270,10 +270,11 @@ mark 3.2 to 3.5 `blocked` and report it.
 ## 5. Fujifilm X-T3 tether over USB (W6)
 
 The Mac transport uses ImageCaptureCore (PLAN.md 3c) and sends raw PTP plus the
-Fuji vendor operations 0x9022 and 0x902C. The W6 build adds a small CLI,
-`mactether`, with `list`, `info`, live view frame and capture-one-RAF
-commands. The exact command names come with that build, so copy them into the
-report.
+Fuji vendor operations 0x9022 and 0x902C. The W6 build adds a small CLI for
+this. **The CLI does not exist yet.** In this section, `mactether` and its
+subcommands (`list`, `info`, `liveview`, `capture`) are **placeholders (TBD)**.
+When W6 lands, use its real command names and flags, and copy them into the
+report. The functional checks and their **Expect** lines stay the same.
 
 - [ ] **5.1** Camera setup:
   - Put the X-T3 in **M** mode, with the shutter dial and ISO as used for
@@ -288,7 +289,7 @@ report.
   system_profiler SPUSBDataType | grep -B3 -A8 -i 'x-t3\|fujifilm' | tee usb-camera.txt
   ```
   Expect: a FUJIFILM device with Vendor ID `0x04cb`.
-- [ ] **5.3** Run `mactether list`, then `mactether info`.
+- [ ] **5.3** Run `mactether list`, then `mactether info` (placeholder names, TBD in W6).
   Expect:
   - Manufacturer `FUJIFILM`, model `X-T3`, and the firmware version are shown.
   - The vendor extension is reported, and the vendor op list includes `0x9022`
@@ -296,19 +297,21 @@ report.
   - macOS shows no prompt about another app using the camera.
   Save the output as `tether-info.txt`.
   On failure: save the output. Also run
-  `log show --last 5m --predicate 'process CONTAINS "ptpcamera" OR process CONTAINS "mactether"' > ptp-log.txt`.
-- [ ] **5.4** Save one live view frame.
+  `log show --last 5m --predicate 'process CONTAINS "ptpcamera" OR process CONTAINS "mactether"' > ptp-log.txt`
+  (replace `mactether` with the real W6 process name).
+- [ ] **5.4** Save one live view frame (`mactether liveview`, placeholder, TBD in W6).
   Expect: a JPEG that shows what the camera sees, saved within a few seconds.
   Run it 10 times in a row and record the frame time from the CLI output
   (informational, see the PLAN.md risk on 0x9022 polling speed).
-- [ ] **5.5** Capture one RAF.
+- [ ] **5.5** Capture one RAF (`mactether capture`, placeholder, TBD in W6).
   Expect:
   - The shutter fires once.
   - A `.RAF` of about 50 MB arrives in the output folder, with the exposure and
     ISO as set.
   - The camera ends ready, without a busy or error screen.
   Keep the RAF file name and size.
-- [ ] **5.6** Unplug the cable during idle, plug it in again, and run `info`.
+- [ ] **5.6** Unplug the cable during idle, plug it in again, and run `mactether info`
+  again (placeholder, TBD in W6).
   Expect: the camera is found again without restarting the Mac.
 - [ ] **5.7** In the app's Camera and Light > Camera page (W9), connect, then
   run live view, a single capture and a 3-frame bracket (for example 0, +2,
@@ -320,10 +323,48 @@ report.
 
 The light is a USB CDC serial device, VID `0483` / PID `5740` (STM32 VCP),
 using the RGBAIR API 1.3 protocol. macOS needs no driver. The app uses the
-callout device `/dev/cu.usbmodem*`, not `/dev/tty.usbmodem*`. The W5 build
-adds a list-ports command that tags the light as `0483:5740`. Copy its exact
-name into the report.
+callout device `/dev/cu.usbmodem*`, not `/dev/tty.usbmodem*`.
 
+The test tool is `cmd/rgblightports` on branch `mac/w5-core-libraw-serial-arm64`.
+It uses the same protocol code as the app:
+
+```
+rgblightports [-port P] [-raw] [-sim] [command [args]...]   (default command: list)
+  list                      ports, lights first, labelled "(RGB Light Air, USB 0483:5740)"
+  info                      cmd 21: model, serial, HW, FW, protocol
+  status                    cmd 20 state + last telemetry if received
+  on  r|g|b|all             cmd 02
+  off r|g|b|all             cmd 02
+  brightness r|g|b|all N    cmd 01, N=1..100 (0 and 101 refused)
+  setall R G B              cmd 03, all channels on, confirmed with 20
+  -port P   e.g. /dev/cu.usbmodemXXXX or COM5 (default: first port tagged 0483:5740)
+  -raw      raw serial hex log to stderr
+  -sim      built-in simulated light
+  -probe P  = -port P info status
+```
+
+Flags go before the commands. Commands chain left to right in one session.
+
+> **Needs 05e973c pushed.** The pushed head `fceae3a` only has `list` and
+> `-probe`. `info`, `status`, `on`, `off`, `brightness`, `setall`, `-port`,
+> `-raw` and `-sim` come with commit `05e973c`, which is not pushed yet. Until
+> it is, run 6.1 to 6.4, the Go test 6.10 (already on `fceae3a`) and the app
+> steps 6.11 and 6.12, and mark 6.0 and 6.5 to 6.9 `not in build`. Record the commit you tested
+> (`git rev-parse --short HEAD`).
+
+- [ ] **6.0** Build the tool and do a dry run on the simulated light, before
+  anything is plugged in:
+  ```sh
+  cd ~/src/NegativeScanStudio && git fetch origin && git checkout mac/w5-core-libraw-serial-arm64 && git pull --ff-only
+  git rev-parse --short HEAD | tee ~/Desktop/nss-qa-$V/light-commit.txt
+  go build -o ~/Desktop/nss-qa-$V/rgblightports ./cmd/rgblightports
+  cd ~/Desktop/nss-qa-$V
+  ./rgblightports -sim info status on all brightness g 33 setall 30 40 50 status off all status 2>&1 | tee light-sim.txt
+  ```
+  You can also run it from source with `go run ./cmd/rgblightports ...` in the
+  repo folder. The rest of this section uses the built `./rgblightports`.
+  Expect: every command succeeds, and the final status shows all channels off.
+  This shows that the tool works before any hardware is involved.
 - [ ] **6.1** Plug in the light and check that macOS sees it:
   ```sh
   ls -l /dev/cu.usbmodem* /dev/tty.usbmodem* 2>&1 | tee light-ports.txt
@@ -341,28 +382,92 @@ name into the report.
   ```
   Expect: no output. If a terminal tool like `screen` holds the port, close
   it.
-- [ ] **6.3** Run the W5 list-ports command.
-  Expect: the port is listed as `/dev/cu.usbmodemNNNN (RGB Light Air, USB 0483:5740)`.
-  The same label is used on Windows with `COMn`.
-- [ ] **6.4** In the app's Light page (or the W5 test command), turn on the
-  raw serial log, then:
-  1. Read status (command 20). Expect: the state of all three channels is
-     shown.
-  2. Turn R on, then off (command 02). Expect: the red LEDs light up, then go
-     dark. The status read back matches.
-  3. Set the R brightness to 1, 50 and 100 (command 01). Expect: visibly
-     dimmer and brighter, and the status read back matches each value. A
-     value of 0 or 101 is refused, because the valid range is 1 to 100 and a
-     channel is turned off with its on/off flag.
-  4. Set all channels (command 03), R/G/B on at 30/40/50. Expect: all three
-     light up, and the status read back shows `on on on 30 40 50`.
-  5. Turn all channels off at the end.
-  Save the raw serial log as `light-serial.log`.
-- [ ] **6.5** Unplug the light while the app is connected.
+- [ ] **6.3** List the ports:
+  ```sh
+  ./rgblightports list 2>&1 | tee light-list.txt
+  ```
+  `./rgblightports` with no command does the same.
+  Expect:
+  - The light is listed first, as
+    `/dev/cu.usbmodemNNNN  (RGB Light Air, USB 0483:5740)`.
+  - No `/dev/tty.*` entry carries the label.
+  - On Windows the same label follows `COMn`.
+
+  Set the port for the next steps:
+  ```sh
+  P=/dev/cu.usbmodemNNNN   # the labelled port from the list
+  ```
+- [ ] **6.4** Probe the light:
+  ```sh
+  ./rgblightports -probe $P 2>&1 | tee light-probe.txt
+  ```
+  Expect: `info` shows the model, serial, hardware, firmware and protocol
+  (RGBAIR API 1.3), and `status` shows the state of all three channels. Record
+  the firmware and protocol in the report.
+- [ ] **6.5** On and off, per channel and for all channels:
+  ```sh
+  ./rgblightports -port $P off all status \
+    on r status off r status \
+    on g status off g status \
+    on b status off b status \
+    on all status off all status 2>&1 | tee light-onoff.txt
+  ```
+  Expect: only the named LEDs light up and then go dark. Each `status` that
+  follows matches the last command. `all` switches all three channels.
+- [ ] **6.6** Brightness 1, 50 and 100 on each channel and on all channels:
+  ```sh
+  for ch in r g b all; do
+    ./rgblightports -port $P on $ch brightness $ch 1 status brightness $ch 50 status brightness $ch 100 status off $ch
+  done 2>&1 | tee light-brightness.txt
+  ```
+  Expect: each step is visibly dimmer or brighter, and each `status` shows the
+  value just set for that channel.
+- [ ] **6.7** Brightness outside the range is refused:
+  ```sh
+  ./rgblightports -raw -port $P status brightness r 0;   echo "exit $?"
+  ./rgblightports -raw -port $P status brightness r 101; echo "exit $?"
+  ./rgblightports -port $P status
+  ```
+  Save all the output as `light-range.txt`.
+  Expect:
+  - Both values are refused with an error, because the valid range is 1 to
+    100. A channel is turned off with `off`, not with brightness 0.
+  - The `-raw` log shows no command 01 frame for the refused value.
+  - The last `status` is unchanged.
+
+  Record the exit codes.
+- [ ] **6.8** Set all channels at once:
+  ```sh
+  ./rgblightports -port $P setall 30 40 50 status 2>&1 | tee light-setall.txt
+  ```
+  Expect: all three channels light up, and `status` shows them on at
+  30 / 40 / 50. The tool confirms `setall` with a command 20 read.
+- [ ] **6.9** Run the chained example and capture the raw serial log:
+  ```sh
+  ./rgblightports -raw -port $P info status on all brightness g 33 status off all status \
+    > light-chain.txt 2> light-serial.log
+  ```
+  Expect:
+  - The steps run in order in one session.
+  - G reads 33 after the brightness step, and everything is off at the end.
+  - `light-serial.log` has the hex bytes sent and received for each command.
+
+  **On failure in any of 6.4 to 6.9:** repeat the failing command with `-raw`,
+  and attach the stderr capture. For example:
+  `./rgblightports -raw -port $P <commands> > light-fail.txt 2> light-fail-raw.log`.
+- [ ] **6.10** Run the real-light Go test from the repo folder:
+  ```sh
+  cd ~/src/NegativeScanStudio
+  NSS_RGBLIGHT_PORT=$P go test -v -run RealLight ./rgblight 2>&1 | tee ~/Desktop/nss-qa-$V/light-gotest.txt
+  ```
+  Expect: `TestDarwinRealLight` passes, not skipped. It checks that the port is
+  tagged `0483:5740` and logs the light info and state. Without
+  `NSS_RGBLIGHT_PORT`, the test is skipped, which does not count as a pass.
+- [ ] **6.11** Unplug the light while the app is connected.
   Expect: a clear "disconnected" message, no hang and no crash. After you plug
   it back in and reconnect, status works again. The port number may change,
   so the app must find the port again.
-- [ ] **6.6** Film-base leveling with the X-T3 (Light page): run Auto leveling
+- [ ] **6.12** Film-base leveling with the X-T3 (Light page): run Auto leveling
   once.
   Expect: it converges as on Windows. Record the final codes and the time it
   took.
@@ -411,8 +516,8 @@ Mac: <model>, <chip>, macOS <v>; Resolve <v> <free|Studio>
 3 Parity Metal/CPU   PASS/FAIL  max <n> codes, mean <n>, identical <n>%
 3 Parity Mac/Windows PASS/FAIL/not run
 3 Playback           Metal <fps>, CPU <fps>, off <fps> @ <res>
-5 X-T3 tether        PASS/FAIL  live view <ms>/frame, RAF <size>
-6 Light serial       PASS/FAIL  port <name>
+5 X-T3 tether        PASS/FAIL  CLI <name/commit>, live view <ms>/frame, RAF <size>
+6 Light serial       PASS/FAIL  port <name>, tool commit <sha>, FW <v>, go test PASS/SKIP
 8 Uninstall          PASS/FAIL
 Attachments: nss-qa-<version>.zip
 ```
