@@ -81,9 +81,14 @@ int main(){
   require(api.pipelineBuilds.load()==builds);}
  // 3. Plugin end to end through the mock host.
  mock::init();OfxHost host{nullptr,mock::fetch};setHost(&host);check(entry(kOfxActionLoad,nullptr,nullptr,nullptr));
+ // macOS build: Rendering controls visible, Render engine exactly Auto (Metal) | CPU (indices 0/1, default Auto).
+ {Plugin p;auto &v=p.fx.params.values;auto visible=[&](const char *k){auto &b=v[k];auto a=b.ints.find(kOfxParamPropSecret);return v.count(k)&&(a==b.ints.end()||a->second.empty()||a->second[0]==0);};
+  require(NSS_MAC_RENDER_UI==1&&visible("render")&&visible("render_device")&&visible("render_info"));
+  require(v["render_device"].strings[kOfxParamPropChoiceOption]==std::vector<std::string>{"Auto (Metal)","CPU"}&&v["render_device"].ints[kOfxParamPropDefault][0]==0);
+  require(v["render_info"].type==kOfxParamTypePushButton);std::printf("macOS UI: Render engine [Auto (Metal) | CPU] and Show render engine visible\n");}
  {Plugin p;require(p.metalProp()=="true");Frame f(queue,333,77,true,12,0);p.attach(f);int win[4]={f.bounds[0],f.bounds[1],f.bounds[2],f.bounds[3]};auto a=p.args(queue,win);
   for(int r=0;r<3;r++)require(entry(kOfxImageEffectActionRender,p.e,bag(a),nullptr)==kOfxStatOK);
-  require(lastRender(p.e).rfind("Metal buffers (host queue, ",0)==0);require(nssTestWait(queue)==1);
+  require(lastRender(p.e).rfind("Metal (",0)==0&&lastRender(p.e).find("), host queue buffers")!=std::string::npos);require(nssTestWait(queue)==1);
   double w=f.worst(nss::Prepared(readParams(p.s,0)),win,false);std::printf("plugin Metal render: worst abs %.3g\n",w);require(w<=kParity&&p.metalProp()=="true");overall=std::max(overall,w);
   require(api.pipelineBuilds.load()==builds);}
  for(int fault=nss::kMetalFaultNoDevice;fault<=nss::kMetalFaultEncode;fault++){

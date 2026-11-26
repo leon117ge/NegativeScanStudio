@@ -34,7 +34,7 @@ jobs:
           import pathlib,re,sys
           han=re.compile("[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\U00020000-\U000323af]")
           files=[*pathlib.Path('ofx/src').glob('*metal*'),*pathlib.Path('ofx/src').glob('render.metal'),pathlib.Path('ofx/src/plugin.cpp'),
-                 *pathlib.Path('ofx/tests').glob('metal*'),*pathlib.Path('ofx/tests/metal_stub').glob('*'),pathlib.Path('.github/workflows/macos-metal.yml'),
+                 *pathlib.Path('ofx/tests').glob('metal*'),pathlib.Path('ofx/tests/param_dump.cpp'),pathlib.Path('ofx/tests/check_param_defs.py'),*pathlib.Path('ofx/tests/metal_stub').glob('*'),pathlib.Path('.github/workflows/macos-metal.yml'),
                  pathlib.Path('ofx/README.md'),pathlib.Path('ofx/CHANGELOG.md'),pathlib.Path('ofx/ROADMAP.md')]
           bad=[f'{f}:{n}' for f in files if f.is_file() for n,l in enumerate(f.read_text(encoding='utf-8').splitlines(),1) if han.search(l)]
           print('\n'.join(bad) or f'PASS: {len(files)} files, zero CJK characters');sys.exit(1 if bad else 0)
@@ -66,6 +66,13 @@ jobs:
         run: |
           clang++ $CXXFLAGS_COMMON -Wno-unknown-attributes -Iofx/tests/metal_stub -Ibuild/metal ofx/tests/metal_contract.cpp -o build/metal/metal_contract
           build/metal/metal_contract
+      - name: Rendering controls per platform (macOS visible, Windows/Linux variant unchanged)
+        run: |
+          clang++ $CXXFLAGS_COMMON ofx/tests/param_dump.cpp -o build/metal/param_dump_mac
+          clang++ $CXXFLAGS_COMMON -DNSS_MAC_RENDER_UI=0 ofx/tests/param_dump.cpp -o build/metal/param_dump_win_linux
+          build/metal/param_dump_mac > build/metal/params_mac.txt
+          build/metal/param_dump_win_linux > build/metal/params_win_linux.txt
+          python3 ofx/tests/check_param_defs.py build/metal/params_win_linux.txt build/metal/params_mac.txt
       - name: Real Metal parity and forced-failure fallback
         env:
           NSS_METAL_REQUIRE_DEVICE: '1'

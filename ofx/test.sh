@@ -28,6 +28,15 @@ NSS_LEVELING_FIXTURE="$BUILD/leveling" go test ./hdrscan -run TestScanMetadataUs
 python3 ofx/tests/check_metal_source.py "$BUILD"
 "$CXX" -std=c++17 -O3 -fno-math-errno -fno-trapping-math -Wno-attributes -Iofx/vendor/openfx/include -Iofx/vendor/opencl -Iofx/tests/metal_stub -I"$BUILD" ofx/tests/metal_contract.cpp -o "$BUILD/metal_contract"
 "$BUILD/metal_contract"
+# macOS UI variant of the same contract (visible Rendering controls), then per-platform parameter
+# definitions: Windows/Linux identical to 0.90.14, macOS differs only in the Rendering group.
+"$CXX" -std=c++17 -O3 -fno-math-errno -fno-trapping-math -Wno-attributes -DNSS_MAC_RENDER_UI=1 -Iofx/vendor/openfx/include -Iofx/vendor/opencl -Iofx/tests/metal_stub -I"$BUILD" ofx/tests/metal_contract.cpp -o "$BUILD/metal_contract_mac_ui"
+"$BUILD/metal_contract_mac_ui"
+"$CXX" -std=c++17 -O1 -Iofx/vendor/openfx/include -Iofx/vendor/opencl ofx/tests/param_dump.cpp -o "$BUILD/param_dump"
+"$CXX" -std=c++17 -O1 -DNSS_MAC_RENDER_UI=1 -Iofx/vendor/openfx/include -Iofx/vendor/opencl ofx/tests/param_dump.cpp -o "$BUILD/param_dump_mac_ui"
+"$BUILD/param_dump" > "$BUILD/params_win_linux.txt"
+"$BUILD/param_dump_mac_ui" > "$BUILD/params_mac.txt"
+python3 ofx/tests/check_param_defs.py "$BUILD/params_win_linux.txt" "$BUILD/params_mac.txt"
 python3 ofx/tests/check_metadata.py "$BUILD" "$SCAN"
 python3 ofx/tests/check_parity.py "$BUILD" "$SCAN"
 if [[ "${NSS_TEST_OPENCL:-0}" == 1 ]]; then

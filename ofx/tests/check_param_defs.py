@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Compare parameter definitions of the Windows/Linux build and the macOS UI variant.
-Usage: check_param_defs.py \u003cwin_linux_dump\u003e \u003cmac_dump\u003e
+Usage: check_param_defs.py <win_linux_dump> <mac_dump>
 - Windows/Linux keeps the 0.90.14 Rendering controls exactly: group, Render engine and Show render
   engine hidden, choices 'Auto (CUDA/OpenCL if offered)|CPU', default 0.
 - macOS differs ONLY there: the three are visible, choices exactly 'Auto (Metal)|CPU' (same indices:
