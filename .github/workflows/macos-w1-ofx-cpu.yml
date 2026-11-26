@@ -15,9 +15,9 @@ env:
   INC: -Iofx/vendor/openfx/include -Iofx/vendor/opencl
   # Minimum macOS 13.0 everywhere (build-mac.sh, Info.plist.in, check_mac_build.py, check_mac_minos.py).
   MACOSX_DEPLOYMENT_TARGET: '13.0'
-  # The Windows translation unit must equal this ref's (W1 changes nothing on Windows).
-  # Use origin/main for W1 alone; after merging W2 (Metal), use origin/feat/metal-render.
-  WIN_BASE_REF: origin/main
+  # The Windows translation unit must equal this ref's (macOS work changes nothing on Windows).
+  # mac/integration (W1 + W2 Metal) compares with origin/feat/metal-render.
+  WIN_BASE_REF: origin/feat/metal-render
 jobs:
   linux-windows-build:
     name: Windows build unchanged + fixtures (Linux, MinGW)
