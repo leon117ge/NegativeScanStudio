@@ -93,7 +93,7 @@ func TestSimHikrobotDimGreenRaisesExposureAndLevels(t *testing.T) {
 		Tol:    0.02,
 		Settle: time.Millisecond,
 		Start:  [3]int{29, 100, 54},
-		Area:   lightlevel.Rect{0, 0, 1, 1},
+		Area:   lightlevel.Rect{X0: 0, Y0: 0, X1: 1, Y1: 1},
 	}, [3]bool{true, true, true}, func(s string) { t.Log(s) })
 	if err != nil {
 		t.Fatal(err)
