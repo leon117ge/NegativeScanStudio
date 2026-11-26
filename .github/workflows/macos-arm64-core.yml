@@ -15,7 +15,7 @@ env:
   SAMPLE: AFXT2721.RAF
 jobs:
   libraw-darwin-arm64:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - name: Toolchain
@@ -46,7 +46,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          PKGS=$(go list ./... 2>/dev/null | grep -v '^basetool$')
+          PKGS=$(go list -e ./... 2>/dev/null | grep -v '^basetool$')
           go vet -composites=false $PKGS  # composites: pre-existing unkeyed literals in hdrscan tests
           go test -v -count=1 $PKGS 2>&1 | tee go-test-linux.log
       - name: Test summary
@@ -94,7 +94,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          go vet -composites=false $(go list ./... | grep -v '^basetool$')
+          go vet -composites=false $(go list -e ./... | grep -v '^basetool$')
           go test -v -count=1 ./... 2>&1 | tee go-test-windows.log
       - name: Test summary
         if: always()
@@ -129,7 +129,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-14, macos-15]
+        os: [macos-15, macos-26]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -147,7 +147,7 @@ jobs:
       - name: Vet and test (cgo on, all packages except the Win32 UI root)
         run: |
           set -o pipefail
-          PKGS=$(go list ./... 2>/dev/null | grep -v '^basetool$')
+          PKGS=$(go list -e ./... 2>/dev/null | grep -v '^basetool$')
           go vet -composites=false $PKGS  # composites: pre-existing unkeyed literals in hdrscan tests
           go test -v -count=1 $PKGS 2>&1 | tee go-test-darwin.log
       - name: rgblight without cgo (ioreg enumerator)

@@ -202,7 +202,7 @@ func TestSimPreviewAndCapture(t *testing.T) {
 	}
 
 	// Also write the raw capture (no overlay) next to it for comparison.
-	cf, err := os.Create("/tmp/mono_capture_no_overlay.png")
+	cf, err := os.Create(filepath.Join(filepath.Dir(out), "mono_capture_no_overlay.png"))
 	if err != nil {
 		t.Fatal(err)
 	}
