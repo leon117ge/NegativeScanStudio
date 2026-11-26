@@ -18,7 +18,7 @@ the same titles, rows and control order. Ported so far:
 | Module | Sub-page | macOS |
 |---|---|---|
 | Camera & Light | Camera | ported (cards Camera and Meter the clear film base, live view, log) |
-| Camera & Light | Light | placeholder |
+| Camera & Light | Light | ported (RGB Light Air, Channels, Auto film-base leveling, Scan config presets, Faults, last leveling captures, 500T illuminant, log) |
 | HDR Scan | White light scan | ported (live view, Capture and merge card) |
 | HDR Scan | Trichrome, Mono trichrome, Focus check | placeholders |
 | Crop & Merge | Crop, Merge files, Remove hairs, Batch RAW to TIFF | placeholders |
@@ -36,6 +36,54 @@ camera. Cameras that do not accept PTP commands are skipped with a log line.
 Copied declarations (item lists, `hdr_config.txt` parsing, nav icons) are checked
 against the Windows source by tests (`internal/drift`), so the two front ends read and
 write the same settings files in `~/Library/Application Support/NegativeScanStudio`.
+
+## Light page (W9 group a)
+
+Camera & Light > Light controls the RGB Light Air over its serial port and runs the
+automatic film-base leveling exactly as Windows does. The page logic is
+`macapp/hdrctl/light*.go`; the layout is `macapp/lightview.go`.
+
+- Every non-UI declaration the Windows page uses is copied verbatim into
+  `hdrctl/copied.go` and checked against the Windows source by
+  `TestCopiedLightDeclsMatchWindows`. That covers the light config file, `busyOnceLight`, the X-T3
+  leveling camera, the camera-profile plan, the TIFF check, `leveling_log.csv` /
+  `leveling_failures.csv` records, the Hikrobot leveling camera, preset summaries and the
+  frame-0 handoff. The UI-bound methods (connect, apply, start leveling, results,
+  presets) are ported line by line; message boxes become in-window dialogs, `Synchronize`
+  becomes `UI.Post`.
+- Leveling sequence (unchanged): parameters and camera-profile plan, the
+  Rectangle-without-a-pick check, the camera choice (X-T3, Hikrobot, Hikrobot simulator,
+  or the synthetic camera that follows the simulated light), the temp folder
+  `nss_leveling_*` (deleted afterwards), `lightlevel.Run`, up to two TIFF checks with one
+  corrective pass, the closest-reachable rule, the final state read (20) that must match,
+  the success or failure CSV row, release of a frame-0 lock and the handoff of light plus
+  exposure to the frame-0 lock (X-T3 only), and the limited / too-bright dialogs.
+- `TestLevelingMatchesWindowsSequence` runs a full leveling on the simulated light
+  through the page and replays the Windows sequence on a fresh simulated light. Every
+  step, reading, final value, serial command, log line and the CSV row must be equal.
+- Serial ports: `rgblight.ListPorts` / `OpenPort` list and open `/dev/cu.*` on macOS (the
+  light is `/dev/cu.usbmodem*`, USB 0483:5740, listed first). The list is built on the
+  light worker goroutine because it may call `ioreg`.
+- ISO, base shutter and the film-base rectangle are shared with the Camera page, as on
+  Windows. A change of the light values drops the leveling handoff and releases a
+  frame-0 lock taken with other values.
+
+Differences from Windows, and why:
+
+- The Mono trichrome page is not on macOS yet. The Hikrobot leveling exposure comes from
+  the shared `HikExposureUS` setting, falling back to the best-quality scan preset.
+  "Auto-meter each channel" is read from the settings file. The exposure is a plain
+  field in us instead of a spin box.
+- Leveling metadata (the Camera card switch "Film base for metadata: Last leveling") and
+  the film-stock comparison of frame 0 stay disabled until the film-base DB increment.
+  The leveling itself, its records and the handoff work.
+- "Send to Develop" on the 500T card shows the same explanation as Windows (Convert does
+  not use the Develop cast controls); nothing is sent.
+- Layout: the live view keeps 55 % of the left column and the cards below it (last
+  leveling captures, 500T, log) scroll, so the preview stays usable at 1280x800. The
+  right column is 480-520 dp as on Windows and never takes more than the page minus
+  360 dp. The live view no longer forces a 360x240 minimum (that clipped the controls
+  under it). The window opens at 1280x800; the minimum is 1024x640.
 
 ## Threading model
 
