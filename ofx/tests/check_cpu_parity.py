@@ -29,13 +29,14 @@ def main():
     cand_names = [l.split()[0] for l in (cand / 'manifest.txt').read_text().splitlines()[1:] if l.strip()]
     if names != cand_names:
         print('FAIL: variant lists differ', names, cand_names); return 1
-    report, failed, worst_all = [], 0, 0.0
+    report, failed, worst_all, worst_rel, worst_ulp_all = [], 0, 0.0, 0.0, 0
     for name in names:
         rb, cb = (ref / f'{name}.f32').read_bytes(), (cand / f'{name}.f32').read_bytes()
         a, b = load(ref / f'{name}.f32'), load(cand / f'{name}.f32')
         if len(a) != len(b):
             print(f'FAIL {name}: sizes differ'); failed += 1; continue
         same = diff_abs = worst_ulp = bad = 0
+        diff_rel = 0.0
         worst_at = -1
         if rb == cb:
             same = len(a)
@@ -49,23 +50,27 @@ def main():
                 if d > diff_abs:
                     diff_abs, worst_at = d, i
                 worst_ulp = max(worst_ulp, abs(ulp_key(x) - ulp_key(y)))
+                diff_rel = max(diff_rel, d / max(abs(x), 1e-30))
                 if d > ABS_TOL + REL_TOL * abs(x):
                     bad += 1
         row = dict(variant=name, values=len(a), bit_identical=same,
                    bit_identical_fraction=same / len(a), max_abs_diff=diff_abs,
-                   max_ulp=worst_ulp, worst_index=worst_at, out_of_tolerance=bad,
+                   max_rel_diff=diff_rel, max_ulp=worst_ulp, worst_index=worst_at, out_of_tolerance=bad,
                    sha256_reference=hashlib.sha256(rb).hexdigest(),
                    sha256_candidate=hashlib.sha256(cb).hexdigest())
         report.append(row)
         worst_all = max(worst_all, diff_abs)
+        worst_rel = max(worst_rel, diff_rel)
+        worst_ulp_all = max(worst_ulp_all, worst_ulp)
         failed += bad > 0
         print(f"{'PASS' if bad == 0 else 'FAIL'} {name}: identical {same}/{len(a)} "
-              f"max_abs {diff_abs:.3g} max_ulp {worst_ulp} out_of_tol {bad} sha_equal {rb == cb}")
+              f"max_abs {diff_abs:.3g} max_rel {diff_rel:.3g} max_ulp {worst_ulp} out_of_tol {bad} sha_equal {rb == cb}")
     summary = dict(abs_tol=ABS_TOL, rel_tol=REL_TOL, variants=len(names), failed=failed,
-                   max_abs_diff=worst_all, rows=report)
+                   max_abs_diff=worst_all, max_rel_diff=worst_rel, max_ulp=worst_ulp_all, rows=report)
     if len(sys.argv) > 3:
         pathlib.Path(sys.argv[3]).write_text(json.dumps(summary, indent=1))
-    print(f"{'PASS' if failed == 0 else 'FAIL'}: {len(names)} variants, worst max_abs {worst_all:.3g}, "
+    print(f"{'PASS' if failed == 0 else 'FAIL'}: {len(names)} variants, worst max_abs {worst_all:.3g} "
+          f"(large only where outputs are large), worst max_rel {worst_rel:.3g}, worst max_ulp {worst_ulp_all}, "
           f"tolerance {ABS_TOL} + {REL_TOL} * |ref|")
     return 1 if failed else 0
 

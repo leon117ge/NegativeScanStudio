@@ -1,0 +1,92 @@
+# Release gate for every macOS build (PLAN.md item W10): CJK scan of everything
+# shipped, plain and consistent version numbers, and docs/changelog entries.
+#
+# Use it three ways:
+#  1. From a build workflow, as a job after the job that uploads the artifact:
+#       checks:
+#         needs: build
+#         uses: ./.github/workflows/macos-build-checks.yml
+#         with: {artifact-name: NegativeScanStudio-ofx-macos-arm64, product: ofx, expect-version: 0.90.16}
+#  2. By hand (Actions tab, once this file is on the default branch): pick a run id.
+#  3. On push to qa/macos-parity it checks the proof artifact of run 45801932421
+#     in report mode (that proof bundle carries a placeholder 0.0.0 Info.plist).
+# Test-only: no release, no tag, no secrets beyond the read-only GITHUB_TOKEN.
+name: macOS build checks
+on:
+  workflow_call:
+    inputs:
+      artifact-name: {type: string, required: true}
+      product: {type: string, required: true, description: 'ofx, print2383 or app'}
+      expect-version: {type: string, required: false, default: ''}
+      run-id: {type: string, required: false, default: '', description: 'empty = artifact of the calling run'}
+      enforce: {type: boolean, required: false, default: true}
+  workflow_dispatch:
+    inputs:
+      run-id: {description: 'Workflow run that produced the Mac artifact', required: true, default: '45801932421'}
+      artifact-name: {description: 'Artifact name', required: true, default: 'NegativeScanStudio-ofx-macos-arm64-proof'}
+      product: {description: 'ofx, print2383 or app', required: true, default: 'ofx'}
+      expect-version: {description: 'Version the build must carry (empty = must only be consistent)', required: false, default: ''}
+      enforce: {description: 'Fail the job on a FAIL', type: boolean, default: true}
+  push:
+    branches: [qa/macos-parity]
+    paths: ['ci/qa/check_mac_build.py', 'ci/qa/ofx_version_probe.c', '.github/workflows/macos-build-checks.yml']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  check:
+    runs-on: macos-15
+    env:
+      RUN_ID: ${{ inputs.run-id || (github.event_name == 'push' && '45801932421') || '' }}
+      ARTIFACT: ${{ inputs.artifact-name || 'NegativeScanStudio-ofx-macos-arm64-proof' }}
+      PRODUCT: ${{ inputs.product || 'ofx' }}
+      EXPECT: ${{ inputs.expect-version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download artifact from another run
+        if: env.RUN_ID != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT }}
+          path: mac-artifact
+          run-id: ${{ env.RUN_ID }}
+          github-token: ${{ github.token }}
+      - name: Download artifact from this run
+        if: env.RUN_ID == ''
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT }}
+          path: mac-artifact
+      - name: OFX version probe (OfxGetPlugin)
+        if: env.PRODUCT != 'app'
+        run: |
+          clang -arch arm64 -Iofx/vendor/openfx/include ci/qa/ofx_version_probe.c -o probe
+          : > probe.json
+          find mac-artifact -path '*Contents/MacOS/*' -type f -name '*.ofx' | while read -r bin; do
+            echo "probe: $bin"; ./probe "$bin" | tee -a probe.json
+          done
+          # keep only the first plugin binary's JSON line for --probe
+          head -1 probe.json > probe1.json
+      - name: Signature and architecture (report)
+        continue-on-error: true
+        run: |
+          find mac-artifact -type f \( -name '*.ofx' -o -perm -u+x \) | while read -r f; do
+            if file "$f" | grep -q Mach-O; then
+              file "$f"; lipo -archs "$f" || true
+              codesign -dv --verbose=2 "$f" 2>&1 | grep -E 'Identifier|Signature|TeamIdentifier|flags' || true
+            fi
+          done
+      - name: CJK, version and docs checks
+        continue-on-error: ${{ github.event_name == 'push' || (inputs.enforce == false) }}
+        run: |
+          args=(mac-artifact --product "$PRODUCT" --repo . --report build-checks.json)
+          [ -n "$EXPECT" ] && args+=(--expect-version "$EXPECT")
+          [ -s probe1.json ] && args+=(--probe probe1.json)
+          python3 ci/qa/check_mac_build.py "${args[@]}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mac-build-checks-${{ env.PRODUCT }}-${{ github.run_id }}
+          path: |
+            build-checks.json
+            probe.json

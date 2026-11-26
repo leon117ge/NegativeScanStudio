@@ -4,8 +4,13 @@ Test builds only, not released yet.
 
 - `ofx/build-mac.sh [out]` (on a Mac with the Xcode command line tools) builds
   `NegativeScanStudio.ofx.bundle` for arm64 with the CPU render path, signs it ad hoc and
-  zips it with `Install.command` and `README-macOS.txt` as
-  `NegativeScanStudio_OFX_v<version>_macOS_arm64.zip`. The version comes from plugin.cpp.
+  zips it with `Install.command` and `README-macOS.txt` (all at the zip root) as
+  `NegativeScanStudio_OFX_v<version>_macOS_arm64.zip`. The version comes from plugin.cpp
+  (label and OfxPlugin major/minor must agree; the build stops otherwise) and is stamped
+  into Info.plist.
+- Render configs: `NSS_METAL=auto` (default) adds the Metal path when
+  `ofx/src/metal_render.mm` exists (`-DNSS_METAL`, `-fobjc-arc`, `-framework Metal
+  -framework Foundation`); `NSS_METAL=0` builds CPU only; `NSS_METAL=1` requires Metal.
 - `Install.command` copies the bundle to `/Library/OFX/Plugins` (sudo), clears the
   `com.apple.quarantine` flag and re-signs the installed bundle ad hoc.
 - `ofx/src/platform.hpp` holds the build switches: CUDA and OpenCL are compiled out on
@@ -16,7 +21,8 @@ Test builds only, not released yet.
   checks the host context with `CGLGetCurrentContext`.
 - Math flags match the Windows build; `-ffp-contract=off` keeps `a*b+c` as two rounded
   operations as on x64 (no fused multiply-add). No chip-specific `-mcpu`.
-- CI: `.github/workflows/macos-w1-ofx-cpu.yml`. It checks that the Windows source is
+- CI: `.github/workflows/macos-w1-ofx-cpu.yml` (macos-15 and macos-26), then the shared
+  `macos-build-checks.yml` (CJK, versions, docs) on the uploaded zip. It checks that the Windows source is
   unchanged, renders the parity variants with the Windows x64 build on a Windows runner,
   then on a macOS arm64 runner builds and inspects the bundle, runs the native tests,
   runs `Install.command` on a quarantined copy and loads the installed binary, and

@@ -2,7 +2,7 @@ NegativeScan Studio OFX for macOS (Apple Silicon)
 =================================================
 
 What is in this folder
-- NegativeScanStudio.ofx.bundle: the OFX plugin (arm64, CPU render path, ad hoc signed).
+- NegativeScanStudio.ofx.bundle: the OFX plugin (arm64, ad hoc signed).
 - Install.command: installs the plugin for DaVinci Resolve and other OFX hosts.
 
 Install
@@ -18,8 +18,9 @@ flag (without this, Resolve skips the plugin silently) and signs it ad hoc for t
 Notes
 - Apple Silicon Macs only (M1 and later), macOS 12 or later. If Resolve runs under
   Rosetta (Intel mode), it cannot load this plugin.
-- Render engine: CPU, using every core macOS reports. CUDA and OpenCL are not used on
-  macOS. Output matches the Windows CPU render within float rounding.
+- Render engine: Metal when the build includes it and Resolve offers it, otherwise the
+  CPU path, which uses every core macOS reports. CUDA and OpenCL are not used on macOS.
+  CPU output matches the Windows CPU render within float rounding.
 - To remove the plugin: sudo rm -rf /Library/OFX/Plugins/NegativeScanStudio.ofx.bundle
 - If the plugin does not appear, check the Resolve log:
   ~/Library/Application Support/Blackmagic Design/DaVinci Resolve/logs/ResolveDebug.txt

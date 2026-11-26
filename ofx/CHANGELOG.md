@@ -5,6 +5,21 @@ Current plugin: **0.90.14** ([Plugin release](https://github.com/leon117ge/Negat
 Plugin releases are independent from the Windows scanning app.
 
 
+## 0.90.14 macOS — Apple Silicon (arm64) CPU build and installer (test build, not released)
+
+Same plugin code and output as the Windows 0.90.14; this entry only adds a macOS build. Not yet run in Resolve on a Mac.
+
+- New macOS package `NegativeScanStudio_OFX_v0.90.14_macOS_arm64.zip` built by `ofx/build-mac.sh`: `NegativeScanStudio.ofx.bundle` (`Contents/MacOS/NegativeScanStudio.ofx`, Mach-O arm64, `Contents/Info.plist` stamped with the plugin version), signed ad hoc, plus `Install.command` and `README-macOS.txt` at the root of the zip.
+- `Install.command` copies the bundle to `/Library/OFX/Plugins` (administrator password), clears the `com.apple.quarantine` flag (without this Resolve skips a downloaded plugin silently) and re-signs the installed bundle ad hoc. All messages are plain English.
+- CUDA and OpenCL are compiled out on macOS (`ofx/src/platform.hpp`). The Windows build keeps them; its preprocessed source is unchanged (checked in CI against main).
+- CPU render on macOS uses every hardware thread the OS reports (performance and efficiency cores), with at least 32 rows per thread; Windows keeps its cap of 8. No chip-specific tuning or flags.
+- The viewer picker overlay draws through `OpenGL.framework` (`CGLGetCurrentContext` for the host context check).
+- Math flags match the Windows build; `-ffp-contract=off` keeps multiply-add as two rounded operations, as on x64.
+- Version: Info.plist `CFBundleShortVersionString`/`CFBundleVersion`, the plugin label and the `OfxGetPlugin` version (0/9014) all come from `plugin.cpp`; the build stops if they disagree.
+- Tests: CI (`.github/workflows/macos-w1-ofx-cpu.yml`) builds on macOS arm64 runners and runs `host_test`, `tone_test`, `overlay_test`, `leveling_metadata_test`, `cuda_contract` (mock driver), a CPU thread count test, an install test of `Install.command` on a quarantined copy plus a load of the installed binary, the CJK scan and the shared macOS build checks. CPU parity: 17 parameter variants of a 256 x 256 synthetic frame rendered through the real plugin entry point on Windows x64 and on macOS arm64, gate `|mac - win| <= 1e-5 + 1e-5 * |win|` per value.
+- The Metal render path (separate entry above) is added to the same bundle when `ofx/src/metal_render.mm` is present (`NSS_METAL=auto`); `NSS_METAL=0` keeps a CPU-only build.
+- Known limits: Apple Silicon only (an Intel or Rosetta Resolve cannot load it); no Developer ID signature or notarization yet.
+
 ## 0.90.14 — Separate Tone Color group with switches and presets, stronger cream after desaturation
 
 - UI: the color controls are a new, separate **Tone Color** group. Each group is laid out as switches, then its own preset menu, then the sliders:
