@@ -8,9 +8,11 @@ package main
 
 import (
 	"image"
+	"io"
 	"strings"
 
 	"gioui.org/font"
+	"gioui.org/io/clipboard"
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/clip"
@@ -45,9 +47,13 @@ type UI struct {
 	dlgOK   Button
 	dlgNo   Button
 
-	hdr  *hdrctl.Ctl
-	hp   *hdrPages
-	pick func(title string, kind pickKind, start string, exts []string, done func(string, bool))
+	hdr *hdrctl.Ctl
+	hp  *hdrPages
+	lp  *lightPage
+
+	clip    string
+	clipSet bool
+	pick    func(title string, kind pickKind, start string, exts []string, done func(string, bool))
 }
 
 type dialog struct {
@@ -69,6 +75,8 @@ func newUI(th *Theme, inval func()) *UI {
 	u.pick = u.pickPath
 	u.hdr = hdrctl.New(u)
 	u.hp = newHDRPages(u)
+	u.lp = newLightPage(u)
+	u.hdr.Light.OnRouting = u.setNav
 	return u
 }
 
@@ -106,14 +114,46 @@ func (u *UI) Confirm(title, text string, done func(bool)) {
 	u.dialogs = append(u.dialogs, &dialog{title: title, text: text, confirm: true, done: done})
 }
 
+// PickFile is a native open or save panel (NSOpenPanel / NSSavePanel).
+func (u *UI) PickFile(title string, save bool, start string, exts []string, done func(string, bool)) {
+	k := pickOpen
+	if save {
+		k = pickSave
+	}
+	u.pick(title, k, start, exts, done)
+}
+
+// SetClipboard puts text on the clipboard with the next frame.
+func (u *UI) SetClipboard(text string) {
+	u.clip, u.clipSet = text, true
+	if u.inval != nil {
+		u.inval()
+	}
+}
+
 // ---------- layout ----------
 
+// setNav is main.go's updateLivePage: which live view polls, and the
+// Hikrobot preview on the Light page when a monochrome leveling camera is
+// selected (it is injected into the Light page's live view).
 func (u *UI) setNav() {
-	u.hdr.SetLiveVisible(u.nav.LiveView() == 0 || u.nav.LiveView() == 1)
+	k := u.nav.LiveView()
+	l := u.hdr.Light
+	if k == 3 && l.UsesMonoCam() {
+		u.hdr.SetLiveVisible(false)
+		l.StartHikPreview()
+		return
+	}
+	l.StopHikPreview()
+	u.hdr.SetLiveVisible(k == 0 || k == 1 || k == 3)
 }
 
 func (u *UI) Layout(gtx layout.Context) layout.Dimensions {
 	u.drain()
+	if u.clipSet {
+		u.clipSet = false
+		gtx.Execute(clipboard.WriteCmd{Type: "application/text", Data: io.NopCloser(strings.NewReader(u.clip))})
+	}
 	fillRect(gtx, cBg, image.Rectangle{Max: gtx.Constraints.Max})
 	for i := range u.navBtns {
 		if u.navBtns[i].Clicked(gtx) && u.nav.SetModule(i) {
@@ -184,7 +224,7 @@ func (u *UI) header(gtx layout.Context) layout.Dimensions {
 func aboutText() string {
 	return appstate.AppVersion + " for macOS (Apple Silicon), Gio user interface (work in progress).\n\n" +
 		"Camera and light control, tethered HDR scanning, RAW to linear TIFF, crop and Convert (RAW to film negative).\n" +
-		"Ported so far: Camera & Light > Camera and HDR Scan > White light scan. The other pages are placeholders on macOS; use the Windows app for them.\n\n" +
+		"Ported so far: Camera & Light > Camera and Light, and HDR Scan > White light scan. The other pages are placeholders on macOS; use the Windows app for them.\n\n" +
 		"Settings: ~/Library/Application Support/NegativeScanStudio (same files as Windows)\nCrash log: ~/Library/Logs/NegativeScanStudio/crash_log.txt"
 }
 
@@ -316,6 +356,8 @@ func (u *UI) page(gtx layout.Context, p appstate.Page) layout.Dimensions {
 		return u.hp.camera(gtx)
 	case appstate.PageWhite:
 		return u.hp.white(gtx)
+	case appstate.PageLight:
+		return u.lp.layout(gtx)
 	}
 	return u.placeholder(gtx, p)
 }

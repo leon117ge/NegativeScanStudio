@@ -11,6 +11,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -107,8 +108,10 @@ func (s *shooter) save(name string) {
 	png.Encode(f, img)
 }
 
-func (s *shooter) pump(what string, ok func() bool) {
-	end := time.Now().Add(10 * time.Second)
+func (s *shooter) pump(what string, ok func() bool) { s.pumpFor(what, 10*time.Second, ok) }
+
+func (s *shooter) pumpFor(what string, d time.Duration, ok func() bool) {
+	end := time.Now().Add(d)
 	for !ok() {
 		select {
 		case f := <-s.u.posts:
@@ -125,13 +128,13 @@ func (s *shooter) pump(what string, ok func() bool) {
 // Metal on macOS) and, with NSS_SHOTS=<dir>, saves screenshots.
 func TestShellAndHDRPages(t *testing.T) {
 	isolate(t)
-	w, err := headless.NewWindow(1280, 860)
+	w, err := headless.NewWindow(1280, 800)
 	if err != nil {
 		t.Skip("no headless GPU:", err)
 	}
 	defer w.Release()
 	u := newUI(newTheme(), nil)
-	s := &shooter{t: t, w: w, u: u, sz: image.Pt(1280, 860), dir: os.Getenv("NSS_SHOTS")}
+	s := &shooter{t: t, w: w, u: u, sz: image.Pt(1280, 800), dir: os.Getenv("NSS_SHOTS")}
 	if s.dir != "" {
 		os.MkdirAll(s.dir, 0o755)
 	}
@@ -149,11 +152,6 @@ func TestShellAndHDRPages(t *testing.T) {
 			s.frame()
 		}
 	}
-	u.nav = appstate.Nav{}
-	u.nav.SetModule(0)
-	u.nav.SetSub(1)
-	u.setNav()
-	s.save("05-light-placeholder.png")
 
 	// connect the mock camera: live view through a GPU image op
 	u.nav = appstate.Nav{}
@@ -197,4 +195,89 @@ func TestNavClicksSwitchLiveView(t *testing.T) {
 	if u.nav.LiveView() != -1 {
 		t.Fatal("convert has no live view")
 	}
+}
+
+// TestLightPageLayout: the Light page at the default 1280x800 and at the
+// minimum window size, before and after a simulated leveling. The preview
+// column keeps the whole live view and the log inside the window (no
+// clipping); with NSS_SHOTS=<dir> the frames are saved.
+func TestLightPageLayout(t *testing.T) {
+	isolate(t)
+	u := newUI(newTheme(), nil)
+	u.nav = appstate.Nav{}
+	u.nav.SetModule(0)
+	u.nav.SetSub(1)
+	u.setNav()
+	u.hdr.Start()
+	l := u.hdr.Light
+	dir := os.Getenv("NSS_SHOTS")
+	if dir != "" {
+		os.MkdirAll(dir, 0o755)
+	}
+	shoot := func(sz image.Point, name string) *shooter {
+		w, err := headless.NewWindow(sz.X, sz.Y)
+		if err != nil {
+			t.Skip("no headless GPU:", err)
+		}
+		t.Cleanup(w.Release)
+		s := &shooter{t: t, w: w, u: u, sz: sz, dir: dir}
+		s.save(name)
+		v := u.lp.view.ir
+		if v.Empty() && l.Comp != nil {
+			t.Fatalf("%s: live view not laid out", name)
+		}
+		return s
+	}
+	s := shoot(image.Pt(1280, 800), "07-light-idle-1280x800.png")
+	s.pump("light ready", func() bool { return strings.Contains(l.LogText(), "Light page ready") })
+
+	// camera live view in the Light page's preview
+	u.pick = func(_ string, _ pickKind, _ string, _ []string, done func(string, bool)) { done("mock.raf", true) }
+	u.hdr.OpenSim = func(string, *camera.Logger) (camera.Device, error) { return newFilmCam(), nil }
+	u.hdr.Connect()
+	s.pump("connected", func() bool { return u.hdr.Connected() && u.hdr.FrameSeq > 2 })
+	s.frame()
+	ir := u.lp.view.ir
+	if ir.Empty() || ir.Max.X > s.sz.X || ir.Max.Y > s.sz.Y {
+		t.Fatalf("live view %v outside the %v window", ir, s.sz)
+	}
+	if ir.Dx() < 360 && ir.Dy() < 240 {
+		t.Fatalf("live view too small at 1280x800: %v", ir)
+	}
+
+	// simulated light + leveling
+	l.PortIdx = len(l.PortItems) - 2
+	l.ToggleConnect()
+	s.pump("light connected", func() bool { return l.Connected() })
+	u.hdr.Disconnect() // the simulated light is measured by the simulated camera
+	s.pump("camera off", func() bool { return !u.hdr.Connected() })
+	l.StartLevel()
+	s.pumpFor("leveling", 120*time.Second, func() bool { return !l.Leveling() && l.Comp != nil })
+	if !strings.HasPrefix(l.ResText, "LEVELLED: ") {
+		t.Fatalf("leveling: %s", l.ResText)
+	}
+	u.lp.cards[3].collapsed = false
+	s.save("08-light-levelled-1280x800.png")
+	if c := u.lp.comp; c.Empty() || c.Max.X > s.sz.X {
+		t.Fatalf("captures %v", c)
+	}
+	shoot(image.Pt(1024, 640), "09-light-levelled-1024x640.png")
+	shoot(image.Pt(1440, 900), "10-light-levelled-1440x900.png")
+
+	// simulated Hikrobot leveling camera: its preview goes into the Light
+	// page's live view (main.go: lightui.startHikPreview)
+	seq := u.hdr.FrameSeq
+	l.Settings().CamSrc = 2
+	l.CamSourceChanged()
+	s.pump("hik preview", func() bool { return u.hdr.FrameSeq > seq+1 })
+	s.save("11-light-hik-sim-1280x800.png")
+	u.nav.SetSub(0)
+	u.setNav() // Camera page: the Hikrobot preview stops
+	seq = u.hdr.FrameSeq
+	time.Sleep(500 * time.Millisecond)
+	s.frame()
+	if u.hdr.FrameSeq > seq+1 {
+		t.Fatal("Hikrobot preview still running off the Light page")
+	}
+	u.hdr.Shutdown()
 }

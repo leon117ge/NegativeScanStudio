@@ -32,8 +32,14 @@ func Decls(t testing.TB, file string) map[string]string {
 		switch d := d.(type) {
 		case *ast.FuncDecl:
 			name := d.Name.Name
-			if d.Recv != nil {
-				continue
+			if d.Recv != nil && len(d.Recv.List) == 1 {
+				t := d.Recv.List[0].Type
+				if s, ok := t.(*ast.StarExpr); ok {
+					t = s.X
+				}
+				if id, ok := t.(*ast.Ident); ok {
+					name = id.Name + "." + name
+				}
 			}
 			out[name] = pr(d)
 		case *ast.GenDecl:

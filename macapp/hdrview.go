@@ -14,6 +14,7 @@ import (
 	"gioui.org/op"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
+	"gioui.org/text"
 	"gioui.org/unit"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
@@ -85,12 +86,23 @@ func b2i(b bool) int {
 	return 0
 }
 
+// rightWidth is the width of a page's right card column: 2/5 of the page
+// between lo and hi dp (the Windows MinSize / MaxSize), but always leaving
+// the left preview column at least minLeftDp.
+func rightWidth(gtx layout.Context, lo, hi unit.Dp) int {
+	total := gtx.Constraints.Max.X
+	rw := min(max(total*2/5, gtx.Dp(lo)), gtx.Dp(hi))
+	return max(min(rw, total-gtx.Dp(minLeftDp)), 0)
+}
+
+// minLeftDp is the narrowest left (preview) column.
+const minLeftDp = 360
+
 // twoCol is the Camera / White page frame: left column (live view, hint,
 // log) and the 450-480 px right column of cards.
 func (p *hdrPages) twoCol(gtx layout.Context, k int, hint string, cards ...layout.Widget) layout.Dimensions {
 	return layout.Inset{Left: 8, Top: 6, Right: 8, Bottom: 6}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		total := gtx.Constraints.Max.X
-		rw := min(max(total*2/5, gtx.Dp(450)), gtx.Dp(480))
+		rw := rightWidth(gtx, 450, 480)
 		return layout.Flex{}.Layout(gtx,
 			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
@@ -141,9 +153,13 @@ func (p *hdrPages) liveView(gtx layout.Context, v *liveView) layout.Dimensions {
 	b := c.Buttons()
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			// The view takes exactly the space the column gives it (never
+			// more: a forced minimum clipped the controls below it at
+			// 1280x800); the frame is fitted inside with its aspect kept.
 			sz := gtx.Constraints.Max
-			sz.X = max(sz.X, gtx.Dp(360))
-			sz.Y = max(sz.Y, gtx.Dp(240))
+			if sz.X <= 0 || sz.Y <= 0 {
+				return layout.Dimensions{Size: gtx.Constraints.Min}
+			}
 			p.viewInput(gtx, v)
 			fillRect(gtx, cViewBg, image.Rectangle{Max: sz})
 			if c.Frame == nil {
@@ -152,7 +168,7 @@ func (p *hdrPages) liveView(gtx layout.Context, v *liveView) layout.Dimensions {
 				layout.Center.Layout(g, func(gtx layout.Context) layout.Dimensions {
 					gtx.Constraints.Min = image.Point{}
 					l := material.Label(th.Theme, unit.Sp(13), "No image yet.\nConnect the camera and start live view, or press Meter base.\nDrag a rectangle here to choose the clear film base yourself.")
-					l.Color, l.Alignment = rgb(128, 128, 136), 1 // text.Middle
+					l.Color, l.Alignment = rgb(128, 128, 136), text.Middle
 					return l.Layout(gtx)
 				})
 			} else {
@@ -365,13 +381,13 @@ func (p *hdrPages) meterCard(gtx layout.Context) layout.Dimensions {
 					return hbox(gtx, 4,
 						layout.Flexed(3, p.combo(&p.f0CB, appstate.Frame0Items, &c.Cfg.Frame0, false,
 							"Auto: meter the shutter at ISO 160 (as before).\nFixed: no metering search - one probe at the chosen ISO and base shutter (1/60 s or 1/125 s) locks frame 0; the brighter frames change the shutter only.\nWarns when the base clips (> 0.95) or is very low; compares with the film stock.", save)),
-						layout.Flexed(1, p.combo(&p.isoCB, appstate.ISOItems, &c.Cfg.ISO, !b.ISO, "ISO of a fixed frame 0 (Fixed only; Auto always uses ISO 160).", save)),
+						layout.Flexed(1, p.combo(&p.isoCB, appstate.ISOItems, &c.Cfg.ISO, !b.ISO, "ISO of a fixed frame 0 (Fixed only; Auto always uses ISO 160).", c.ISOChanged)),
 					)
 				})
 			},
 			func(gtx layout.Context) layout.Dimensions {
 				return gridRow(gtx, th, "Base shutter", lw, p.combo(&p.shutCB, appstate.FixedShutterItems, &c.Cfg.Shutter, !b.Shutter,
-					"Base shutter of a Fixed frame 0, Record base, the RGB light's auto film-base leveling and trichrome scans.\n1/125 s is one stop faster than 1/60 s (the X-T3 has no 1/120 s; 1/125 s is its nearest step).", save))
+					"Base shutter of a Fixed frame 0, Record base, the RGB light's auto film-base leveling and trichrome scans.\n1/125 s is one stop faster than 1/60 s (the X-T3 has no 1/120 s; 1/125 s is its nearest step).", c.ShutterChanged))
 			},
 			func(gtx layout.Context) layout.Dimensions {
 				return gridRow(gtx, th, "Film stock", lw, func(gtx layout.Context) layout.Dimensions {
@@ -402,7 +418,7 @@ func (p *hdrPages) meterCard(gtx layout.Context) layout.Dimensions {
 			p.readouts,
 			func(gtx layout.Context) layout.Dimensions {
 				d, _ := p.levelMeta.Layout(gtx.Disabled(), th, "Film base for metadata: Last leveling (after profile)", &p.levelOn,
-					"Uses the Light page's last accepted leveling. The Light page is not on macOS yet.")
+					"Uses the Light page's last accepted leveling. Leveling metadata is not on macOS yet (later increment).")
 				return d
 			},
 			func(gtx layout.Context) layout.Dimensions { return th.text(gtx, "Last leveling: unavailable") },

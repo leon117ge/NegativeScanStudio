@@ -34,6 +34,11 @@ type Host interface {
 	Message(title, text string)
 	// Confirm asks OK / Cancel; done runs on the UI goroutine.
 	Confirm(title, text string, done func(ok bool))
+	// PickFile shows a native open (save=false) or save panel; done runs on
+	// the UI goroutine.
+	PickFile(title string, save bool, start string, exts []string, done func(path string, ok bool))
+	// SetClipboard puts text on the clipboard.
+	SetClipboard(text string)
 }
 
 // Device is one entry of the camera dropdown.
@@ -90,6 +95,18 @@ type Ctl struct {
 	sessFirst  time.Time
 	LastCap    *hdrscan.Result
 	camFn      float64
+
+	// Light page link (v0.82 handoff, shared ISO / base shutter / rectangle)
+	Light       *Light
+	Hik         *hikCams
+	handoff     *baseHandoff
+	autoLocking bool
+	lockSrc     string
+	lockLight   *[3]int // light values when frame 0 was locked (nil = unknown)
+	isoPrev     int     // Cfg.ISO / Cfg.Shutter as last handled (the combos write Cfg first)
+	shutPrev    int
+	// shared Hikrobot exposure (hikexp_ui.go)
+	syncingHikExp, hikExpReady bool
 }
 
 // New loads the settings and starts the camera worker.
@@ -117,6 +134,9 @@ func New(h Host) *Ctl {
 	if db, err := filmdb.Load(filmdb.Path(appstate.ConfigDir())); err == nil {
 		c.DB = db
 	}
+	c.isoPrev, c.shutPrev = c.Cfg.ISO, c.Cfg.Shutter
+	c.Hik = newHikCams()
+	c.Light = newLight(c)
 	return c
 }
 
@@ -125,6 +145,17 @@ func (c *Ctl) Start() {
 	c.showBracket()
 	c.say(appstate.AppVersion + " HDR scan ready. Log file: " + c.Log.Path())
 	c.RefreshDevices()
+	if c.Light != nil {
+		c.Light.Start()
+	}
+}
+
+// Shutdown runs when the window closes: the Light page's planned
+// disconnect (lightui.shutdown on Windows).
+func (c *Ctl) Shutdown() {
+	if c.Light != nil {
+		c.Light.Shutdown()
+	}
 }
 
 const maxLog = 400
@@ -178,6 +209,9 @@ func (c *Ctl) Buttons() Buttons {
 	}
 	if len(appstate.EVs(c.Cfg)) <= 1 {
 		b.CapText = "Capture"
+	}
+	if c.handoff != nil && c.handoff.pending {
+		c.autoLock() // updateButtons runs a pending light handoff's lock
 	}
 	return b
 }
@@ -535,6 +569,7 @@ func (c *Ctl) showCamera(e camera.Exposure, fn float64) {
 }
 
 func (c *Ctl) clearLocked() {
+	c.lockSrc, c.lockLight = "", nil
 	c.F0ISO, c.F0Sh, c.P2Sh, c.BaseLv, c.BaseR, c.BaseG, c.BaseB = "not locked", "", "", "", "", "", ""
 }
 
@@ -548,26 +583,42 @@ func (c *Ctl) SetROI(r hdrscan.Rect) {
 	c.ROI = r
 	c.Cfg.AreaMode = 1
 	c.Save()
+	if l := c.Light; l != nil {
+		l.cfg.Area = toLightRect(r)
+		l.cfg.AreaMode = 1
+		l.cfg.AreaPicked = true
+		l.saveCfg()
+	}
 	c.BaseLbl = "Base rectangle set. Press Meter base."
 }
 
 // ClearROI is Reset to Auto.
 func (c *Ctl) ClearROI() {
-	if c.Busy {
+	if c.Busy || (c.Light != nil && c.Light.level) {
 		return
 	}
 	c.ROI = hdrscan.Rect{}
 	c.Cfg.AreaMode = 0
 	c.Save()
+	if l := c.Light; l != nil {
+		l.cfg.Area, l.cfg.AreaMode, l.cfg.AreaPicked = toLightRect(hdrscan.Rect{}), 0, false
+		l.saveCfg()
+	}
 }
 
 // ---------- meter / capture ----------
 
-func (c *Ctl) Meter() {
+// Meter is the Meter base button (a manual lock supersedes a light
+// handoff's label, the handoff's values stay the trichrome scan values).
+func (c *Ctl) Meter() { c.meterSrc(nil) }
+
+// meterSrc meters / locks frame 0; ho != nil is a leveling / Apply stored
+// handoff (fixed lock at its exposure, no dialogs).
+func (c *Ctl) meterSrc(ho *baseHandoff) {
 	if c.dev == nil || c.Busy {
 		return
 	}
-	if c.Cfg.AreaMode == 1 && c.ROI.Empty() {
+	if ho == nil && c.Cfg.AreaMode == 1 && c.ROI.Empty() {
 		c.Host.Message("Meter base", "Base area is set to \"Rectangle\": drag a rectangle over the clear film base on the image first (start live view to see the frame), or choose Auto.")
 		return
 	}
@@ -582,7 +633,22 @@ func (c *Ctl) Meter() {
 		s.ROI = hdrscan.Rect{}
 	}
 	fixed, iso := appstate.Fixed(c.Cfg), appstate.FixedISO(c.Cfg)
+	src := ""
+	if ho != nil {
+		fixed, iso, src = true, ho.ISO, "from "+ho.Source
+		c.Log.Printf("==== Frame 0 lock from the light handoff (%s): fixed ISO %d, %s - no Meter base needed ====", ho.Source, ho.ISO, camera.ShutterLabel(ho.Shutter))
+	}
+	var lockLight *[3]int
+	if l := c.Light; l != nil && l.cl != nil {
+		if cs := l.cl.CachedState(); cs != nil {
+			v := cs.Value
+			lockLight = &v
+		}
+	}
 	s.Fixed = appstate.FixedShutter(c.Cfg)
+	if ho != nil {
+		s.Fixed = ho.Shutter
+	}
 	if fixed {
 		c.ExpLbl = fmt.Sprintf("Frame 0 fixed: ISO %d, %s ...", iso, camera.ShutterLabel(s.Fixed))
 	} else {
@@ -630,15 +696,24 @@ func (c *Ctl) Meter() {
 				c.ExpLbl = "NOT LOCKED"
 				c.BaseLbl = "Metering failed: " + err.Error()
 				c.say("Metering failed: " + err.Error())
+				if ho != nil {
+					c.say("Frame 0 lock from " + ho.Source + " failed - press Meter base, or level / load a preset again.")
+				}
 				if errors.Is(err, camera.ErrNotManual) {
 					c.notManualMsg(err)
 				}
 				return
 			}
 			c.BaseNorm = r.Norm
+			c.lockSrc, c.lockLight = src, lockLight
 			mode := "set over USB"
 			if s.DialMode {
 				mode = "set on the camera dials"
+			}
+			if src != "" {
+				mode += ", " + src + " - ready to scan, no Meter base needed"
+				c.say(fmt.Sprintf("Frame 0 LOCKED from %s: ISO %d, %s, base %.2f FS, R/G/B %.3f / %.3f / %.3f - ready to scan.",
+					ho.Source, e.ISO, camera.ShutterLabel(e.Shutter), r.Max, r.RGB[0], r.RGB[1], r.RGB[2]))
 			}
 			if fixed {
 				c.ExpLbl = fmt.Sprintf("LOCKED  (fixed ISO %d, %s, %s)", e.ISO, camera.ShutterLabel(e.Shutter), mode)
@@ -648,7 +723,7 @@ func (c *Ctl) Meter() {
 				}
 				extra += "\nFilm stock check: not on macOS yet"
 				c.BaseLbl += extra
-				if len(warns) > 0 {
+				if len(warns) > 0 && ho == nil {
 					c.Host.Message("Frame 0", strings.TrimPrefix(extra, "\n"))
 				}
 			} else {

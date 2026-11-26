@@ -23,6 +23,8 @@ type testHost struct {
 	scene    string
 	messages []string
 	confirm  bool
+	file     string
+	clip     string
 }
 
 func newHost() *testHost { return &testHost{q: make(chan func(), 1024), confirm: true} }
@@ -35,6 +37,10 @@ func (h *testHost) Message(title, text string) { h.messages = append(h.messages,
 func (h *testHost) Confirm(title, text string, done func(bool)) {
 	done(h.confirm)
 }
+func (h *testHost) PickFile(title string, save bool, start string, exts []string, done func(string, bool)) {
+	done(h.file, h.file != "")
+}
+func (h *testHost) SetClipboard(text string) { h.clip = text }
 
 func (h *testHost) pump(t *testing.T, what string, d time.Duration, ok func() bool) {
 	t.Helper()
