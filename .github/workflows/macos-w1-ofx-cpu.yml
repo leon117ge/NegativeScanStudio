@@ -3,7 +3,7 @@
 name: macOS arm64 OFX CPU (W1)
 on:
   push:
-    branches: [mac/w1-ofx-cpu-arm64]
+    branches: [mac/w1-ofx-cpu-arm64, mac/integration]
   workflow_dispatch:
 permissions:
   contents: read
