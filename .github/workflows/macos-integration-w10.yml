@@ -1,0 +1,57 @@
+# W10 on the mac/integration tip, in report mode. mac/integration has no push
+# workflow of its own, so this builds its bundle with the branch's own
+# ofx/build-mac.sh (no product source is changed) and then runs the reusable
+# build checks on the artifact of this same run (empty run-id), with the
+# version the build declares as expected-version.
+# Change INTEGRATION_SHA to check a newer tip. Test-only: no release, no tag.
+name: macOS W10 on mac/integration
+on:
+  push:
+    branches: [qa/macos-parity]
+    paths: ['.github/workflows/macos-integration-w10.yml']
+permissions:
+  contents: read
+  actions: read
+env:
+  INTEGRATION_SHA: 0f5ccd978546803634b1afd58fd5646a6d88bd7f
+jobs:
+  build:
+    runs-on: macos-15
+    outputs:
+      version: ${{ steps.build.outputs.version }}
+      sha: ${{ steps.build.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.INTEGRATION_SHA }}
+      - name: Build, sign and package (ofx/build-mac.sh, shipping config)
+        id: build
+        run: |
+          set -o pipefail
+          mkdir -p build
+          bash ofx/build-mac.sh build/mac | tee build/build-mac.log
+          grep -E '^(version|engine)=' build/build-mac.log >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          ls -l build/mac
+      - uses: actions/upload-artifact@v4
+        with:
+          name: integration-ofx-macos-arm64
+          path: build/mac/NegativeScanStudio_OFX_v*_macOS_arm64.zip
+  checks:
+    needs: build
+    uses: ./.github/workflows/macos-build-checks.yml
+    with:
+      artifact-name: integration-ofx-macos-arm64
+      product: ofx
+      expected-version: ${{ needs.build.outputs.version }}
+      source-ref: ${{ needs.build.outputs.sha }}
+      mode: report
+  checks-tentative:
+    needs: build
+    uses: ./.github/workflows/macos-build-checks.yml
+    with:
+      artifact-name: integration-ofx-macos-arm64
+      product: ofx
+      expected-version: '0.90.16'
+      source-ref: ${{ needs.build.outputs.sha }}
+      mode: report
