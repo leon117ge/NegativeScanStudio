@@ -32,7 +32,7 @@ func TestTrichromeAndMonoPages(t *testing.T) {
 		os.MkdirAll(s.dir, 0o755)
 	}
 	u.hdr.Cfg.OutDir = t.TempDir()
-	u.hdr.Start()
+	startHDR(u)
 	l, tr, m := u.hdr.Light, u.hdr.Tri, u.hdr.Mono
 	s.pump("pages ready", func() bool {
 		return strings.Contains(l.LogText(), "Light page ready") && strings.Contains(m.LogText(), "Mono trichrome page ready") && len(l.PortItems) >= 2

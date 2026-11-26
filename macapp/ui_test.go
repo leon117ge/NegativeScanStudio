@@ -65,6 +65,15 @@ func (m *filmCam) Status() (camera.Exposure, float64, error) {
 	return camera.Exposure{ISO: 160, Shutter: 3906}, 4, nil
 }
 
+// startHDR starts the HDR controller as the app does, without the real
+// camera scan: on macOS that is the ImageCaptureCore scan, which needs the
+// main run loop that a test binary doesn't run, so it can block the camera
+// worker for its 5 s timeout (see newLightCtl in hdrctl/light_test.go).
+func startHDR(u *UI) {
+	u.hdr.ListDevices = nil
+	u.hdr.Start()
+}
+
 func isolate(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -139,7 +148,7 @@ func TestShellAndHDRPages(t *testing.T) {
 		os.MkdirAll(s.dir, 0o755)
 	}
 	u.setNav()
-	u.hdr.Start()
+	startHDR(u)
 	s.pump("start", func() bool { return u.hdr.LogSeq > 0 })
 	s.save("01-camera-idle.png")
 
@@ -208,7 +217,7 @@ func TestLightPageLayout(t *testing.T) {
 	u.nav.SetModule(0)
 	u.nav.SetSub(1)
 	u.setNav()
-	u.hdr.Start()
+	startHDR(u)
 	l := u.hdr.Light
 	dir := os.Getenv("NSS_SHOTS")
 	if dir != "" {

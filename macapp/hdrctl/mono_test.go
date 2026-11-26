@@ -195,8 +195,8 @@ func TestMonoSDKMissing(t *testing.T) {
 	}
 	// the simulator connects, previews and disconnects
 	m.ToggleConnect()
-	h.pump(t, "sim connect", 5*time.Second, func() bool { return m.Connected() && !m.ConnBusy() })
-	h.pump(t, "preview", 5*time.Second, func() bool { return m.FrameSeq > 1 })
+	h.pump(t, "sim connect", 30*time.Second, func() bool { return m.Connected() && !m.ConnBusy() })
+	h.pump(t, "preview", 30*time.Second, func() bool { return m.FrameSeq > 1 })
 	if !strings.HasPrefix(m.ViewWhat, "Live  ") || m.Frame == nil {
 		t.Fatal(m.ViewWhat)
 	}
@@ -213,7 +213,7 @@ func TestMonoSDKMissing(t *testing.T) {
 		t.Fatal("Mono preview still running after stopOther")
 	}
 	m.ToggleConnect()
-	h.pump(t, "disconnect", 5*time.Second, func() bool { return !m.Connected() && !m.ConnBusy() && !m.PreviewRunning() })
+	h.pump(t, "disconnect", 30*time.Second, func() bool { return !m.Connected() && !m.ConnBusy() && !m.PreviewRunning() })
 	if len(h.messages) != 0 {
 		t.Fatal(h.messages)
 	}
