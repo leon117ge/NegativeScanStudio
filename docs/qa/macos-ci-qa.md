@@ -81,6 +81,25 @@ python3 ci/qa/parity.py run ./mr-wine.sh wine.json --label wine
 python3 ci/qa/parity.py compare ci/qa/golden/ofx_cpu_windows_x64.json wine.json
 ```
 
+Wine provides its own CRT math, so its output is not bit-identical to real
+Windows. On 2026-11-26 it matched 91.3% of values bit for bit, with a max abs
+error of 4.3e-6, which is within the gate. Commit goldens only from the CI
+Windows job.
+
+## Measured results
+
+Run [45805981985](https://github.com/leon117ge/NegativeScanStudio/actions/runs/45805981985)
+on 2026-11-26 (code from main bd0de46, OFX 0.90.14). It compared 46,116 values:
+
+| Comparison | Max abs | Mean abs | Bit-exact values |
+|---|---|---|---|
+| macOS arm64 clang vs Windows x64 MinGW g++ 14.2 (gate) | 5.7e-6 | 4.5e-8 | 69.8% |
+| macOS arm64 with `-ffp-contract=off` (diagnostic) | 4.3e-6 | 8.6e-9 | 91.1% |
+
+The worst value is in case `density_controls_mode0`, at an output of about 6.1,
+where float32 has a relative error of 1e-6. Both rows are well inside the 1e-4
+gate.
+
 ## 2. Checks on every Mac build (`.github/workflows/macos-build-checks.yml`, `ci/qa/check_mac_build.py`)
 
 `check_mac_build.py ARTIFACT --product ofx|print2383|app [--expect-version X] [--repo .] [--probe probe.json]`
