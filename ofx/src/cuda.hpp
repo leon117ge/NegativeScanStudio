@@ -1,8 +1,11 @@
 #pragma once
 // Minimal public CUDA Driver ABI bindings; no proprietary SDK headers are redistributed.
 // API contracts: https://docs.nvidia.com/cuda/cuda-driver-api/
+#include "platform.hpp"
 #include "prepared.hpp"
+#if NSS_WITH_CUDA
 #include "cuda_source.hpp"
+#endif
 #include <cstdint>
 #include <cstring>
 #include <map>
@@ -10,6 +13,7 @@
 #include <memory>
 #include <vector>
 #include <stdexcept>
+#if NSS_WITH_CUDA
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -117,3 +121,17 @@ struct CudaRender {
 };
 }
 #undef NSS_CUDA_CALL
+#else
+#include <string>
+namespace nss {
+// CUDA compiled out (macOS). Same surface as the real backend; never available.
+struct CudaApi {
+ bool available=false;std::string availability="CUDA: not used on this platform";
+ static CudaApi &get(){static CudaApi api;return api;}
+};
+struct CudaRender {
+ std::vector<float> readPatch(void*,void*,const int*,int,const int*){throw std::runtime_error("CUDA is not built into this plugin");}
+ void enqueue(void*,bool,void*,void*,const int*,const int*,int,int,const int*,bool,const Prepared&){throw std::runtime_error("CUDA is not built into this plugin");}
+};
+}
+#endif

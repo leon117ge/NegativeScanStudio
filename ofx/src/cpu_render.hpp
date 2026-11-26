@@ -1,4 +1,5 @@
 #pragma once
+#include "platform.hpp"
 #include "prepared.hpp"
 #include <thread>
 #include <vector>
@@ -21,7 +22,13 @@ struct CpuJob {
   }
  }
 };
-inline unsigned cpuThreads(int rows){return unsigned(std::max(1,std::min({int(std::thread::hardware_concurrency()),8,std::max(1,rows/32)})));}
+// At least 32 rows per worker, at most NSS_CPU_THREAD_CAP workers (see platform.hpp).
+#if NSS_CPU_THREAD_CAP>0
+inline unsigned cpuThreads(int rows){return unsigned(std::max(1,std::min({int(std::thread::hardware_concurrency()),NSS_CPU_THREAD_CAP,std::max(1,rows/32)})));}
+#else
+// No fixed cap: every hardware thread the OS reports (hardware_concurrency may report 0).
+inline unsigned cpuThreads(int rows){return unsigned(std::max(1,std::min(int(std::thread::hardware_concurrency()),std::max(1,rows/32))));}
+#endif
 inline void parallelCpu(const CpuJob &job,unsigned count){
  count=std::max(1u,count);if(count==1){job.rows(0,1);return;}
  std::vector<std::thread> threads;threads.reserve(count-1);

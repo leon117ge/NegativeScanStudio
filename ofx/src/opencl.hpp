@@ -1,4 +1,6 @@
 #pragma once
+#include "platform.hpp"
+#if NSS_WITH_OPENCL
 #define CL_TARGET_OPENCL_VERSION 120
 #include "../vendor/opencl/CL/cl.h"
 #include "opencl_source.hpp"
@@ -92,3 +94,19 @@ struct CLRender {
  }
 };
 }
+#else
+#include "prepared.hpp"
+#include <stdexcept>
+#include <vector>
+namespace nss {
+// OpenCL compiled out (macOS). Same surface as the real backend; never available.
+struct CLApi {
+ bool available=false;
+ static CLApi &get(){static CLApi api;return api;}
+};
+struct CLRender {
+ std::vector<float> readPatch(void*,void*,const int*,int,const int*){throw std::runtime_error("OpenCL is not built into this plugin");}
+ void enqueue(void*,void*,void*,const int*,const int*,int,int,const int*,bool,const Prepared&){throw std::runtime_error("OpenCL is not built into this plugin");}
+};
+}
+#endif
