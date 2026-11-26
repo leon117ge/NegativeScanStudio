@@ -174,6 +174,42 @@ jobs:
           out/rgblightports -sim info status on all brightness g 33 off b setall 64 1 100 status | tee -a out/rgblightports.txt
           out/rgblightports-nocgo | tee -a out/rgblightports.txt
           ls -l /dev/cu.* /dev/tty.* 2>/dev/null | head -20 || true
+      - name: W6 mactether (ImageCaptureCore), camera sims, CLI sims, real camera list
+        if: ${{ !cancelled() }}
+        run: |
+          set -o pipefail
+          W=w6out
+          mkdir -p "$W"
+          # Camera package with cgo: ICC transport over the simulated X-T3, fuji_test, shutter_test.
+          go test -v -count=1 ./camera 2>&1 | tee "$W/go-test-camera.log"
+          bash ci/macos/test_summary.sh "$W/go-test-camera.log" "camera ${{ matrix.os }} (cgo, ICC sim + fuji/shutter)" | tee -a "$GITHUB_STEP_SUMMARY"
+          go build -o "$W/mactether" ./cmd/mactether
+          file "$W/mactether"
+          otool -L "$W/mactether" | tee "$W/otool.txt"
+          grep -q ImageCaptureCore.framework "$W/otool.txt"
+          if grep -qi libraw "$W/otool.txt"; then echo "LibRaw linked dynamically"; exit 1; fi
+          # Hard 120 s cap per run (macOS has no timeout(1)): a hung ImageCaptureCore wait fails the step.
+          run() { perl -e 'alarm 120; exec @ARGV or die "exec: $!"' "$@"; }
+          (
+            cd "$W"
+            run ./mactether -sim list
+            run ./mactether -sim info
+            run ./mactether -sim -n 20 lv sim_lv.jpg
+            run ./mactether -sim capture sim_capture
+            file sim_lv.jpg sim_capture/*
+            head -c 15 sim_capture/mactether_DSCF0001.RAF | grep -q FUJIFILMCCD-RAW
+            if run ./mactether bogus; then echo "unknown command accepted"; exit 1; fi
+          ) 2>&1 | tee "$W/sim.txt"
+          # Real ImageCaptureCore browse on a runner without a camera: must exit 0 and say so.
+          (cd "$W" && run ./mactether -timeout 8s list) 2>&1 | tee "$W/real_list.txt"
+          grep -Eq 'no cameras found|camera\(s\):' "$W/real_list.txt"
+          # The artifact keeps the binary: the user can run this CI build on his Mac (see docs/MACTETHER.md).
+          (cd "$W" && shasum -a 256 $(find . -type f ! -name SHA256SUMS.txt | sort) > SHA256SUMS.txt)
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: w6-mactether-sim-${{ matrix.os }}
+          path: w6out
       - uses: actions/cache@v4
         if: ${{ !cancelled() }}
         with:
