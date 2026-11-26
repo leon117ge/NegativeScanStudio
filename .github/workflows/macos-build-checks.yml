@@ -22,6 +22,9 @@
 # The docs/changelog check reads the caller's commit (or source-ref). The check
 # scripts come from qa-ref (default qa/macos-parity), so a build branch does
 # not need its own copy of ci/qa/.
+# The artifact comes from inputs.run-id, or from the calling run when it is
+# empty. Under workflow_call, github.event_name, github.ref and github.run_id
+# are the caller's, so nothing here looks at event_name.
 # Test-only: no release, no tag, no secrets beyond the read-only GITHUB_TOKEN.
 name: macOS build checks
 on:
@@ -91,6 +94,12 @@ jobs:
         with:
           name: ${{ env.ARTIFACT }}
           path: mac-artifact
+      - name: Unpack zipped packages (for the probe and codesign)
+        run: |
+          mkdir -p mac-unpacked
+          find mac-artifact -type f -name '*.zip' | while read -r z; do
+            echo "unpack: $z"; ditto -x -k "$z" "mac-unpacked/$(basename "$z" .zip)"
+          done
       - name: Decide mode
         id: mode
         run: |
@@ -102,28 +111,31 @@ jobs:
             esac
           fi
           case "$mode" in enforce|report) ;; *) echo "::error::mode must be auto, report or enforce"; exit 1 ;; esac
-          echo "ref $GITHUB_REF -> $mode mode"
+          echo "ref $GITHUB_REF, artifact from run ${RUN_ID:-$GITHUB_RUN_ID (this run)} -> $mode mode"
           echo "mode=$mode" >> "$GITHUB_OUTPUT"
       - name: OFX version probe (OfxGetPlugin)
         if: env.PRODUCT != 'app'
         run: |
           clang -arch arm64 -Iqa/ofx/vendor/openfx/include qa/ci/qa/ofx_version_probe.c -o probe
           : > probe.json
-          find mac-artifact -path '*Contents/MacOS/*' -type f -name '*.ofx' | while read -r bin; do
+          find mac-artifact mac-unpacked -path '*Contents/MacOS/*' -type f -name '*.ofx' | while read -r bin; do
             echo "probe: $bin"; ./probe "$bin" | tee -a probe.json
           done
           head -1 probe.json > probe1.json
       - name: codesign and architecture (macOS tools)
         run: |
-          find mac-artifact -name '*.ofx.bundle' -o -name '*.app' | while read -r b; do
+          find mac-artifact mac-unpacked \( -name '*.ofx.bundle' -o -name '*.app' \) | while read -r b; do
             echo "== $b"
             codesign --verify --deep --strict --verbose=2 "$b" 2>&1 || echo "::warning::codesign --verify failed for $b"
             codesign -dv --verbose=2 "$b" 2>&1 | grep -E 'Identifier|Signature|TeamIdentifier|flags' || true
           done
-          find mac-artifact -type f | while read -r f; do
-            if file "$f" | grep -q Mach-O; then file "$f"; lipo -archs "$f"; fi
+          find mac-artifact mac-unpacked -type f | while read -r f; do
+            if file "$f" | grep -q Mach-O; then
+              file "$f"; lipo -archs "$f"
+              vtool -show-build "$f" 2>/dev/null || otool -l "$f" | grep -A4 LC_BUILD_VERSION || true
+            fi
           done
-      - name: CJK, version, layout and docs checks
+      - name: CJK, version, layout, minimum macOS, test-hook and docs checks
         id: check
         run: |
           echo "docs from $(git -C src rev-parse HEAD)"

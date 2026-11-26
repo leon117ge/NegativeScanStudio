@@ -5,7 +5,7 @@ name: macOS build checks (self-test)
 on:
   push:
     branches: [qa/macos-parity]
-    paths: ['ci/qa/check_mac_build.py', 'ci/qa/ofx_version_probe.c', '.github/workflows/macos-build-checks*.yml']
+    paths: ['ci/qa/check_mac_build.py', 'ci/qa/test_check_mac_build.py', 'ci/qa/ofx_version_probe.c', '.github/workflows/macos-build-checks*.yml']
 permissions:
   contents: read
   actions: read
@@ -15,11 +15,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # W2 Metal build, feat/metal-render daf4d32
-          - {run: '45807551550', artifact: NegativeScanStudio-ofx-macos-arm64-metal-macos-15, runner: macos-15, expected: ''}
-          - {run: '45807551550', artifact: NegativeScanStudio-ofx-macos-arm64-metal-macos-26, runner: macos-26, expected: ''}
+          # W2 Metal build, feat/metal-render 39f2018
+          - {run: '45811439394', artifact: NegativeScanStudio-ofx-macos-arm64-metal-macos-15, runner: macos-15, expected: ''}
+          - {run: '45811439394', artifact: NegativeScanStudio-ofx-macos-arm64-metal-macos-26, runner: macos-26, expected: ''}
           # same artifact against the tentative next plugin number (docs/examples only)
-          - {run: '45807551550', artifact: NegativeScanStudio-ofx-macos-arm64-metal-macos-15, runner: macos-15, expected: '0.90.16'}
+          - {run: '45811439394', artifact: NegativeScanStudio-ofx-macos-arm64-metal-macos-15, runner: macos-15, expected: '0.90.16'}
     uses: ./.github/workflows/macos-build-checks.yml
     with:
       artifact-name: ${{ matrix.artifact }}
@@ -27,5 +27,30 @@ jobs:
       product: ofx
       expected-version: ${{ matrix.expected }}
       runner: ${{ matrix.runner }}
-      source-ref: daf4d326c8f4fbfc9e15a28b35f4993abf047209   # the commit the W2 artifacts were built from
+      source-ref: 39f2018c40b5a91493768340c047ce6782555a1c   # the commit the W2 artifacts were built from
+      mode: report
+
+  # Same-run path: an artifact uploaded earlier in this run, called with an
+  # empty run-id (as a build workflow does). Uses the W1 release zip of run
+  # 45811682780, re-uploaded here under a new name.
+  same-run-upload:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: NegativeScanStudio-ofx-macos-arm64
+          path: w1
+          run-id: '45811682780'
+          github-token: ${{ github.token }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: selftest-same-run-ofx-macos-arm64
+          path: w1/*.zip
+  same-run:
+    needs: same-run-upload
+    uses: ./.github/workflows/macos-build-checks.yml
+    with:
+      artifact-name: selftest-same-run-ofx-macos-arm64
+      product: ofx
+      source-ref: 3772ded2aa3075341d898dacff2d0096d5843d32   # mac/w1-ofx-cpu-arm64, the commit that built it
       mode: report

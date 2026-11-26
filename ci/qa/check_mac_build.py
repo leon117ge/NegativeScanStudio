@@ -21,7 +21,12 @@ Checks
      CFBundleExecutable in Contents/MacOS; every Mach-O must have an arm64
      slice and a code signature (ad-hoc is reported as WARN until a
      Developer ID exists, PLAN.md Q1; unsigned is FAIL).
-  4. Docs: with --repo, the changelog for the product has an entry headed with
+  4. Minimum macOS: every Mach-O slice's minos (LC_BUILD_VERSION, or
+     LC_VERSION_MIN_MACOSX) and Info.plist LSMinimumSystemVersion must be at
+     least --min-macos (default 13.0). A missing LSMinimumSystemVersion is WARN.
+  5. Test hooks: no test-only strings (for example "forced by test" from
+     -DNSS_TEST_HOOKS builds) in any shipped binary. Text logs are not scanned.
+  6. Docs: with --repo, the changelog for the product has an entry headed with
      the version and mentions macOS; the README has macOS install notes.
 
 Exit code 0 = all checks pass, 1 = at least one FAIL (with --mode enforce,
@@ -61,6 +66,21 @@ LOOSE_SECTIONS = {"__const", "__rodata", "__data", "__noptrdata", "__gosymtab", 
 MH_MAGIC_64 = 0xFEEDFACF
 FAT_MAGIC = 0xCAFEBABE
 LC_SEGMENT_64 = 0x19
+LC_VERSION_MIN_MACOSX = 0x24
+LC_BUILD_VERSION = 0x32
+PLATFORM_MACOS = 1
+# Strings that only test builds may carry (metal_render.mm under NSS_TEST_HOOKS).
+TEST_HOOKS = re.compile(rb"forced by test|NSS_TEST_HOOKS|kMetalFault[A-Za-z]*")
+MIN_MACOS = (13, 0)
+BUILD_CHECKS = True  # False with --cjk-only (source folders): skip minimum-macOS checks
+
+
+def vtuple(text):
+    return tuple(int(x) for x in re.findall(r"\d+", str(text))[:3]) or (0,)
+
+
+def vtext(t):
+    return ".".join(str(x) for x in t)
 
 
 class Report:
@@ -139,6 +159,23 @@ def macho_signature(sl):
     return "unsigned"
 
 
+def macho_minos(sl):
+    """Return (major, minor, patch) of the minimum macOS for a thin Mach-O, or None."""
+    ncmds = struct.unpack("<I", sl[16:20])[0]
+    off = 32
+    for _ in range(ncmds):
+        cmd, size = struct.unpack("<II", sl[off:off + 8])
+        if cmd == LC_BUILD_VERSION:
+            platform, minos = struct.unpack("<II", sl[off + 8:off + 16])
+            if platform == PLATFORM_MACOS:
+                return (minos >> 16, (minos >> 8) & 0xFF, minos & 0xFF)
+        elif cmd == LC_VERSION_MIN_MACOSX:
+            v = struct.unpack("<I", sl[off + 8:off + 12])[0]
+            return (v >> 16, (v >> 8) & 0xFF, v & 0xFF)
+        off += size
+    return None
+
+
 def utf8_runs(buf, min_cjk):
     """Printable UTF-8 runs that contain at least min_cjk consecutive CJK chars."""
     hits = []
@@ -182,6 +219,15 @@ def scan_macho(path, data, rep, rel):
         rep.add("FAIL", "binary", f"{rel}: no arm64 slice (cputypes {[hex(c) for c in cpus]})")
     else:
         rep.add("PASS", "binary", f"{rel}: arm64 slice present")
+    for x in slices if BUILD_CHECKS else []:
+        cpu = struct.unpack("<i", x[4:8])[0] & 0xFFFFFFFF
+        mo = macho_minos(x)
+        if mo is None:
+            rep.add("FAIL", "minos", f"{rel} (cputype 0x{cpu:x}): no LC_BUILD_VERSION / LC_VERSION_MIN_MACOSX")
+        elif mo[:2] < MIN_MACOS:
+            rep.add("FAIL", "minos", f"{rel} (cputype 0x{cpu:x}): minos {vtext(mo)} is below {vtext(MIN_MACOS)}")
+        else:
+            rep.add("PASS", "minos", f"{rel} (cputype 0x{cpu:x}): minos {vtext(mo)} (at least {vtext(MIN_MACOS)})")
     for x in slices:
         sig = macho_signature(x)
         if sig == "unsigned":
@@ -247,6 +293,12 @@ def collect(root, rep, versions, args):
                 data = f.read()
             is_text = not (b"\0" in data[:8192] or data.startswith(b"bplist00"))
             if not is_text:
+                hooks = sorted(set(TEST_HOOKS.findall(data)))
+                if hooks:
+                    rep.add("FAIL", "testhooks", f"{rel}: test-only strings in a shipped binary: "
+                            + ", ".join(h.decode("ascii", "replace") for h in hooks))
+                elif not args.cjk_only:
+                    rep.add("PASS", "testhooks", f"{rel}: no test-hook strings")
                 for rx, key in ((OFX_LABEL, "ofx label in binary"), (P2383_LABEL, "2383 label in binary"),
                                 (APP_LABEL, "app version in binary")):
                     for m in sorted(set(rx.findall(data))):
@@ -269,6 +321,14 @@ def collect(root, rep, versions, args):
                             versions.append((f"{k} ({rel})", str(pl[k])))
                         else:
                             rep.add("FAIL", "version", f"{rel}: {k} missing")
+                    if args.cjk_only:
+                        pass
+                    elif "LSMinimumSystemVersion" not in pl:
+                        rep.add("WARN", "minos", f"{rel}: LSMinimumSystemVersion missing")
+                    elif vtuple(pl["LSMinimumSystemVersion"])[:2] < MIN_MACOS:
+                        rep.add("FAIL", "minos", f"{rel}: LSMinimumSystemVersion {pl['LSMinimumSystemVersion']} is below {vtext(MIN_MACOS)}")
+                    else:
+                        rep.add("PASS", "minos", f"{rel}: LSMinimumSystemVersion {pl['LSMinimumSystemVersion']}")
                     if CJK.search(str(pl.get("CFBundleDevelopmentRegion", ""))):
                         rep.add("FAIL", "cjk", f"{rel}: development region is not English")
                 continue
@@ -373,16 +433,29 @@ def main():
     ap.add_argument("--repo", help="repository root for the docs/changelog check")
     ap.add_argument("--probe", help="JSON from ofx_version_probe (OfxGetPlugin major/minor)")
     ap.add_argument("--report", help="write a JSON report here")
+    ap.add_argument("--min-macos", default="13.0",
+                    help="lowest allowed minos and LSMinimumSystemVersion (default 13.0)")
     ap.add_argument("--mode", choices=["enforce", "report"], default="enforce",
                     help="enforce: exit 1 on FAIL (release builds); report: print the verdict, exit 0")
     args = ap.parse_args()
     if not args.cjk_only and not args.product:
         ap.error("--product is required unless --cjk-only")
+    global MIN_MACOS, BUILD_CHECKS
+    MIN_MACOS = (vtuple(args.min_macos) + (0,))[:2]
+    BUILD_CHECKS = not args.cjk_only
     rep = Report()
     versions = []
     work = tempfile.mkdtemp(prefix="nss-w10-")
+    arts = []
+    for art in args.artifact:
+        # A folder that holds zipped packages (a CI artifact that carries the
+        # release zip): check the zips themselves, so the version in the file
+        # name counts and the bundle inside is unpacked.
+        zips = sorted(os.path.join(d, f) for d, _, fs in os.walk(art) for f in fs
+                      if f.lower().endswith(".zip")) if os.path.isdir(art) and not args.cjk_only else []
+        arts += zips or [art]
     try:
-        for art in args.artifact:
+        for art in arts:
             base = os.path.basename(art.rstrip("/"))
             if CJK.search(base):
                 rep.add("FAIL", "cjk", f"artifact name with CJK: {base!r}")
