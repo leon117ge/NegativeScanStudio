@@ -261,6 +261,9 @@ func TestDarwinClientOverPTY(t *testing.T) {
 	if on, v := d.Lights(); on != [3]bool{true, false, true} || v != [3]int{64, 1, 100} {
 		t.Fatalf("device %v %v", on, v)
 	}
+	if err := c.SetSpeed(2); err != nil { // custom timing applies in speed 2
+		t.Fatal(err)
+	}
 	if err := c.SetTiming(Timing{500, 70, 120, 800}); err != nil {
 		t.Fatal(err)
 	}

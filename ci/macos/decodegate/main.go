@@ -13,11 +13,14 @@ import (
 	"golang.org/x/image/tiff"
 )
 
-// Tolerance in 16-bit code values. Integer paths are expected to match
-// exactly; float rounding in the libm may move a value by a code or two.
+// Tolerance. The vendored Linux and Windows LibRaw builds already differ
+// from each other on a few isolated X-Trans pixels (173 of 26 M on the
+// sample: float rounding flips an interpolation or highlight decision, so
+// the change at such a pixel can be large). The gate is therefore on how
+// many samples differ and on the mean, not on the largest difference.
 const (
-	maxAbsTol  = 4
-	meanAbsTol = 0.01
+	maxDifferFrac = 1e-4 // at most 0.01 % of samples may differ
+	meanAbsTol    = 0.01 // mean absolute difference in 16-bit code values
 )
 
 type stats struct {
@@ -93,16 +96,16 @@ func main() {
 		verdict := "identical"
 		if s.differ > 0 {
 			verdict = "within tolerance"
-			if s.max > maxAbsTol || s.mean > meanAbsTol {
+			if float64(s.differ)/float64(s.samples) > maxDifferFrac || s.mean > meanAbsTol {
 				verdict = "OUT OF TOLERANCE"
 				bad = true
 			}
 		}
-		fmt.Printf("darwin vs %s: %s (max abs %d, mean abs %.6f, %d of %d samples differ)\n",
-			p, verdict, s.max, s.mean, s.differ, s.samples)
+		fmt.Printf("darwin vs %s: %s (max abs %d, mean abs %.6f, %d of %d samples differ = %.5f%%)\n",
+			p, verdict, s.max, s.mean, s.differ, s.samples, 100*float64(s.differ)/float64(s.samples))
 	}
 	if bad {
-		fail("darwin/arm64 decode differs beyond max %d / mean %.3f code values", maxAbsTol, meanAbsTol)
+		fail("darwin/arm64 decode differs on more than %.3f%% of samples or by a mean above %.3f code values", 100*maxDifferFrac, meanAbsTol)
 	}
 	fmt.Println("decode gate: PASS")
 }

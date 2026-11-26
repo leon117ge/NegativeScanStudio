@@ -91,6 +91,17 @@ The app uses `rsrc_windows_amd64.syso` and `third_party/libraw/lib/windows_amd64
 ./ofx/build.sh /absolute/output/directory
 ```
 
+macOS core packages (Apple Silicon, work in progress; no Mac app yet). On a Mac with Xcode command-line tools and Go:
+
+```sh
+bash ci/macos/build_libraw.sh          # static LibRaw 0.22.1 into third_party/libraw/lib/darwin_arm64
+go test ./rawconv ./hdrscan ./rgblight
+go run ./cmd/rgblightports list        # serial ports; the RGB Light Air shows as /dev/cu.usbmodem... (RGB Light Air, USB 0483:5740)
+go run ./cmd/rgblightports info status # talks to the first light found (-port /dev/cu.usbmodemXXXX to pick one)
+```
+
+The RGB Light Air needs no driver on macOS (built-in CDC-ACM). Close other programs that hold the port; it is opened exclusively.
+
 Plugin dependencies, tests (`NSS_TEST_OPENCL=1`), and simulators are documented in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) and [ofx/README.md](ofx/README.md). Building either product does not require rebuilding the other.
 
 ## License

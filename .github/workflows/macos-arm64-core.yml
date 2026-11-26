@@ -171,6 +171,7 @@ jobs:
           echo "rawtest links (LibRaw must be static):"; otool -L out/rawtest
           if otool -L out/rawtest | grep -qi libraw; then echo "LibRaw linked dynamically"; exit 1; fi
           out/rgblightports | tee out/rgblightports.txt
+          out/rgblightports -sim info status on all brightness g 33 off b setall 64 1 100 status | tee -a out/rgblightports.txt
           out/rgblightports-nocgo | tee -a out/rgblightports.txt
           ls -l /dev/cu.* /dev/tty.* 2>/dev/null | head -20 || true
       - uses: actions/cache@v4

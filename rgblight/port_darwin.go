@@ -97,6 +97,15 @@ func openPath(path string) (*unixPort, error) {
 	if err := unix.IoctlSetInt(fd, unix.TIOCEXCL, 0); err != nil {
 		return nil, fmt.Errorf("%s: TIOCEXCL: %w", path, err)
 	}
+	// TIOCEXCL does not stop root, and macOS does not enforce it on every
+	// tty type; an advisory lock (as pyserial and others use) also stops a
+	// second open from this or another cooperating program.
+	if err := unix.Flock(fd, unix.LOCK_EX|unix.LOCK_NB); err != nil {
+		if err == unix.EWOULDBLOCK {
+			return nil, fmt.Errorf("open %s: port is in use by another program", path)
+		}
+		return nil, fmt.Errorf("%s: flock: %w", path, err)
+	}
 	t, err := unix.IoctlGetTermios(fd, unix.TIOCGETA)
 	if err != nil {
 		return nil, fmt.Errorf("%s: get termios: %w", path, err)
