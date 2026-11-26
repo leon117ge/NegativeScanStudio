@@ -47,7 +47,7 @@ var pageIDs = [][]Page{
 
 // Ported lists the pages that are real in the Gio UI; the others show a
 // placeholder until a later increment ports them.
-var Ported = map[Page]bool{PageCamera: true, PageLight: true, PageWhite: true, PageCrop: true, PageMerge: true, PageHairs: true, PageBatch: true}
+var Ported = map[Page]bool{PageCamera: true, PageLight: true, PageWhite: true, PageTri: true, PageMono: true, PageCrop: true, PageMerge: true, PageHairs: true, PageBatch: true}
 
 // AllPages is every leaf page in Windows tab order.
 func AllPages() []Page {

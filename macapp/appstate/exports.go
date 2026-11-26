@@ -41,7 +41,13 @@ var (
 	TargetVals       = targetVals
 	FixedShutterVals = fixedShutterVals
 	FixedShutterTip  = fixedShutterTip
+	BracketEVs       = bracketEVs
+	// Mono trichrome HDR bracket presets (monoopts_ui.go).
+	MonoBracketEVs   = monoBracketEVs
+	MonoBracketItems = monoBracketItems
 )
+
+const MonoBracketDefault = monoBracketDefault
 
 // FixedShutterIndexOf is the base shutter selection for a stored shutter (-1 = none).
 func FixedShutterIndexOf(us uint32) int { return fixedShutterIndexOf(us) }
