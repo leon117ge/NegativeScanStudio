@@ -3,6 +3,11 @@
 // Covers the Metal property, render routing, no-wait encode, CPU fallback and withdrawal on
 // every forced failure, async command-buffer errors, private buffers and the picker.
 // NOT Metal execution: metal_plugin_test.cpp runs the real Metal path on macOS CI.
+// The Metal contract is a Metal build: Render engine reads 'Auto (Metal)|CPU' when the macOS UI is on
+// (ofx/src/platform.hpp). Set here so the mock build needs no -DNSS_METAL (which would link metal_render.mm).
+#ifndef NSS_RENDER_AUTO_METAL
+#define NSS_RENDER_AUTO_METAL 1
+#endif
 #define main nss_original_host_test
 #include "host_test.cpp"
 #undef main

@@ -20,16 +20,7 @@
 #include <mutex>
 #include <sstream>
 
-// macOS shows the Rendering group (Render engine + Show render engine) so Metal and CPU can be
-// compared in the host. Windows/Linux keep the 0.90.14 hidden controls and labels exactly.
-// Choice indices are shared by every platform: 0 = Auto, 1 = CPU (saved projects keep meaning).
-#ifndef NSS_MAC_RENDER_UI
-#if defined(__APPLE__)
-#define NSS_MAC_RENDER_UI 1
-#else
-#define NSS_MAC_RENDER_UI 0
-#endif
-#endif
+// Rendering controls (NSS_MAC_RENDER_UI, labels, hints): ofx/src/platform.hpp.
 namespace {
 OfxHost *host=nullptr;
 OfxPropertySuiteV1 *prop=nullptr;
@@ -204,12 +195,12 @@ OfxStatus describeContext(OfxImageEffectHandle e) {
  hideParam(numberDef(s,"pick_radius","Sample radius (pixels)",3,0,32,"graypick"));
  hideParam(choiceDef(s,"stage","Pipeline output","Density In|Positive Out",1));
  if(NSS_MAC_RENDER_UI){
-  auto device=choiceDef(s,"render_device","Render engine","Auto (Metal)|CPU",0,"render");
-  prop->propSetString(device,kOfxParamPropHint,0,"Auto renders with Metal when the host offers it, otherwise on the CPU. CPU always renders on the CPU (for Metal vs CPU checks).");
+  auto device=choiceDef(s,"render_device","Render engine",NSS_RENDER_DEVICE_OPTIONS,0,"render");
+  prop->propSetString(device,kOfxParamPropHint,0,NSS_RENDER_DEVICE_HINT);
   auto info=define(s,"render_info","Show render engine",kOfxParamTypePushButton,"render");
-  prop->propSetString(info,kOfxParamPropHint,0,"Shows the engine used by the last render (Metal with the GPU name, or CPU) and why.");
+  prop->propSetString(info,kOfxParamPropHint,0,NSS_RENDER_INFO_HINT);
  }else{
-  hideParam(choiceDef(s,"render_device","Render engine","Auto (CUDA/OpenCL if offered)|CPU",0,"render"));
+  hideParam(choiceDef(s,"render_device","Render engine",NSS_RENDER_DEVICE_OPTIONS_HIDDEN,0,"render"));
   hideParam(define(s,"render_info","Show render engine",kOfxParamTypePushButton,"render"));
  }
  hideParam(boolDef(s,"auto_metadata","Auto-read Resolve 20 source metadata",1,"balance"));

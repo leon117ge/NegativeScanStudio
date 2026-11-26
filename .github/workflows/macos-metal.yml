@@ -73,11 +73,13 @@ jobs:
           build/metal/metal_contract
       - name: Rendering controls per platform (macOS visible, Windows/Linux variant unchanged)
         run: |
-          clang++ $CXXFLAGS_COMMON ofx/tests/param_dump.cpp -o build/metal/param_dump_mac
+          clang++ $CXXFLAGS_COMMON -DNSS_RENDER_AUTO_METAL=1 ofx/tests/param_dump.cpp -o build/metal/param_dump_mac
+          clang++ $CXXFLAGS_COMMON -DNSS_RENDER_AUTO_METAL=0 ofx/tests/param_dump.cpp -o build/metal/param_dump_mac_cpu
           clang++ $CXXFLAGS_COMMON -DNSS_MAC_RENDER_UI=0 ofx/tests/param_dump.cpp -o build/metal/param_dump_win_linux
           build/metal/param_dump_mac > build/metal/params_mac.txt
+          build/metal/param_dump_mac_cpu > build/metal/params_mac_cpu.txt
           build/metal/param_dump_win_linux > build/metal/params_win_linux.txt
-          python3 ofx/tests/check_param_defs.py build/metal/params_win_linux.txt build/metal/params_mac.txt
+          python3 ofx/tests/check_param_defs.py build/metal/params_win_linux.txt build/metal/params_mac.txt build/metal/params_mac_cpu.txt
       - name: Real Metal parity and forced-failure fallback
         env:
           NSS_METAL_REQUIRE_DEVICE: '1'

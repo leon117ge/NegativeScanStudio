@@ -17,6 +17,12 @@ Test builds only, not released yet.
   macOS (`NSS_WITH_CUDA`, `NSS_WITH_OPENCL`); the CPU worker count has no fixed cap on
   macOS (`NSS_CPU_THREAD_CAP` 0 = every hardware thread the OS reports). Windows keeps
   CUDA, OpenCL and the cap of 8; its preprocessed source is identical to main.
+- Rendering controls (one mechanism, `ofx/src/platform.hpp`): choice indices are fixed on
+  every build, 0 = Auto, 1 = CPU, default 0. Windows/Linux: hidden, `Auto (CUDA/OpenCL if
+  offered) | CPU` (0.90.14). macOS with Metal: visible, `Auto (Metal) | CPU`. macOS CPU-only
+  (`NSS_METAL=0`): visible, `Auto | CPU` (both render on the CPU; `Show render engine`
+  still reports the engine). `NSS_MAC_RENDER_UI` and `NSS_RENDER_AUTO_METAL` let tests emulate
+  each build on any OS (`ofx/tests/param_dump.cpp`, `check_param_defs.py`).
 - The overlay loads GL from `/System/Library/Frameworks/OpenGL.framework/OpenGL` and
   checks the host context with `CGLGetCurrentContext`.
 - Math flags match the Windows build; `-ffp-contract=off` keeps `a*b+c` as two rounded
