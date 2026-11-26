@@ -5,6 +5,17 @@ Quit Resolve, back up your project, and remove the previous bundle. Copy the ent
 
 Auto uses CUDA or OpenCL buffers when offered by the host. CPU fallback is available. No extra CUDA/OpenCL DLL is bundled or required for CPU use. Keep the whole bundle together. Scanning app binaries are unchanged.
 
+## macOS (Apple Silicon) installation
+
+macOS test builds come as `NegativeScanStudio_OFX_v<version>_macOS_arm64.zip` for Apple Silicon Macs (M1 and later, macOS 13 or later). The Windows instructions above do not apply on a Mac.
+
+1. Quit Resolve and unzip the download. It contains `NegativeScanStudio.ofx.bundle`, `Install.command` and `README-macOS.txt`.
+2. Right-click `Install.command` and choose Open (or run `bash Install.command` in Terminal), then enter your administrator password.
+3. The installer copies the bundle to `/Library/OFX/Plugins/NegativeScanStudio.ofx.bundle`, clears the download quarantine flag (`xattr -dr com.apple.quarantine`; without it Resolve skips the plugin silently) and signs it ad hoc for this Mac.
+4. Restart Resolve and find the plugin under OpenFX > NegativeScan Studio.
+
+To install by hand instead: copy the bundle to `/Library/OFX/Plugins/`, then run `sudo xattr -dr com.apple.quarantine /Library/OFX/Plugins/NegativeScanStudio.ofx.bundle`. To remove it: `sudo rm -rf /Library/OFX/Plugins/NegativeScanStudio.ofx.bundle`. On macOS, CUDA and OpenCL are not used; the CPU path uses every core and gives the same output as Windows within float rounding. If Resolve runs under Rosetta it cannot load this arm64 plugin. If the plugin does not appear, check `~/Library/Application Support/Blackmagic Design/DaVinci Resolve/logs/ResolveDebug.txt`.
+
 ## Controls
 All UI labels, statuses, and prompts are in English. The inversion math and all earlier numerical defaults are unchanged from 0.90.6; 0.90.12 added the optional Tone stage (on by default) after the inversion; 0.90.13 added highlight/shadow desaturation and highlight cream; 0.90.14 moves those into a separate Tone Color group with switches and its own presets, and makes the cream stronger.
 

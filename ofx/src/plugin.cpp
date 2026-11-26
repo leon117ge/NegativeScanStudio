@@ -618,10 +618,14 @@ OfxPlugin plugin={kOfxImageEffectPluginApi,1,"org.negativescanstudio.complete",0
 extern "C" {
 #ifdef _WIN32
 __declspec(dllexport)
+#elif defined(__GNUC__)
+__attribute__((visibility("default")))
 #endif
 int OfxGetNumberOfPlugins(){return 1;}
 #ifdef _WIN32
 __declspec(dllexport)
+#elif defined(__GNUC__)
+__attribute__((visibility("default")))
 #endif
 OfxPlugin *OfxGetPlugin(int i){return i==0?&plugin:nullptr;}
 }

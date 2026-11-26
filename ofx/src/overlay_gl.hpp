@@ -27,6 +27,10 @@ struct OverlayGL {
 #ifdef _WIN32
   auto module=LoadLibraryExW(L"opengl32.dll",nullptr,LOAD_LIBRARY_SEARCH_SYSTEM32);
   auto symbol=[&](const char *name){return module?GetProcAddress(module,name):nullptr;};
+#elif defined(__APPLE__)
+  // System OpenGL.framework; the host makes its GL context current before Draw.
+  auto module=dlopen("/System/Library/Frameworks/OpenGL.framework/OpenGL",RTLD_NOW|RTLD_LOCAL);
+  auto symbol=[&](const char *name){return module?dlsym(module,name):nullptr;};
 #else
   auto module=dlopen("libGL.so.1",RTLD_NOW|RTLD_LOCAL);
   auto symbol=[&](const char *name){return module?dlsym(module,name):nullptr;};
@@ -35,6 +39,8 @@ struct OverlayGL {
   LOAD(pushAttrib,"glPushAttrib");LOAD(popAttrib,"glPopAttrib");LOAD(disable,"glDisable");LOAD(lineWidth,"glLineWidth");LOAD(color,"glColor3f");LOAD(begin,"glBegin");LOAD(vertex,"glVertex2d");LOAD(end,"glEnd");
 #ifdef _WIN32
   LOAD(currentContext,"wglGetCurrentContext");
+#elif defined(__APPLE__)
+  LOAD(currentContext,"CGLGetCurrentContext");
 #else
   LOAD(currentContext,"glXGetCurrentContext");
 #endif

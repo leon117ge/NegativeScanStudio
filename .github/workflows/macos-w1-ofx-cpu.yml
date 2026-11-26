@@ -1,0 +1,194 @@
+# W1: NegativeScan Studio OFX plugin, macOS Apple Silicon CPU build, installer and
+# Windows parity. Test builds only, not a release.
+name: macOS arm64 OFX CPU (W1)
+on:
+  push:
+    branches: [mac/w1-ofx-cpu-arm64]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+env:
+  # Windows release toolchain flags (ofx/build.sh) and macOS flags (ofx/build-mac.sh).
+  WIN_FLAGS: -std=c++17 -O3 -fno-math-errno -fno-trapping-math -static -static-libgcc -static-libstdc++
+  MAC_FLAGS: -arch arm64 -mmacosx-version-min=13.0 -std=c++17 -O3 -fno-math-errno -fno-trapping-math -ffp-contract=off
+  INC: -Iofx/vendor/openfx/include -Iofx/vendor/opencl
+  # The Windows translation unit must equal this ref's (W1 changes nothing on Windows).
+  # Use origin/main for W1 alone; after merging W2 (Metal), use origin/feat/metal-render.
+  WIN_BASE_REF: origin/main
+jobs:
+  linux-windows-build:
+    name: Windows build unchanged + fixtures (Linux, MinGW)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: MinGW-w64 (Windows release toolchain)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq g++-mingw-w64-x86-64-posix >/dev/null && x86_64-w64-mingw32-g++-posix --version | head -n 1
+      - name: Windows translation unit is unchanged versus WIN_BASE_REF
+        run: |
+          BASE=$(git merge-base HEAD "$WIN_BASE_REF")
+          echo "Comparing against $WIN_BASE_REF at $BASE"
+          git worktree add -q ../base "$BASE"
+          for d in ../base .; do (cd "$d" && python3 ofx/tools/generate.py >/dev/null && python3 ofx/tools/cuda_source.py >/dev/null); done
+          (cd ../base && x86_64-w64-mingw32-g++-posix -std=c++17 -E -P $INC ofx/src/plugin.cpp) | grep -v '^[[:space:]]*$' > /tmp/win_base.ii
+          x86_64-w64-mingw32-g++-posix -std=c++17 -E -P $INC ofx/src/plugin.cpp | grep -v '^[[:space:]]*$' > /tmp/win_head.ii
+          if cmp -s /tmp/win_base.ii /tmp/win_head.ii; then echo "PASS: Windows preprocessed plugin.cpp is identical to $WIN_BASE_REF (blank lines ignored)"; else diff /tmp/win_base.ii /tmp/win_head.ii | head -n 80; echo "FAIL: Windows source changed"; exit 1; fi
+      - name: Windows plugin still builds (ofx/build.sh)
+        run: CXX=x86_64-w64-mingw32-g++-posix bash ofx/build.sh build/win && ls -l build/win/NegativeScanStudio.ofx.bundle/Contents/Win64
+      - name: Windows CPU parity renderer (release flags)
+        run: |
+          mkdir -p build/parity
+          x86_64-w64-mingw32-g++-posix $WIN_FLAGS $INC ofx/tests/cpu_parity.cpp -o build/parity/cpu_parity.exe
+      - name: Metadata fixtures (Go, Linux LibRaw)
+        run: |
+          mkdir -p build/fixtures
+          NSS_META_FIXTURE="$PWD/build/fixtures/metadata-fixture.tiff" go test ./hdrscan -run TestScanTIFFMetadataAndHairPreservation -count=1
+          NSS_LEVELING_FIXTURE="$PWD/build/fixtures/leveling" go test ./hdrscan -run TestScanMetadataUsesLastLevelingNotScene -count=1
+          python3 ofx/tests/make_plain_tiff.py build/fixtures/plain-old-scan.tiff
+          ls -l build/fixtures
+      - uses: actions/upload-artifact@v4
+        with:
+          name: w1-windows-parity-exe
+          path: build/parity/cpu_parity.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: w1-fixtures
+          path: build/fixtures
+  windows-reference:
+    name: Windows x64 CPU reference renders
+    needs: linux-windows-build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: w1-windows-parity-exe
+          path: parity
+      - name: Render reference variants on Windows
+        shell: bash
+        run: |
+          parity/cpu_parity.exe reference-windows
+          sha256sum reference-windows/*.f32
+      - uses: actions/upload-artifact@v4
+        with:
+          name: w1-windows-reference
+          path: reference-windows
+  macos-arm64:
+    name: macOS arm64 bundle, tests, parity, installer (${{ matrix.os }})
+    needs: [linux-windows-build, windows-reference]
+    strategy:
+      fail-fast: false
+      matrix:
+        # macos-14 is retired. The artifact comes from macos-15; macos-26 runs the same tests.
+        os: [macos-15, macos-26]
+    runs-on: ${{ matrix.os }}
+    outputs:
+      version: ${{ steps.build.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: uname -m; sw_vers; xcodebuild -version; clang++ --version; sysctl -n hw.logicalcpu hw.perflevel0.logicalcpu hw.perflevel1.logicalcpu 2>/dev/null || true
+      - name: Build, sign and package (ofx/build-mac.sh)
+        id: build
+        run: |
+          set -o pipefail
+          mkdir -p build
+          # Shipping config: Metal + CPU when ofx/src/metal_render.mm exists (W2), else CPU only.
+          bash ofx/build-mac.sh build/mac | tee build/build-mac.log
+          grep -E '^(version|engine)=' build/build-mac.log >> "$GITHUB_OUTPUT"
+          # The CPU-only config must keep building as well.
+          if [ -f ofx/src/metal_render.mm ]; then NSS_METAL=0 bash ofx/build-mac.sh build/mac-cpu; fi
+      - name: Inspect bundle
+        run: |
+          B=build/mac/NegativeScanStudio.ofx.bundle
+          X=$B/Contents/MacOS/NegativeScanStudio.ofx
+          file "$X"
+          test "$(lipo -archs "$X")" = arm64
+          nm -gU "$X" | tee /tmp/exports.txt
+          grep -q ' _OfxGetPlugin$' /tmp/exports.txt && grep -q ' _OfxGetNumberOfPlugins$' /tmp/exports.txt
+          otool -L "$X"
+          ALLOWED='libc\+\+\.1\.dylib|libSystem\.B\.dylib'
+          if [ -f ofx/src/metal_render.mm ]; then ALLOWED="$ALLOWED|Metal\.framework|Foundation\.framework|libobjc\.A\.dylib|CoreFoundation\.framework"; fi
+          if otool -L "$X" | tail -n +2 | grep -v -E "$ALLOWED"; then echo "Unexpected link dependency"; exit 1; fi
+          if strings -a "$X" | grep -E 'libcuda|nvcuda|libOpenCL|OpenCL\.dll'; then echo "CUDA/OpenCL loader strings found in the Mac binary"; exit 1; fi
+          strings -a "$X" | grep -q 'OpenGL.framework/OpenGL'
+          plutil -p "$B/Contents/Info.plist"
+          codesign -dv --verbose=2 "$B" 2>&1 | tee /tmp/sign.txt
+          grep -q 'Signature=adhoc' /tmp/sign.txt
+          codesign --verify --strict --verbose=2 "$B"
+      - name: No CJK text in the package or the OFX tree
+        run: python3 ofx/tests/check_no_cjk.py build/mac/NegativeScanStudio_OFX_v*_macOS_arm64 ofx
+      - uses: actions/download-artifact@v4
+        with:
+          name: w1-fixtures
+          path: build/fixtures
+      - name: Native arm64 tests (same flags as the bundle)
+        run: |
+          set -e
+          python3 ofx/tools/cuda_source.py >/dev/null
+          T=build/tests; mkdir -p $T
+          clang++ $MAC_FLAGS ofx/tests/cpu_threads_test.cpp -o $T/cpu_threads_test && $T/cpu_threads_test
+          clang++ $MAC_FLAGS ofx/tests/tone_test.cpp -o $T/tone_test && $T/tone_test
+          clang++ $MAC_FLAGS $INC ofx/tests/host_test.cpp -o $T/host_test && $T/host_test build/fixtures/metadata-fixture.tiff build/fixtures/plain-old-scan.tiff
+          clang++ $MAC_FLAGS $INC ofx/tests/overlay_test.cpp -o $T/overlay_test && $T/overlay_test
+          clang++ -arch arm64 -std=c++17 -O0 $INC ofx/tests/leveling_metadata_test.cpp -o $T/leveling_metadata_test
+          $T/leveling_metadata_test build/fixtures/leveling-false.tiff build/fixtures/leveling-true.tiff build/fixtures/metadata-fixture.tiff
+          # The CUDA backend is compiled out of the Mac plugin; build it here anyway so its
+          # contract test keeps running on arm64 (mock driver, no GPU).
+          clang++ $MAC_FLAGS -DNSS_WITH_CUDA=1 -DNSS_WITH_OPENCL=1 $INC ofx/tests/cuda_contract.cpp -o $T/cuda_contract && $T/cuda_contract
+      - name: Installed plugin loads (Install.command, quarantine, ctypes load)
+        run: |
+          set -e
+          PKG=$(ls -d build/mac/NegativeScanStudio_OFX_v*_macOS_arm64)
+          rm -rf /tmp/pkg && ditto -x -k build/mac/$(basename "$PKG").zip /tmp/pkg
+          xattr -w com.apple.quarantine "0081;00000000;Safari;" /tmp/pkg/NegativeScanStudio.ofx.bundle
+          xattr -w com.apple.quarantine "0081;00000000;Safari;" /tmp/pkg/NegativeScanStudio.ofx.bundle/Contents/MacOS/NegativeScanStudio.ofx
+          test -x /tmp/pkg/Install.command && bash /tmp/pkg/Install.command </dev/null
+          D=/Library/OFX/Plugins/NegativeScanStudio.ofx.bundle
+          if xattr -r "$D" | grep com.apple.quarantine; then exit 1; fi
+          codesign --verify --strict "$D"
+          python3 - "$D/Contents/MacOS/NegativeScanStudio.ofx" <<'PY'
+          import ctypes, sys
+          class Plugin(ctypes.Structure):
+              _fields_ = [('api', ctypes.c_char_p), ('apiVersion', ctypes.c_int), ('id', ctypes.c_char_p),
+                          ('major', ctypes.c_uint), ('minor', ctypes.c_uint)]
+          lib = ctypes.CDLL(sys.argv[1])
+          lib.OfxGetPlugin.restype = ctypes.POINTER(Plugin)
+          n = lib.OfxGetNumberOfPlugins(); p = lib.OfxGetPlugin(0).contents
+          print('plugins', n, p.api.decode(), p.id.decode(), f'{p.major}.{p.minor}')
+          assert n == 1 and p.api == b'OfxImageEffectPluginAPI' and p.id == b'org.negativescanstudio.complete'
+          print('PASS: installed bundle loads and exports the OFX entry points')
+          PY
+      - uses: actions/download-artifact@v4
+        with:
+          name: w1-windows-reference
+          path: build/reference-windows
+      - name: CPU parity versus Windows x64
+        run: |
+          clang++ $MAC_FLAGS $INC ofx/tests/cpu_parity.cpp -o build/tests/cpu_parity
+          build/tests/cpu_parity build/parity-macos
+          python3 ofx/tests/check_cpu_parity.py build/reference-windows build/parity-macos build/parity-report.json
+      - uses: actions/upload-artifact@v4
+        if: matrix.os == 'macos-15'
+        with:
+          name: NegativeScanStudio-ofx-macos-arm64
+          path: build/mac/NegativeScanStudio_OFX_v*_macOS_arm64.zip
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: w1-parity-report-${{ matrix.os }}
+          path: |
+            build/parity-report.json
+            build/parity-macos/manifest.txt
+  build-checks:
+    name: macOS build checks (W10)
+    needs: macos-arm64
+    uses: ./.github/workflows/macos-build-checks.yml
+    with:
+      artifact-name: NegativeScanStudio-ofx-macos-arm64
+      product: ofx
+      expect-version: ${{ needs.macos-arm64.outputs.version }}

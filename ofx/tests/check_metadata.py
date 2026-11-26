@@ -9,7 +9,8 @@ def run(p,good):
  assert (r.returncode==0)==good,(p,r.returncode,r.stdout,r.stderr)
  if good:assert abs(json.loads(r.stdout)['base'][0]-.48)<1e-6
 # Big-endian classic TIFF, UTF-8 path, uncompressed/LZW independence.
-p=build/'元数据.tiff';tifffile.imwrite(p,np.zeros((2,2,3),dtype=np.uint16),photometric='rgb',byteorder='>',description=json.dumps(base));run(p,True)
+# Non-ASCII (Han) path names, written with \u escapes so this file contains no CJK.
+p=build/'\u5143\u6570\u636e.tiff';tifffile.imwrite(p,np.zeros((2,2,3),dtype=np.uint16),photometric='rgb',byteorder='>',description=json.dumps(base));run(p,True)
 for key,value in [('film_base',[1,2]),('film_base',[.5,.5,-1]),('film_base',[1,2,3,4]),('encoding','cineon'),('schema','other'),('processing','mask already applied'),('camera_matrix',[1,2]),('camera_strength',2),('film_base_space','unknown')]:
  m=base.copy();m[key]=value
  if key=='camera_strength':m['camera_matrix']=[1,0,0,0,1,0,0,0,1]
@@ -25,7 +26,7 @@ assert np.allclose(json.loads(r.stdout)['base'],[.48,.5,.46])
 # Classic and BigTIFF, both byte orders; quoted paths and file:// URL decoding.
 for big in (False,True):
  for order in ('<','>'):
-  p=build/f'扫描 大文件-{big}-{order==">"}.tiff'
+  p=build/f'\u626b\u63cf \u5927\u6587\u4ef6-{big}-{order==">"}.tiff'
   tifffile.imwrite(p,np.zeros((2,2,3),dtype=np.uint16),photometric='rgb',byteorder=order,bigtiff=big,description=json.dumps(base))
   run(p,True);run('  "'+str(p)+'"  ',True);run('file://'+quote(str(p)),True)
 p=build/'bom.json';p.write_text(json.dumps(base),encoding='utf-8-sig');run(p,True)
