@@ -392,6 +392,15 @@ func fixedShutterIndex(v string) int {
 }
 
 // fixedShutterIndexOf is the selection for a stored shutter (-1 = none).
+func fixedShutterIndexOf(us uint32) int {
+	for i, v := range fixedShutterVals {
+		if v == us {
+			return i
+		}
+	}
+	return -1
+}
+
 // copied from ../../tripage.go (end)
 
 var triModeKeys = []string{"tri", "tri_hdr"}

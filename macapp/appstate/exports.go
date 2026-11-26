@@ -33,6 +33,17 @@ var (
 	CompItems         = []string{"None (fastest)", "LZW + predictor (lossless)"}
 )
 
+// Values behind the item lists (shared with the Light page controller).
+var (
+	ISOVals          = isoVals
+	TargetVals       = targetVals
+	FixedShutterVals = fixedShutterVals
+	FixedShutterTip  = fixedShutterTip
+)
+
+// FixedShutterIndexOf is the base shutter selection for a stored shutter (-1 = none).
+func FixedShutterIndexOf(us uint32) int { return fixedShutterIndexOf(us) }
+
 const (
 	BracketDefault = bracketDefault
 	MergeDefault   = mergeDefault

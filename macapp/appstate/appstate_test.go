@@ -20,7 +20,7 @@ func TestCopiedDeclsMatchWindows(t *testing.T) {
 		"stockTolDefault", "evKey", "evText", "slowestVals", "slowestItems", "targetVals", "targetItems", "targetDefault",
 		"targetValsV04", "targetIndex", "alignItems", "alignModes", "mergeItems", "mergeModes", "mergeKeys", "mergeDefault",
 		"mergeTip", "hdrConfigFile", "defaultOutDir", "loadHDRConfig", "keyIndex", "saveHDRConfig")
-	drift.Same(t, ours, drift.Decls(t, "../../tripage.go"), "fixedShutterVals", "fixedShutterItems", "fixedShutterKeys", "fixedShutterTip", "fixedShutterIndex", "triModeKeys")
+	drift.Same(t, ours, drift.Decls(t, "../../tripage.go"), "fixedShutterVals", "fixedShutterItems", "fixedShutterKeys", "fixedShutterTip", "fixedShutterIndex", "fixedShutterIndexOf", "triModeKeys")
 	drift.Same(t, ours, drift.Decls(t, "../../monoopts_ui.go"), "monoBracketEVs", "monoBracketItems", "monoBracketDefault", "monoBracketIndex", "framesPerExpMin", "framesPerExpMax")
 	drift.Same(t, ours, drift.Decls(t, "../../lightpage.go"), "clampIdx")
 	drift.Same(t, ours, drift.Decls(t, "../../presets.go"), "configDir")
