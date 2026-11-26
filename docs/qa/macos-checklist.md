@@ -189,8 +189,12 @@ section needs the Mac build to offer two controls:
 - **Show render engine**
 - **Render engine** with a CPU choice
 
-On Windows 0.90.14 both are hidden parameters. If the Mac build hides them,
-mark 3.2 to 3.5 `blocked` and report it.
+On Windows 0.90.14 both are hidden parameters. On macOS, NegativeScan Studio
+builds from `feat/metal-render` `39f2018` onwards show them in the
+**Rendering** group: **Render engine** = `Auto (Metal)` or `CPU`, and **Show
+render engine**. Expect exactly these two choices, with no `CUDA` or `OpenCL`
+in the label. If a Mac build hides them, mark 3.2 to 3.5 `blocked` and report
+it.
 
 - [ ] **3.1** Set Resolve to Metal: DaVinci Resolve > Settings > System > Memory
   and GPU > GPU Processing Mode **Metal**. Restart Resolve if asked.
@@ -345,7 +349,7 @@ rgblightports [-port P] [-raw] [-sim] [command [args]...]   (default command: li
 
 Flags go before the commands. Commands chain left to right in one session.
 
-How the tool reports (confirmed by Dev Engineer on `05e973c` with `-sim -raw`;
+How the tool reports (confirmed by Dev Engineer on `05e973c`, now `10d41c39`, with `-sim -raw`;
 the behaviour on a real light is still to be confirmed by this checklist):
 
 - Everything, errors included, goes to **stdout**. Only the `-raw` hex log and
@@ -368,12 +372,13 @@ the behaviour on a real light is still to be confirmed by this checklist):
   with the first one you took (the baseline, S0). Check what changed, not the
   absolute values. `mode`, `speed` and `focus` must stay as in S0 throughout.
 
-> **Needs 05e973c pushed.** The pushed head `fceae3a` only has `list` and
-> `-probe`. `info`, `status`, `on`, `off`, `brightness`, `setall`, `-port`,
-> `-raw` and `-sim` come with commit `05e973c`, which is not pushed yet. Until
-> it is, run 6.1 to 6.4, the Go test 6.12 (already on `fceae3a`) and the app
-> steps 6.13 and 6.14, and mark 6.0 and 6.5 to 6.11 `not in build`. Record the
-> commit you tested (`git rev-parse --short HEAD`).
+> **Tool version.** Use `mac/w5-core-libraw-serial-arm64` at `10d41c39` or
+> later. That commit is on origin, has the same tree as the local `05e973c`,
+> and its CI run 45810268198 is green
+> (https://github.com/leon117ge/NegativeScanStudio/actions/runs/45810268198).
+> It has every command and flag above. Older heads such as `fceae3a` only have
+> `list` and `-probe`. Record the commit you tested
+> (`git rev-parse --short HEAD`).
 
 - [ ] **6.0** Build the tool and do a dry run on the simulated light, before
   anything is plugged in:
@@ -527,13 +532,25 @@ the behaviour on a real light is still to be confirmed by this checklist):
   A separate `status` run is unchanged.
 - [ ] **6.9** A missing argument is refused:
   ```sh
-  ./rgblightports -port $P brightness r > light-missingarg.txt;      echo "exit $?"
-  ./rgblightports -port $P setall 30 40 >> light-missingarg.txt;      echo "exit $?"
+  for cmd in "on" "off" "brightness r" "setall 30 40"; do
+    ./rgblightports -raw -port $P ${=cmd} >> light-missingarg.txt 2>> light-missingarg-raw.log
+    echo "$cmd -> exit $?" >> light-missingarg.txt
+  done
+  ./rgblightports -port $P status >> light-missingarg.txt
   ```
-  Expect: `exit 1` for both. Each last line has the form
-  `error: <cmd>: needs N argument(s)`, for example
-  `error: brightness: needs 2 argument(s)` and `error: setall: needs 3 argument(s)`.
-  Record the exact lines. Nothing is printed to stderr.
+  (`${=cmd}` splits the words in zsh. In bash, use `$cmd`.)
+  Expect, from `cmd/rgblightports/main.go` at `10d41c39`:
+
+  | Command | Last line on stdout | Exit |
+  |---|---|---|
+  | `on` | `error: on: needs 1 argument(s)` | 1 |
+  | `off` | `error: off: needs 1 argument(s)` | 1 |
+  | `brightness r` | `error: brightness: needs 2 argument(s)` | 1 |
+  | `setall 30 40` | `error: setall: needs 3 argument(s)` | 1 |
+
+  - The message is on stdout, and nothing else goes to stderr.
+  - Nothing is sent to the light: `light-missingarg-raw.log` has no TX frame.
+  - The final `status` matches the state before this step.
 - [ ] **6.10** Set all channels at once:
   ```sh
   ./rgblightports -port $P setall 30 40 50 status > light-setall.txt; echo "exit $?"

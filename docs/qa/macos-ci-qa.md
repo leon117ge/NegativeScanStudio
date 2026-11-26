@@ -110,7 +110,7 @@ gate.
 
 ## 2. Checks on every Mac build (`.github/workflows/macos-build-checks.yml`, `ci/qa/check_mac_build.py`)
 
-`check_mac_build.py ARTIFACT --product ofx|print2383|app [--expect-version X] [--repo SRC] [--probe probe.json] [--mode enforce|report]`
+`check_mac_build.py ARTIFACT --product ofx|print2383|app [--expect-version X] [--repo SRC] [--probe probe.json] [--min-macos 13.0] [--mode enforce|report]`
 takes a bundle, an `.app`, a folder, a zip (nested zips are opened too) or a
 DMG. `--mode enforce` (the default) exits 1 on any FAIL. `--mode report`
 prints the same verdict and exits 0.
@@ -147,7 +147,19 @@ folder itself, not a bare `Contents/`. It also needs:
 Every Mach-O must have an arm64 slice and a code signature. An ad-hoc
 signature is a WARN until a Developer ID exists (PLAN.md Q1). A missing
 signature is a FAIL. On the macOS runner the workflow also runs
-`codesign --verify --deep --strict`, `codesign -dv`, `file` and `lipo -archs`.
+`codesign --verify --deep --strict`, `codesign -dv`, `file`, `lipo -archs` and
+`vtool -show-build`.
+
+**Minimum macOS.** Every Mach-O slice's `minos` (from `LC_BUILD_VERSION`, or
+`LC_VERSION_MIN_MACOSX` in older binaries) and `LSMinimumSystemVersion` in each
+`Info.plist` must be at least `--min-macos`, which defaults to 13.0 (PLAN.md
+target). A lower value is a FAIL. A missing `LSMinimumSystemVersion` is a WARN.
+
+**Test hooks.** No shipped binary may contain test-only strings: `forced by
+test`, `NSS_TEST_HOOKS` or `kMetalFault...`. These come from `-DNSS_TEST_HOOKS`
+test builds of `metal_render.mm`. Any hit is a FAIL. Text files such as the
+CI log `metal/parity.txt` are not checked for these strings, because the test
+run is meant to print them there.
 
 **Docs** (with `--repo`):
 - The product changelog has a `## <version>` entry (`## v<version>` for the app)
@@ -162,6 +174,8 @@ signature is a FAIL. On the macOS runner the workflow also runs
 - a wrong `--expect-version`
 - CJK in a text file, in a file name, and in a Mach-O `__cstring` (macOS only)
 - a bare `Contents/` without the bundle folder
+- `LSMinimumSystemVersion` 12.0, and a Mach-O built with minos 12.0 (macOS only)
+- a test-hook string in a binary, while the same text in a log file passes
 
 It also checks that report mode exits 0.
 
@@ -212,5 +226,17 @@ release tag: `refs/tags/v*` (app), `refs/tags/ofx-v*` (plugin) or
 
 `macos-build-checks-selftest.yml` runs on pushes to `qa/macos-parity`. It
 calls the reusable workflow in report mode on the W2 Metal artifacts from run
-45807551550 (macos-15 and macos-26), and once more against the tentative
-0.90.16.
+45811439394 (feat/metal-render 39f2018, macos-15 and macos-26), and once more
+against the tentative 0.90.16. A fourth job re-uploads the W1 release zip
+(run 45811682780) in the same run and calls the workflow with an empty
+`run-id`, the way a build workflow does, to cover the same-run download.
+
+An empty `run-id` always means the calling run. Under `workflow_call`,
+`github.event_name`, `github.ref` and `github.run_id` are the caller's, so the
+workflow never uses `event_name` to pick a run. An earlier copy did, which
+made W1 run 45811682780 download from the old proof run.
+
+A folder artifact that holds zipped packages (the W1 artifact carries
+`NegativeScanStudio_OFX_v<version>_macOS_arm64.zip`) is checked zip by zip:
+the version in the file name counts, and the bundle inside is unpacked. The
+workflow also unpacks the zips with `ditto` for the probe and `codesign`.
