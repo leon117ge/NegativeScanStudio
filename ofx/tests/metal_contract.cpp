@@ -44,6 +44,10 @@ bool drain(void *q){require(q==&queue);++drains;return true;}
 void install(bool available=true){auto &api=nss::MetalApi::get();api.available=available;api.availability=available?"Metal: mock":"Metal: not built in";api.encode=encode;api.contents=contents;api.drain=drain;api.fault=nss::kMetalFaultNone;}
 }
 using mock::Bag;
+// Captures the Show render engine message (the mock host has no message suite of its own).
+static std::string shown;
+static OfxStatus captureMessage(void*,const char*,const char*,const char *format,...){va_list ap;va_start(ap,format);char text[4096];std::vsnprintf(text,sizeof text,format,ap);va_end(ap);shown=text;return kOfxStatOK;}
+static OfxMessageSuiteV1 messages{captureMessage};
 static OfxPropertySetHandle bag(Bag &b){return reinterpret_cast<OfxPropertySetHandle>(&b);}
 struct Frame {
  static constexpr int W=37,H=11; // odd sizes: partial threadgroups
@@ -100,7 +104,7 @@ int main(){
  // 2. Metal available: declared true, renders through the host queue without waiting.
  {Plugin p;require(p.metalProp()=="true");Frame f;attach(p.fx,f);int window[4]={101,51,135,60};auto a=metalArgs(window);
   for(int r=0;r<3;r++)require(entry(kOfxImageEffectActionRender,p.e,bag(a),nullptr)==kOfxStatOK);
-  require(fake::encodes==3&&fake::drains==0);require(worst(p.s,f,window)<=1e-6);require(lastRender(p.e).find("Metal buffers (host queue, Mock Metal)")==0);
+  require(fake::encodes==3&&fake::drains==0);require(worst(p.s,f,window)<=1e-6);require(lastRender(p.e).find("Metal (Mock Metal), host queue buffers")==0);
   require(instance(p.e)->preparedCache.builds==1);require(p.metalProp()=="true");
   // Window larger than the source: pixels outside the source are written as zero, like the CPU path.
   int wide[4]={100,50,137,61};int clipped[4]={102,52,130,58};mock::Bag sb=p.fx.source.image;for(int c=0;c<4;c++)mock::si(bag(p.fx.source.image),kOfxImagePropBounds,c,clipped[c]);
@@ -143,7 +147,30 @@ int main(){
   setI(p.s,"pick_auto",1);mock::Bag changed;mock::ss(bag(changed),kOfxPropName,0,"pick_auto");mock::ss(bag(changed),kOfxPropChangeReason,0,kOfxChangeUserEdited);check(entry(kOfxActionInstanceChanged,p.e,bag(changed),nullptr));setD(p.s,"pick_radius",2);check(param->paramSetValue(handle(p.s,"pick_point"),110.5,55.5));
   int drained=fake::drains,before=fake::encodes;require(entry(kOfxImageEffectActionRender,p.e,bag(a),nullptr)==kOfxStatOK);require(fake::drains==drained+1&&fake::encodes==before+1);
   require(lastRender(p.e).find("pick unavailable")==std::string::npos);require(std::abs(f.out[0]-f.out[1])<2e-5f&&std::abs(f.out[1]-f.out[2])<2e-5f);}
- // 9. Render info names the Metal state.
- {Plugin p;auto i=instance(p.e);i->metalWithdrawn=true;mock::Bag changed;mock::ss(bag(changed),kOfxPropName,0,"render_info");mock::ss(bag(changed),kOfxPropChangeReason,0,kOfxChangeUserEdited);require(entry(kOfxActionInstanceChanged,p.e,bag(changed),nullptr)==kOfxStatOK);}
+ // 9. Rendering controls and Show render engine, per platform (this file is built both ways by test.sh).
+ message=&messages;
+ {Plugin p;auto device=p.fx.params.values["render_device"],info=p.fx.params.values["render_info"],group=p.fx.params.values["render"];
+  auto secret=[](mock::Bag &b){auto a=b.ints.find(kOfxParamPropSecret);return a!=b.ints.end()&&!a->second.empty()&&a->second[0]==1;};
+  require(device.ints[kOfxParamPropDefault][0]==0&&device.strings[kOfxParamPropChoiceOption].size()==2&&device.strings[kOfxParamPropChoiceOption][1]=="CPU");
+  Frame f;attach(p.fx,f);int window[4]={100,50,137,61};auto a=metalArgs(window);require(entry(kOfxImageEffectActionRender,p.e,bag(a),nullptr)==kOfxStatOK);
+  mock::Bag changed;mock::ss(bag(changed),kOfxPropName,0,"render_info");mock::ss(bag(changed),kOfxPropChangeReason,0,kOfxChangeUserEdited);shown.clear();require(entry(kOfxActionInstanceChanged,p.e,bag(changed),nullptr)==kOfxStatOK);
+#if NSS_MAC_RENDER_UI
+  require(!secret(device)&&!secret(info)&&!secret(group));require(device.strings[kOfxParamPropChoiceOption][0]=="Auto (Metal)");
+  require(shown.rfind("Metal (Mock Metal)",0)==0&&shown.find("\nMetal: mock")!=std::string::npos&&shown.find("CUDA")==std::string::npos&&shown.find("OpenCL")==std::string::npos);
+  // A/B: Render engine = CPU, the host then sends CPU images; Show render engine starts with CPU.
+  setI(p.s,"render_device",1);mock::Bag dev;mock::ss(bag(dev),kOfxPropName,0,"render_device");mock::ss(bag(dev),kOfxPropChangeReason,0,kOfxChangeUserEdited);check(entry(kOfxActionInstanceChanged,p.e,bag(dev),nullptr));require(p.metalProp()=="false");
+  Bag cpuArgs;mock::sd(bag(cpuArgs),kOfxPropTime,0,0);for(int c=0;c<4;c++)mock::si(bag(cpuArgs),kOfxImageEffectPropRenderWindow,c,window[c]);mock::sp(bag(p.fx.source.image),kOfxImagePropData,0,f.in.data());mock::sp(bag(p.fx.output.image),kOfxImagePropData,0,f.out.data());
+  require(entry(kOfxImageEffectActionRender,p.e,bag(cpuArgs),nullptr)==kOfxStatOK);require(entry(kOfxActionInstanceChanged,p.e,bag(changed),nullptr)==kOfxStatOK);require(shown.rfind("CPU ",0)==0);
+  std::cout<<"  macOS UI: Rendering group visible, Render engine Auto (Metal)|CPU, Show render engine reports Metal (device) / CPU\n";
+#else
+  require(secret(device)&&secret(info)&&secret(group));require(device.strings[kOfxParamPropChoiceOption][0]=="Auto (CUDA/OpenCL if offered)");
+  require(shown.rfind("Metal (Mock Metal)",0)==0&&shown.find("OpenCL runtime: ")!=std::string::npos&&shown.find("\nMetal: ")==std::string::npos);
+  std::cout<<"  Windows/Linux UI: Rendering controls hidden as in 0.90.14, Show render engine text lines unchanged\n";
+#endif
+ }
+ // Withdrawn state is named in the Show render engine text on macOS.
+ {Plugin p;auto i=instance(p.e);i->metalWithdrawn=true;mock::Bag changed;mock::ss(bag(changed),kOfxPropName,0,"render_info");mock::ss(bag(changed),kOfxPropChangeReason,0,kOfxChangeUserEdited);require(entry(kOfxActionInstanceChanged,p.e,bag(changed),nullptr)==kOfxStatOK);
+  require(!NSS_MAC_RENDER_UI||shown.find("withdrawn for this node")!=std::string::npos);}
+ message=nullptr;
  std::cout<<"PASS: Metal contract (mock API + embedded MSL kernel as host C++): property declare/withdraw, host-queue encode without drain, "<<fake::encodes<<" encodes, CPU fallback on 5 forced failures, async error, private buffers, CPU engine, picker. NOT Metal execution.\n";
 }

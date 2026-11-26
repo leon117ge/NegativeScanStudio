@@ -174,6 +174,10 @@ require(instance(e)->lastRender.find("pick unavailable")!=std::string::npos);
   "tone_highlight_desat_on","tone_highlight_cream_on","tone_shadow_desat_on","tone_color_preset","tone_highlight_desat","tone_highlight_start","tone_highlight_cream","tone_shadow_desat","tone_shadow_start",
   "balance_preset","balance_preset_name","save_balance_preset","delete_balance_preset","balance_preset_status"
  };
+#if NSS_MAC_RENDER_UI
+ // macOS shows the Rendering group for Metal vs CPU checks; Windows/Linux keep it hidden.
+ expectedVisible.push_back("render_device");expectedVisible.push_back("render_info");
+#endif
  require(visible==expectedVisible);
  require(fx.params.values["balance_preset"].strings[kOfxParamPropChoiceOption]==std::vector<std::string>({"None","Slot 1","Slot 2","Slot 3","Slot 4","Slot 5","Slot 6","Slot 7","Slot 8"}));
  require(integer(s,"balance_preset",0)==0);

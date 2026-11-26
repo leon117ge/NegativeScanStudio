@@ -20,6 +20,16 @@
 #include <mutex>
 #include <sstream>
 
+// macOS shows the Rendering group (Render engine + Show render engine) so Metal and CPU can be
+// compared in the host. Windows/Linux keep the 0.90.14 hidden controls and labels exactly.
+// Choice indices are shared by every platform: 0 = Auto, 1 = CPU (saved projects keep meaning).
+#ifndef NSS_MAC_RENDER_UI
+#if defined(__APPLE__)
+#define NSS_MAC_RENDER_UI 1
+#else
+#define NSS_MAC_RENDER_UI 0
+#endif
+#endif
 namespace {
 OfxHost *host=nullptr;
 OfxPropertySuiteV1 *prop=nullptr;
@@ -166,7 +176,7 @@ OfxStatus describeContext(OfxImageEffectHandle e) {
  for(auto &g:groups){
   auto gp=define(s,g[0],g[1],kOfxParamTypeGroup);
   if(std::strcmp(g[0],"camera")==0||std::strcmp(g[0],"balance")==0||std::strcmp(g[0],"positive")==0||std::strcmp(g[0],"color_balance")==0||std::strcmp(g[0],"tone")==0||std::strcmp(g[0],"tone_color")==0||std::strcmp(g[0],"graypick")==0)prop->propSetInt(gp,kOfxParamPropGroupOpen,0,1);
-  if(std::strcmp(g[0],"graypick")==0||std::strcmp(g[0],"density")==0||std::strcmp(g[0],"render")==0)hideParam(gp);
+  if(std::strcmp(g[0],"graypick")==0||std::strcmp(g[0],"density")==0||(std::strcmp(g[0],"render")==0&&!NSS_MAC_RENDER_UI))hideParam(gp);
  }
  // 1. Camera calibration (visible selector; underlying 3x3 matrix & controls preserved as secret params)
  auto camMode=choiceDef(s,"camera_mode","Camera calibration","X-T3|Monochrome (MV-CS240-90UM)|Off",2,"camera");
@@ -193,8 +203,15 @@ OfxStatus describeContext(OfxImageEffectHandle e) {
  hideParam(point);
  hideParam(numberDef(s,"pick_radius","Sample radius (pixels)",3,0,32,"graypick"));
  hideParam(choiceDef(s,"stage","Pipeline output","Density In|Positive Out",1));
- hideParam(choiceDef(s,"render_device","Render engine","Auto (CUDA/OpenCL if offered)|CPU",0,"render"));
- hideParam(define(s,"render_info","Show render engine",kOfxParamTypePushButton,"render"));
+ if(NSS_MAC_RENDER_UI){
+  auto device=choiceDef(s,"render_device","Render engine","Auto (Metal)|CPU",0,"render");
+  prop->propSetString(device,kOfxParamPropHint,0,"Auto renders with Metal when the host offers it, otherwise on the CPU. CPU always renders on the CPU (for Metal vs CPU checks).");
+  auto info=define(s,"render_info","Show render engine",kOfxParamTypePushButton,"render");
+  prop->propSetString(info,kOfxParamPropHint,0,"Shows the engine used by the last render (Metal with the GPU name, or CPU) and why.");
+ }else{
+  hideParam(choiceDef(s,"render_device","Render engine","Auto (CUDA/OpenCL if offered)|CPU",0,"render"));
+  hideParam(define(s,"render_info","Show render engine",kOfxParamTypePushButton,"render"));
+ }
  hideParam(boolDef(s,"auto_metadata","Auto-read Resolve 20 source metadata",1,"balance"));
  hideParam(boolDef(s,"camera_on","Enable camera calibration",1,"camera"));
  hideParam(boolDef(s,"neutralise","Neutralise grey - bake white balance",0,"camera"));
@@ -441,8 +458,9 @@ OfxStatus changed(OfxImageEffectHandle e,OfxPropertySetHandle a) {
   prop->propSetString(properties(e),kOfxImageEffectPropMetalRenderSupported,0,automatic&&metalAvailable()&&!instance(e)->metalWithdrawn?"true":"false");
  }else if(key=="render_info"){
   auto i=instance(e);std::string text;{std::lock_guard<std::mutex> lock(i->mutex);text=i->lastRender;}
-  text+="\n"+nss::CudaApi::get().availability+"\nOpenCL runtime: "+(nss::CLApi::get().available?"available":"unavailable");
-  text+="\n"+nss::MetalApi::get().availability+(i->metalWithdrawn?" (withdrawn for this node after a failure)":"");
+  // macOS: the last render plus the Metal state. Windows/Linux: the 0.90.14 text (CUDA, OpenCL).
+  if(NSS_MAC_RENDER_UI)text+="\n"+nss::MetalApi::get().availability+(i->metalWithdrawn?" (withdrawn for this node after a failure)":"");
+  else text+="\n"+nss::CudaApi::get().availability+"\nOpenCL runtime: "+(nss::CLApi::get().available?"available":"unavailable");
   if(message)message->message(e,kOfxMessageMessage,"nss.render","%s",text.c_str());
  }
  return kOfxStatOK;
@@ -527,7 +545,7 @@ OfxStatus render(OfxImageEffectHandle e,OfxPropertySetHandle a) {
    if(src.row<=0||dst.row<=0||src.row%int(sizeof(float))||dst.row%int(sizeof(float)))error="Unsupported Metal buffer layout";
    else try{ok=api.encode(metalQueue,metalGpuSource,metalGpuDest,prepared.values.data(),prepared.values.size(),args,i->metal,device,error);}
    catch(const std::exception &x){error=x.what();}catch(...){error="unknown Metal error";}
-   if(ok){setLastRender(i,"Metal buffers (host queue, "+device+")"+(pickUnavailable?"; pick unavailable":""));return kOfxStatOK;}
+   if(ok){setLastRender(i,"Metal ("+device+"), host queue buffers"+(pickUnavailable?"; pick unavailable":""));return kOfxStatOK;}
    why="Metal failed: "+error;
   }
   // Any Metal failure: withdraw Metal for this instance and render this frame on the CPU,
