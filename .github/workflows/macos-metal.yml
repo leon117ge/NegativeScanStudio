@@ -1,0 +1,89 @@
+# Metal render path for the NSS OFX plugin on macOS Apple Silicon (W2).
+# Not a release: the uploaded bundle is an ad-hoc signed test build.
+name: macOS Metal
+on:
+  push:
+    branches: [feat/metal-render]
+  pull_request:
+    paths: ['ofx/**', '.github/workflows/macos-metal.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  metal:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, macos-15]
+    runs-on: ${{ matrix.os }}
+    env:
+      CXXFLAGS_COMMON: -arch arm64 -mmacosx-version-min=12.0 -std=c++17 -O3 -fno-math-errno -fno-trapping-math -Wall -Wextra -Wno-unused-parameter -Iofx/vendor/openfx/include -Iofx/vendor/opencl
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: uname -m; sw_vers; xcodebuild -version; clang++ --version
+      - name: Generated sources are committed and in sync
+        run: |
+          python3 ofx/tools/generate.py && python3 ofx/tools/cuda_source.py
+          git diff --exit-code -- ofx/src
+      - name: Embedded Metal source matches render_math.h
+        run: python3 ofx/tests/check_metal_source.py build/metal
+      - name: No CJK characters in the Metal work
+        run: |
+          python3 - <<'PY'
+          import pathlib,re,sys
+          han=re.compile("[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\U00020000-\U000323af]")
+          files=[*pathlib.Path('ofx/src').glob('*metal*'),*pathlib.Path('ofx/src').glob('render.metal'),pathlib.Path('ofx/src/plugin.cpp'),
+                 *pathlib.Path('ofx/tests').glob('metal*'),*pathlib.Path('ofx/tests/metal_stub').glob('*'),pathlib.Path('.github/workflows/macos-metal.yml'),
+                 pathlib.Path('ofx/README.md'),pathlib.Path('ofx/CHANGELOG.md'),pathlib.Path('ofx/ROADMAP.md')]
+          bad=[f'{f}:{n}' for f in files if f.is_file() for n,l in enumerate(f.read_text(encoding='utf-8').splitlines(),1) if han.search(l)]
+          print('\n'.join(bad) or f'PASS: {len(files)} files, zero CJK characters');sys.exit(1 if bad else 0)
+          PY
+      - name: Offline compile of the embedded MSL (fast math off), as a lint
+        run: |
+          if ! xcrun -sdk macosx metal -v >/dev/null 2>&1; then xcodebuild -downloadComponent MetalToolchain || true; fi
+          if xcrun -sdk macosx metal -v >/dev/null 2>&1; then
+            xcrun -sdk macosx metal -fno-fast-math -c build/metal/nss_render.metal -o build/metal/nss_render.air
+            xcrun -sdk macosx metallib build/metal/nss_render.air -o build/metal/nss_render.metallib && ls -l build/metal
+          else
+            echo "metal compiler not available on this image; runtime compile is still tested below"
+          fi
+      - name: Build NegativeScanStudio.ofx.bundle (arm64, Metal + CPU)
+        run: |
+          B=build/NegativeScanStudio.ofx.bundle/Contents
+          mkdir -p "$B/MacOS" "$B/Resources" build/obj
+          clang++ $CXXFLAGS_COMMON -fobjc-arc -DNSS_METAL -c ofx/src/metal_render.mm -o build/obj/metal_render.o
+          clang++ $CXXFLAGS_COMMON -DNSS_METAL -c ofx/src/plugin.cpp -o build/obj/plugin.o
+          clang++ -arch arm64 -mmacosx-version-min=12.0 -bundle build/obj/plugin.o build/obj/metal_render.o \
+            -framework Metal -framework Foundation -o "$B/MacOS/NegativeScanStudio.ofx"
+          cp ci/macos/Info.plist "$B/Info.plist"
+          codesign --force --sign - --timestamp=none build/NegativeScanStudio.ofx.bundle
+          file "$B/MacOS/NegativeScanStudio.ofx"
+          nm -gU "$B/MacOS/NegativeScanStudio.ofx" | grep -E 'OfxGetPlugin|OfxGetNumberOfPlugins'
+          otool -L "$B/MacOS/NegativeScanStudio.ofx" | tee build/otool.txt
+          grep -q Metal.framework build/otool.txt
+      - name: Metal contract (mock API, exact kernel as host C++)
+        run: |
+          clang++ $CXXFLAGS_COMMON -Wno-unknown-attributes -Iofx/tests/metal_stub -Ibuild/metal ofx/tests/metal_contract.cpp -o build/metal/metal_contract
+          build/metal/metal_contract
+      - name: Real Metal parity and forced-failure fallback
+        env:
+          NSS_METAL_REQUIRE_DEVICE: '1'
+        run: |
+          clang++ $CXXFLAGS_COMMON -fobjc-arc -c ofx/tests/metal_test_support.mm -o build/obj/metal_test_support.o
+          clang++ $CXXFLAGS_COMMON -DNSS_METAL -c ofx/tests/metal_plugin_test.cpp -o build/obj/metal_plugin_test.o
+          clang++ -arch arm64 -mmacosx-version-min=12.0 build/obj/metal_plugin_test.o build/obj/metal_render.o build/obj/metal_test_support.o \
+            -framework Metal -framework Foundation -o build/metal/metal_plugin_test
+          build/metal/metal_plugin_test | tee build/metal/parity.txt
+      - name: Existing native unit tests (CPU-only build, unchanged)
+        run: |
+          for t in tone_test overlay_test cuda_contract; do
+            clang++ $CXXFLAGS_COMMON ofx/tests/$t.cpp -o build/metal/$t
+            build/metal/$t
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NegativeScanStudio-ofx-macos-arm64-metal-${{ matrix.os }}
+          path: |
+            build/NegativeScanStudio.ofx.bundle
+            build/metal/parity.txt
