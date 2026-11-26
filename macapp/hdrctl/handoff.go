@@ -33,7 +33,7 @@ func (c *Ctl) ShutterChanged() {
 		c.dropHandoff("base shutter changed to " + camera.ShutterLabel(sh))
 	}
 	s := c.sess
-	if s != nil && s.Locked != nil && appstate.Fixed(c.Cfg) && s.Locked.Shutter != sh && !c.Busy {
+	if s != nil && c.lock != nil && appstate.Fixed(c.Cfg) && c.lock.Shutter != sh && !c.Busy {
 		c.releaseLock("Base shutter changed - fixed frame 0 lock released, meter the base again.")
 	}
 }
@@ -59,7 +59,7 @@ func (c *Ctl) ISOChanged() {
 		c.dropHandoff(fmt.Sprintf("ISO changed to %d", iso))
 	}
 	s := c.sess
-	if s != nil && s.Locked != nil && appstate.Fixed(c.Cfg) && s.Locked.ISO != iso && !c.Busy {
+	if s != nil && c.lock != nil && appstate.Fixed(c.Cfg) && c.lock.ISO != iso && !c.Busy {
 		c.releaseLock(fmt.Sprintf("ISO changed to %d - fixed frame 0 lock released.", iso))
 	}
 }
@@ -94,7 +94,7 @@ func (c *Ctl) setFixedFrame0() {
 // releaseLock drops the frame-0 lock (camera worker) with a reason.
 func (c *Ctl) releaseLock(why string) {
 	s := c.sess
-	if s == nil || s.Locked == nil {
+	if s == nil || c.lock == nil {
 		return
 	}
 	c.worker.do(func() {
@@ -134,7 +134,7 @@ func (c *Ctl) takeHandoff(ho baseHandoff) {
 	c.say(fmt.Sprintf("Light handoff from %s: R %d G %d B %d at ISO %d, %s - frame 0 locks automatically (Meter base not needed).",
 		ho.Source, ho.Values[0], ho.Values[1], ho.Values[2], ho.ISO, camera.ShutterLabel(ho.Shutter)))
 	s := c.sess
-	if s != nil && s.Locked != nil && !c.Busy {
+	if s != nil && c.lock != nil && !c.Busy {
 		s2 := s
 		c.worker.do(func() {
 			s2.Locked = nil

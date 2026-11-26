@@ -569,7 +569,7 @@ func (l *Light) hdrLightChanged(v [3]int) {
 	if ho := h.handoff; ho != nil && ho.Values != v {
 		h.dropHandoff(fmt.Sprintf("light values changed to R %d G %d B %d", v[0], v[1], v[2]))
 	}
-	if h.sess == nil || h.sess.Locked == nil || h.Busy {
+	if h.sess == nil || h.lock == nil || h.Busy {
 		return
 	}
 	if h.lockLight != nil && *h.lockLight == v {

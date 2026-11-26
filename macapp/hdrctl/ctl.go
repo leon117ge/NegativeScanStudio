@@ -111,8 +111,13 @@ type Ctl struct {
 	autoLocking bool
 	lockSrc     string
 	lockLight   *[3]int // light values when frame 0 was locked (nil = unknown)
-	isoPrev     int     // Cfg.ISO / Cfg.Shutter as last handled (the combos write Cfg first)
-	shutPrev    int
+	// lock is the UI goroutine's copy of sess.Locked. The camera worker
+	// writes sess.Locked (hdrscan Session.Meter / LockFixed) while the UI
+	// reads the lock state for every redraw, so the UI never reads
+	// sess.Locked: the worker publishes a copy through Host.Post.
+	lock     *camera.Exposure
+	isoPrev  int // Cfg.ISO / Cfg.Shutter as last handled (the combos write Cfg first)
+	shutPrev int
 	// shared Hikrobot exposure (hikexp_ui.go)
 	syncingHikExp, hikExpReady bool
 }
@@ -193,7 +198,17 @@ func (c *Ctl) Save() {
 func (c *Ctl) Connected() bool { return c.dev != nil }
 
 // Locked reports whether frame 0 is locked.
-func (c *Ctl) Locked() bool { return c.dev != nil && c.sess != nil && c.sess.Locked != nil }
+func (c *Ctl) Locked() bool { return c.dev != nil && c.sess != nil && c.lock != nil }
+
+// lockedCopy copies a session's lock on the goroutine that owns the session
+// (the camera worker) so it can be posted to the UI goroutine.
+func lockedCopy(s *hdrscan.Session) *camera.Exposure {
+	if s == nil || s.Locked == nil {
+		return nil
+	}
+	e := *s.Locked
+	return &e
+}
 
 // Scanning reports whether Stop is available.
 func (c *Ctl) Scanning() bool { return c.scanCancel != nil }
@@ -579,6 +594,7 @@ func (c *Ctl) showCamera(e camera.Exposure, fn float64) {
 }
 
 func (c *Ctl) clearLocked() {
+	c.lock = nil
 	c.lockSrc, c.lockLight = "", nil
 	c.F0ISO, c.F0Sh, c.P2Sh, c.BaseLv, c.BaseR, c.BaseG, c.BaseB = "not locked", "", "", "", "", "", ""
 }
@@ -665,6 +681,7 @@ func (c *Ctl) meterSrc(ho *baseHandoff) {
 		c.ExpLbl = "Metering ..."
 	}
 	c.LastCap = nil
+	c.lock = nil // Session.Meter / LockFixed drop the lock first
 	c.worker.do(func() {
 		var e camera.Exposure
 		var r hdrscan.Reading
@@ -688,8 +705,12 @@ func (c *Ctl) meterSrc(ho *baseHandoff) {
 		if s.LastProbe != nil {
 			prev = hdrscan.Preview(s.LastProbe)
 		}
+		lock := lockedCopy(s)
 		c.Host.Post(func() {
 			c.Busy = false
+			if c.sess == s {
+				c.lock = lock
+			}
 			if sterr == nil {
 				c.showCamera(st, fn)
 			}
@@ -775,7 +796,7 @@ func (c *Ctl) showBracket() {
 		c.P2Sh = ""
 		return
 	}
-	c.P2Sh = appstate.BrighterText(*c.sess.Locked, appstate.EVs(c.Cfg))
+	c.P2Sh = appstate.BrighterText(*c.lock, appstate.EVs(c.Cfg))
 }
 
 // BracketChanged updates the Brighter readout after the Bracket choice.
@@ -884,7 +905,7 @@ func (c *Ctl) Capture() {
 	}
 	evs := appstate.EVs(c.Cfg)
 	opts.MeteredBase = s.Reading.RGB
-	e0 := *s.Locked
+	e0 := *c.lock
 	roll, last := c.Cfg.Roll, c.Cfg.Counter
 	c.Res = fmt.Sprintf("Capturing %s ...", appstate.EVText(evs))
 	ctx, cancel := context.WithCancel(context.Background())
