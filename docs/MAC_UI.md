@@ -21,7 +21,7 @@ the same titles, rows and control order. Ported so far:
 | Camera & Light | Light | ported (RGB Light Air, Channels, Auto film-base leveling, Scan config presets, Faults, last leveling captures, 500T illuminant, log) |
 | HDR Scan | White light scan | ported (live view, Capture and merge card) |
 | HDR Scan | Trichrome, Mono trichrome, Focus check | placeholders |
-| Crop & Merge | Crop, Merge files, Remove hairs, Batch RAW to TIFF | placeholders |
+| Crop & Merge | Crop, Merge files, Remove hairs, Batch RAW to TIFF | ported (crop, merge, dust / hair removal, batch RAW to TIFF) |
 | Convert | | placeholder |
 
 On the Camera card, Chart calibration, Record base, Save base to DB, Save last frame 0
@@ -85,6 +85,74 @@ Differences from Windows, and why:
   360 dp. The live view no longer forces a 360x240 minimum (that clipped the controls
   under it). The window opens at 1280x800; the minimum is 1024x640.
 
+
+## Crop & Merge (W9 group b)
+
+Crop, Merge files, Remove hairs and Batch RAW to TIFF are ported with the same
+labels, control order and behaviour as Windows. The page logic is
+`macapp/cropctl/` (Crop, Batch RAW to TIFF) and `macapp/hdrctl/merge.go` /
+`hair.go` (Merge files, Remove hairs); the layouts are `cropview.go`,
+`mergeview.go`, `hairsview.go` and `batchview.go`. Full-resolution work stays
+in the existing `cropper`, `hdrscan` and `rawconv` packages, on CPU goroutines.
+
+- Crop: add files or a folder (native panels, TIFF / JPEG / PNG), automatic
+  edge detection and levelling (`cropper.Detect` / `AutoRect`), the orange
+  frame (move, corners, sides, aspect lock, inset, grid, edges overlay),
+  rotation (±5°, 0.05° steps), export next to the source in a `cropped`
+  subfolder or a chosen folder. Existing `_crop` files are never overwritten.
+  Settings are the same `crop_config.txt` as Windows, checked by
+  `TestCopiedCropDeclsMatchWindows`.
+- Merge files: frame 0, a brighter frame, an optional third frame, alignment,
+  merge method, compression and dust removal (Off / Light / Strong). Output is
+  `<frame 0>_HDR.tiff` next to frame 0, with the same `hdrscan.ProcessOptions`
+  as Windows (`MergeFilesOptions`). The source files are never changed or
+  deleted. "Open in Develop" first checks that the HDR TIFF is still there
+  (same message as Windows if it is gone).
+- Remove hairs: open a 16-bit TIFF (Browse..., Last HDR, or a typed path),
+  drag a box around a hair, heal with nearby film texture, Show mask, Undo,
+  Save into `_HDR.tiff` (in place when the file is already an HDR output,
+  otherwise a new `_HDR.tiff`). Copied helpers are checked by
+  `TestCopiedHairDeclsMatchWindows`.
+- Batch RAW to TIFF: add files or a folder, convert to a linear 16-bit TIFF
+  next to the RAW or in `make_tiff/`, LZW, ICC, worker count, Retry failed,
+  Clear finished, and a watch folder that waits until a new RAW is stable
+  before converting it. An existing TIFF is never overwritten (Skipped).
+  Settings are the same `raw_config.txt` as Windows.
+
+Long jobs (export, merge, dust removal, batch conversion, watch folder) run
+on worker goroutines with progress; merge and batch conversion can be
+stopped. The UI goroutine is never blocked. File and folder picks use the
+native panels.
+
+Golden tests compare the Mac page output with the Windows code path on the
+same inputs: crop export (byte-identical), merge and dust (pixels equal; the
+embedded metadata creation time may differ by a second), hair save
+(byte-identical), and batch RAW to TIFF (byte-identical when `NSS_TEST_RAF`
+points at a real RAW).
+
+Differences from Windows, and why:
+
+- Drag and drop of files onto the pages is not wired: Gio does not receive
+  file drops on macOS. The Windows hint texts that mention dropping files are
+  kept verbatim; use Add files, Add folder or Browse... instead.
+- Convert (Develop) is not on macOS yet (later increment). "Open in Develop"
+  still switches to the Convert module, as Windows does, and shows the HDR
+  path in the window with a message that Convert is not ported. That is a
+  known gap.
+- Merge files has a Stop button and a progress bar (Windows has no Stop on
+  this page). Cancel is honoured between `ProcessN` stages; any partial
+  output is removed and the sources are left unchanged. Dust removal itself
+  is not interruptible mid-stage. Crop export has no Stop, as on Windows.
+  Hair removal of one box is a short job and has no cancel.
+- Adobe DNG Converter is not used: `rawconv` only knows the Windows install
+  path, and changing that would change the Windows program. The check box
+  stays off and the label is "Not available on macOS".
+- Status text for a subfolder conversion uses `make_tiff/` (Windows uses
+  `make_tiff\`).
+- Yes/No walk dialogs are OK/Cancel in-window dialogs, as on the other Gio
+  pages.
+- The `--dust` command-line tool is not ported.
+
 ## Threading model
 
 - `main()` gives the main thread to Gio's `app.Main`, which runs the Cocoa
@@ -94,9 +162,10 @@ Differences from Windows, and why:
 - One window goroutine owns all UI state: it lays out frames and runs the functions that
   background work posts with `UI.Post` (a queue plus `Window.Invalidate`).
 - Camera I/O runs on one camera worker goroutine (`hdrctl`), the live-view loop and the
-  status poll on their own goroutines, merges on a goroutine per merge. They report back
-  only through `UI.Post`. A set-the-dials-by-hand prompt (`Session.Dials`) blocks the
-  capture goroutine, never the UI, until the in-window dialog is answered.
+  status poll on their own goroutines, merges, crop export, hair load/save and batch RAW
+  conversion on their own goroutines. They report back only through `UI.Post`. A
+  set-the-dials-by-hand prompt (`Session.Dials`) blocks the capture goroutine, never the
+  UI, until the in-window dialog is answered.
 - Native file panels (`dialogs_darwin.go`) are opened from a helper goroutine with
   `dispatch_sync` to the main queue; the window keeps drawing while a panel is open.
 - `NegativeScanStudio -selftest-runloop` checks this: once the window shows, a worker
@@ -122,4 +191,4 @@ uploads each new frame once as a GPU texture (Metal on macOS) and scales it on t
   recovered panics, with stacks). Camera log and settings stay in
   `~/Library/Application Support/NegativeScanStudio`.
 - Tests: `cd macapp && go test ./...` on macOS; on Linux add `-tags gio` (needs the
-  Wayland/X11/EGL headers). `NSS_SHOTS=<dir>` saves headless screenshots of the pages.
+  Wayland/X11/EGL headers). `NSS_SHOTS=<dir>` saves headless screenshots of the pages. `NSS_TEST_RAF` is a list of real RAW files for the batch conversion golden test (skipped if unset).
