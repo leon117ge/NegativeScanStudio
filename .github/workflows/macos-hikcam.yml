@@ -1,0 +1,81 @@
+# W7 of the macOS port: Hikrobot MVS camera backend on darwin (hikcam/mvs_darwin.*).
+# The real SDK (MvCameraControl.framework) is proprietary and never downloaded
+# here: the backend is built against nothing (dlopen at runtime) and tested
+# against ci/macos/mvs_stub.c, a stand-in that simulates one USB3 camera.
+# Test-only: no release, no secrets beyond the read-only GITHUB_TOKEN.
+name: macOS Hikrobot MVS (stub)
+on:
+  push:
+    branches: [mac/integration, mac/w7-hikrobot-mac, w7/hikrobot-mac]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  hikcam-darwin:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-26]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Environment
+        run: |
+          uname -m; sw_vers; go version; go env GOOS GOARCH CGO_ENABLED; cc --version | head -1
+          if [ -e /Library/Frameworks/MvCameraControl.framework ]; then echo "unexpected: MVS SDK present on runner"; fi
+      - name: Build the stub MvCameraControl
+        run: |
+          set -o pipefail
+          mkdir -p out
+          lib=$(bash ci/macos/build_mvs_stub.sh "$PWD/out/mvs-stub" | tail -1)
+          echo "NSS_MVS_STUB=$lib" >> "$GITHUB_ENV"
+          file "$lib"; otool -L "$lib"
+          nm -gU "$lib" | grep ' _MV_CC_' | tee out/mvs-stub-exports.txt
+      - name: Vet hikcam (cgo and no cgo)
+        run: |
+          go vet ./hikcam
+          CGO_ENABLED=0 go vet ./hikcam
+      - name: hikcam tests, SDK missing (default framework path)
+        run: |
+          set -o pipefail
+          env -u NSS_MVS_STUB go test -v -count=1 ./hikcam 2>&1 | tee go-test-hikcam-nosdk.log
+      - name: hikcam tests against the stub camera
+        if: ${{ !cancelled() }}
+        run: |
+          set -o pipefail
+          go test -v -count=1 -run 'TestDarwinLoader|Mirror' ./hikcam 2>&1 | tee go-test-hikcam-stub.log
+          grep -q -- '--- PASS: TestDarwinLoader/capture' go-test-hikcam-stub.log
+      - name: hikcam tests without cgo (stub-free fallback)
+        if: ${{ !cancelled() }}
+        run: |
+          set -o pipefail
+          CGO_ENABLED=0 go test -v -count=1 ./hikcam 2>&1 | tee go-test-hikcam-nocgo.log
+      - name: Callers still build on darwin
+        if: ${{ !cancelled() }}
+        run: |
+          go vet ./monocap ./hdrscan ./focusmark
+          go test -c -o out/hikcam.test ./hikcam
+          echo "hikcam.test links (MvCameraControl must NOT be linked, only dlopen'd):"
+          otool -L out/hikcam.test | tee out/hikcam-otool.txt
+          if otool -L out/hikcam.test | grep -qi MvCameraControl; then echo "MvCameraControl linked at build time"; exit 1; fi
+          out/hikcam.test -test.run 'TestDarwinLoader' -test.v | tail -5
+      - name: Test summary
+        if: always()
+        run: |
+          bash ci/macos/test_summary.sh go-test-hikcam-nosdk.log "hikcam ${{ matrix.os }} (no SDK)" | tee -a "$GITHUB_STEP_SUMMARY"
+          bash ci/macos/test_summary.sh go-test-hikcam-stub.log "hikcam ${{ matrix.os }} (stub camera)" | tee -a "$GITHUB_STEP_SUMMARY"
+          bash ci/macos/test_summary.sh go-test-hikcam-nocgo.log "hikcam ${{ matrix.os }} (no cgo)" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Checksums
+        if: always()
+        run: |
+          mkdir -p out
+          cp go-test-hikcam-*.log out/ 2>/dev/null || true
+          (cd out && find . -type f ! -name SHA256SUMS.txt -exec shasum -a 256 {} + > SHA256SUMS.txt; cat SHA256SUMS.txt)
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: w7-hikcam-${{ matrix.os }}
+          path: out
