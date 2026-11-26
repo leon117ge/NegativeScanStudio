@@ -22,7 +22,7 @@ the same titles, rows and control order. Ported so far:
 | HDR Scan | White light scan | ported (live view, Capture and merge card) |
 | HDR Scan | Trichrome | ported (live view, Trichrome scan card, film-base metadata) |
 | HDR Scan | Mono trichrome | ported (Hikrobot live view with centre marks, camera card, Mono trichrome capture card) |
-| HDR Scan | Focus check | placeholder |
+| HDR Scan | Focus check | ported (live loupe with zoom and pan, centre marks, green / white light, auto exposure, sharpness meter with peak hold) |
 | Crop & Merge | Crop, Merge files, Remove hairs, Batch RAW to TIFF | ported (crop, merge, dust / hair removal, batch RAW to TIFF) |
 | Convert | | placeholder |
 
@@ -219,6 +219,65 @@ Differences from Windows, and why:
 - The centre-mark arm lengths are in dp, so they scale on Retina screens.
 - Send base to Develop shows the same "Film base" message as Windows
   (Convert does not take a scanned film-base reference).
+
+## Focus check (W9 group d)
+
+HDR Scan > Focus check is ported with the same layout, labels, tooltips,
+control order and behaviour as Windows (`focuspage.go`). The page logic is
+`macapp/hdrctl/focus.go`; the layout is `macapp/focusview.go`.
+
+- Left: the live view (click at Fit zooms to 200 % around that point, drag
+  pans when zoomed), the Center mark check box (shared with Mono trichrome)
+  and the hint. The marks follow the true sensor centre and the 10 % inset
+  through zoom and pan and hide when off-screen; the green crosshair marks the
+  exposure and sharpness sample.
+- Right, the Focus check card: camera, light, auto exposure, Zoom (Fit,
+  100 %, 200 %, 400 %), Green only / White (enabled when the light is
+  connected), the sharpness meter (Combined x 20000 on 0..1000), sharpness
+  and Laplacian / grain values, Peak hold with Reset peak, the auto-exposure
+  note and the log.
+- Entering the page saves the capture exposure (the Mono trichrome fields for
+  the Hikrobot camera, the X-T3 exposure otherwise) and the light state,
+  switches the light to green only at the scan values, applies full-resolution
+  live settings and runs the loop: grab, meter rectangle (the visible region,
+  at least 100 %), `hdrscan.RegionSamples`, `CropGray16ToFloat64`,
+  `MeasureFocus`, `LiveAE` with the same thresholds, peak hold. Leaving
+  restores the exposure and the light. The Hikrobot camera (or simulator) is
+  preferred; the X-T3 live-view JPEG is the fallback (shutter-only auto
+  exposure).
+- Threading: setup, the frame loop, the focus metric, auto exposure and the
+  restore run on the Hikrobot worker (`hikcam.Controller`), or on a goroutine
+  with X-T3 calls on the camera worker; light switching runs on the light
+  worker. Frames and labels come back through `UI.Post`.
+- Copied declarations (`zoomItems`, `zoomVals`, `imageToGray16`,
+  `gray16Pix`, `liveGrabMessage`) are checked by
+  `TestCopiedFocusDeclsMatchWindows`.
+
+Golden tests (`hdrctl/focus_test.go`) run the page and the literal Windows
+enter / loop / leave sequence on fresh simulators and compare, exactly: the
+focus score (Laplacian, Tenengrad, grain, combined), the peak hold, the whole
+`LiveAE` state, the meter samples and region, and every camera call with its
+values. Hikrobot simulator: 1 to 12 frames at Fit, 100 %, 200 % and 400 %,
+with and without a pan. X-T3: 10 live-view JPEG frames at 200 % with the
+shutter steps and the restore. The page reads no RAF, so `NSS_TEST_RAF` does
+not apply.
+
+Differences from Windows, and why:
+
+- The X-T3 device, the light client and the scan light values are read on the
+  UI goroutine and handed to the workers (Windows reads them from the UI
+  struct on the worker); the values used are the same.
+- After a zoom or pan the last frame is rebuilt on a goroutine and posted
+  back (Windows builds the bitmap on the UI thread); a full 6016 x 4096 frame
+  would otherwise stall the window. The newest rebuild wins.
+- Leaving Focus check for Mono trichrome starts the Mono preview after the
+  restore. On Windows `leave()` queues the restore, `startPreview()` follows,
+  and the restore's `StopSync` bumps the Hikrobot generation, which (from
+  reading the code; not checked on hardware) cancels that preview. The
+  Windows code is unchanged.
+- The zoomed loupe is drawn with nearest-neighbour scaling (as GDI
+  StretchBlt does), Fit with linear filtering as the other Gio views.
+- The sharpness bar is drawn as a determinate bar (the Windows ProgressBar).
 
 ## Threading model
 
