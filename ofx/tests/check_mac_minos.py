@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Check otool -l (or vtool -show-build) output for a minimum macOS of 13.0.
-Usage: python3 check_mac_minos.py \u003cotool-l-or-vtool.txt\u003e"""
+Usage: python3 check_mac_minos.py <otool-l-or-vtool.txt>"""
 import pathlib,re,sys
 if len(sys.argv)!=2:
- print("usage: check_mac_minos.py \u003cotool-l.txt\u003e",file=sys.stderr);sys.exit(2)
+ print("usage: check_mac_minos.py <otool-l.txt>",file=sys.stderr);sys.exit(2)
 text=pathlib.Path(sys.argv[1]).read_text()
 ok=bool(re.search(r"minos 13\.0",text) or re.search(r"^\s*version 13\.0",text,re.M))
 bad=bool(re.search(r"minos 12\.|^\s*version 12\.",text,re.M))

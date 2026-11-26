@@ -3,7 +3,7 @@
 Those strings are compiled only into test builds (-DNSS_TEST_HOOKS).
 
 Usage:
-  python3 check_release_hooks.py \u003cbinary-or-object\u003e [\u003cfile\u003e...]
+  python3 check_release_hooks.py <binary-or-object> [<file>...]
   python3 check_release_hooks.py --source ofx/src/metal_render.mm
 """
 import pathlib,sys
@@ -53,7 +53,7 @@ if not args or args[0] in ("-h","--help"):
  print(__doc__.strip(),file=sys.stderr);sys.exit(2)
 ok=True
 if args[0]=="--source":
- if len(args)\u003c2: print(__doc__.strip(),file=sys.stderr);sys.exit(2)
+ if len(args)<2: print(__doc__.strip(),file=sys.stderr);sys.exit(2)
  for name in args[1:]:
   ok=check_source(pathlib.Path(name)) and ok
 else:

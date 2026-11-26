@@ -25,7 +25,7 @@ jobs:
             ofx/src/plugin.cpp -o "$B/MacOS/NegativeScanStudio.ofx"
           cp ci/macos/Info.plist "$B/Info.plist"
           codesign --force --sign - --timestamp=none build/NegativeScanStudio.ofx.bundle
-          codesign -dv build/NegativeScanStudio.ofx.bundle 2>\u00261
+          codesign -dv build/NegativeScanStudio.ofx.bundle 2>&1
           file "$B/MacOS/NegativeScanStudio.ofx"
           nm -gU "$B/MacOS/NegativeScanStudio.ofx" | grep -E 'OfxGetPlugin|OfxGetNumberOfPlugins'
           otool -L "$B/MacOS/NegativeScanStudio.ofx"
@@ -51,7 +51,7 @@ jobs:
         run: |
           mkdir -p build/metal
           bash ci/macos/make_msl.sh build/metal/render_math_msl.h
-          if ! xcrun -sdk macosx metal -v >/dev/null 2>\u00261; then xcodebuild -downloadComponent MetalToolchain; fi
+          if ! xcrun -sdk macosx metal -v >/dev/null 2>&1; then xcodebuild -downloadComponent MetalToolchain; fi
           xcrun -sdk macosx metal -std=metal3.0 -fno-fast-math -Ibuild/metal -c ci/macos/nss_render.metal -o build/metal/nss_render.air
           xcrun -sdk macosx metallib build/metal/nss_render.air -o build/metal/nss_render.metallib
           ls -l build/metal
