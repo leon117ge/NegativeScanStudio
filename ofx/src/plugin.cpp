@@ -185,7 +185,7 @@ OfxStatus describeContext(OfxImageEffectHandle e) {
  hideParam(point);
  hideParam(numberDef(s,"pick_radius","Sample radius (pixels)",3,0,32,"graypick"));
  hideParam(choiceDef(s,"stage","Pipeline output","Density In|Positive Out",1));
- hideParam(choiceDef(s,"render_device","Render engine","Auto (CUDA/OpenCL if offered)|CPU",0,"render"));
+ hideParam(choiceDef(s,"render_device","Render engine",NSS_RENDER_DEVICE_OPTIONS,0,"render"));
  hideParam(define(s,"render_info","Show render engine",kOfxParamTypePushButton,"render"));
  hideParam(boolDef(s,"auto_metadata","Auto-read Resolve 20 source metadata",1,"balance"));
  hideParam(boolDef(s,"camera_on","Enable camera calibration",1,"camera"));
@@ -432,7 +432,11 @@ OfxStatus changed(OfxImageEffectHandle e,OfxPropertySetHandle a) {
   prop->propSetString(properties(e),kOfxImageEffectPropCudaRenderSupported,0,automatic&&nss::CudaApi::get().available?"true":"false");
  }else if(key=="render_info"){
   auto i=instance(e);std::string text;{std::lock_guard<std::mutex> lock(i->mutex);text=i->lastRender;}
+#if NSS_WITH_CUDA || NSS_WITH_OPENCL
   text+="\n"+nss::CudaApi::get().availability+"\nOpenCL runtime: "+(nss::CLApi::get().available?"available":"unavailable");
+#else
+  text+="\nGPU: CUDA and OpenCL are not used on this platform";
+#endif
   if(message)message->message(e,kOfxMessageMessage,"nss.render","%s",text.c_str());
  }
  return kOfxStatOK;
@@ -554,10 +558,14 @@ OfxPlugin plugin={kOfxImageEffectPluginApi,1,"org.negativescanstudio.complete",0
 extern "C" {
 #ifdef _WIN32
 __declspec(dllexport)
+#elif defined(__GNUC__)
+__attribute__((visibility("default")))
 #endif
 int OfxGetNumberOfPlugins(){return 1;}
 #ifdef _WIN32
 __declspec(dllexport)
+#elif defined(__GNUC__)
+__attribute__((visibility("default")))
 #endif
 OfxPlugin *OfxGetPlugin(int i){return i==0?&plugin:nullptr;}
 }
