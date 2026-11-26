@@ -19,7 +19,7 @@ NSS_META_FIXTURE="$BUILD/metadata-fixture.tiff" go test ./hdrscan -run TestScanT
 "$CXX" -std=c++17 -O0 -Iofx/vendor/openfx/include -Iofx/vendor/opencl ofx/tests/leveling_metadata_test.cpp -o "$BUILD/leveling_metadata_test"
 NSS_LEVELING_FIXTURE="$BUILD/leveling" go test ./hdrscan -run TestScanMetadataUsesLastLevelingNotScene -count=1
 "$BUILD/leveling_metadata_test" "$BUILD/leveling-false.tiff" "$BUILD/leveling-true.tiff" "$BUILD/metadata-fixture.tiff"
-"$CXX" -std=c++17 -O3 -fno-math-errno -fno-trapping-math -Iofx/vendor/openfx/include -Iofx/vendor/opencl ofx/tests/cuda_contract.cpp -o "$BUILD/cuda_contract"
+"$CXX" -std=c++17 -O3 -fno-math-errno -fno-trapping-math -DNSS_WITH_CUDA=1 -DNSS_WITH_OPENCL=1 -Iofx/vendor/openfx/include -Iofx/vendor/opencl ofx/tests/cuda_contract.cpp -o "$BUILD/cuda_contract"
 "$BUILD/cuda_contract"
 "$CXX" -std=c++17 -O3 -fno-math-errno -fno-trapping-math -Iofx/vendor/openfx/include -Iofx/vendor/opencl ofx/tests/overlay_test.cpp -o "$BUILD/overlay_test"
 "$BUILD/overlay_test"

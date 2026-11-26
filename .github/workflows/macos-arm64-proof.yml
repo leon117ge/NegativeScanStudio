@@ -32,11 +32,15 @@ jobs:
       - name: Native arm64 unit tests
         run: |
           mkdir -p build/tests
-          for t in tone_test overlay_test cuda_contract; do
-            clang++ -arch arm64 -mmacosx-version-min=13.0 -std=c++17 -O3 -fno-math-errno -fno-trapping-math -Iofx/vendor/openfx/include -Iofx/vendor/opencl \
-              ofx/tests/$t.cpp -o build/tests/$t
+          F="-arch arm64 -mmacosx-version-min=13.0 -std=c++17 -O3 -fno-math-errno -fno-trapping-math -Iofx/vendor/openfx/include -Iofx/vendor/opencl"
+          for t in tone_test overlay_test; do
+            clang++ $F ofx/tests/$t.cpp -o build/tests/$t
             build/tests/$t
           done
+          # CUDA and OpenCL are compiled out on macOS (ofx/src/platform.hpp); the mocked CUDA driver
+          # contract turns them back on, as in macos-metal.yml and macos-w1-ofx-cpu.yml.
+          clang++ $F -DNSS_WITH_CUDA=1 -DNSS_WITH_OPENCL=1 ofx/tests/cuda_contract.cpp -o build/tests/cuda_contract
+          build/tests/cuda_contract
       - uses: actions/upload-artifact@v4
         with:
           name: NegativeScanStudio-ofx-macos-arm64-proof
