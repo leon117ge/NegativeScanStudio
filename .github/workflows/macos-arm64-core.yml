@@ -4,7 +4,7 @@
 name: macOS arm64 core (LibRaw + serial)
 on:
   push:
-    branches: [mac/w5-core-libraw-serial-arm64]
+    branches: [mac/w5-core-libraw-serial-arm64, mac/integration]
   workflow_dispatch:
 permissions:
   contents: read
