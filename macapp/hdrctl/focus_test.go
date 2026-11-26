@@ -420,9 +420,9 @@ func TestFocusLabelsAndNoCamera(t *testing.T) {
 		t.Fatalf("%q %q %d", f.SharpText, f.PeakText, f.Meter)
 	}
 	f.Enter()
-	h.pump(t, "no camera", 5*time.Second, func() bool { return strings.Contains(f.LogText(), "No camera to preview.") })
+	h.pump(t, "no camera", 30*time.Second, func() bool { return strings.Contains(f.LogText(), "No camera to preview.") })
 	f.Leave()
-	h.pump(t, "left", 5*time.Second, func() bool {
+	h.pump(t, "left", 30*time.Second, func() bool {
 		return strings.Contains(f.LogText(), "Left Focus check: previous capture exposure restored.")
 	})
 

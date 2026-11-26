@@ -76,7 +76,7 @@ func TestCropMergePages(t *testing.T) {
 	if s.dir != "" {
 		os.MkdirAll(s.dir, 0o755)
 	}
-	u.hdr.Start()
+	startHDR(u)
 	d := t.TempDir()
 	open := func(sub int) {
 		u.nav.SetModule(2)
