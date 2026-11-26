@@ -1,9 +1,10 @@
 package hdrctl
 
-// hikCams owns the Hikrobot monochrome camera for the Light page (leveling
-// camera and its preview), as MonoUI does on Windows (monopage.go,
-// levelhik.go ensureHik). The Mono trichrome page takes it over when it is
-// ported. Every camera call runs on a goroutine, never on the main thread.
+// hikCams owns the Hikrobot monochrome camera shared by the Mono trichrome
+// page and the Light page (leveling camera and its preview), as MonoUI does
+// on Windows (monopage.go camMu/cam/devices/sdkMsg/levelSim, levelhik.go
+// ensureHik). Every camera call runs on a goroutine, never on the main
+// thread.
 
 import (
 	"fmt"
@@ -18,19 +19,62 @@ import (
 type hikCams struct {
 	mu       sync.Mutex
 	cam      hikcam.Device // the real (or Mono-page) camera
+	devices  []hikcam.Info // real cameras from the last refresh
 	levelSim *hikcam.Sim   // the simulator used for leveling
 	sdkMsg   string
+
+	// The MVS entry points (tests replace them to simulate a machine
+	// without MvCameraControl.framework or with a camera attached).
+	enumerate func() hikcam.ListResult
+	openReal  func(hikcam.Info) (hikcam.Device, error)
+	sdkStatus func() string
+
+	// stopOther stops the Mono trichrome preview loop before the Light
+	// page's preview or leveling uses the camera (Windows runs both on
+	// MonoUI's worker). Not on the UI goroutine.
+	stopOther func()
 
 	prevGen  atomic.Int64
 	prevDone chan struct{} // closed when the running preview loop has stopped
 }
 
-func newHikCams() *hikCams { return &hikCams{} }
+func newHikCams() *hikCams {
+	return &hikCams{enumerate: hikcam.Enumerate, openReal: hikcam.OpenReal, sdkStatus: hikcam.SDKStatus}
+}
 
 func (h *hikCams) getCam() hikcam.Device {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.cam
+}
+
+func (h *hikCams) setCam(d hikcam.Device) {
+	h.mu.Lock()
+	h.cam = d
+	h.mu.Unlock()
+}
+
+func (h *hikCams) getSDKMsg() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.sdkMsg
+}
+
+func (h *hikCams) setSDK(msg string, devs []hikcam.Info) {
+	h.mu.Lock()
+	h.sdkMsg = msg
+	if devs != nil {
+		h.devices = append([]hikcam.Info(nil), devs...)
+	} else {
+		h.devices = nil
+	}
+	h.mu.Unlock()
+}
+
+func (h *hikCams) getDevices() []hikcam.Info {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]hikcam.Info(nil), h.devices...)
 }
 
 func (h *hikCams) setCamIfNil(d hikcam.Device) {
@@ -60,17 +104,15 @@ func (h *hikCams) ensureHik(wantSim bool) (hikcam.Device, error) {
 	if cur := h.getCam(); cur != nil && !cur.Info().Simulated {
 		return cur, nil
 	}
-	list := hikcam.Enumerate()
-	h.mu.Lock()
-	h.sdkMsg = list.Message()
-	h.mu.Unlock()
+	list := h.enumerate()
+	h.setSDK(list.Message(), list.Cameras)
 	if list.Err != nil {
 		return nil, list.Err
 	}
 	if len(list.Cameras) == 0 {
 		return nil, hikcam.ErrNoCamera
 	}
-	d, err := hikcam.OpenReal(list.Cameras[0])
+	d, err := h.openReal(list.Cameras[0])
 	if err != nil {
 		return nil, err
 	}
@@ -103,6 +145,9 @@ func (h *hikCams) startPreview(wantSim bool, logf func(string, ...any), show fun
 		h.stopWait(gen)
 		if h.prevGen.Load() != gen || !alive() {
 			return
+		}
+		if h.stopOther != nil {
+			h.stopOther()
 		}
 		done := make(chan struct{})
 		h.mu.Lock()

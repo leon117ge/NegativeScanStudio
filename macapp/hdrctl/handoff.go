@@ -11,6 +11,7 @@ import (
 
 	"basetool/camera"
 	"basetool/hikbase"
+	"basetool/scanmeta"
 
 	"basetool/macapp/appstate"
 )
@@ -183,8 +184,32 @@ func (c *Ctl) sharedHikExposure() float64 {
 	return hikbase.DefaultExposureUS
 }
 
-// setSharedHikExposure writes the shared exposure into the config and the
-// Light page field. source is "user", "leveling", or "load".
+// hikSnapshot is the exposure and light codes of the last successful
+// monochrome leveling.
+func (c *Ctl) hikSnapshot() hikbase.Snapshot {
+	return hikbase.Snapshot{
+		US:  c.Cfg.HikLeveledUS,
+		RGB: c.Cfg.HikLeveledRGB,
+		At:  hikbase.ParseLeveledAt(c.Cfg.HikLeveledAt),
+	}
+}
+
+// currentLightRGB is the light values on the Light page (its fields, else
+// the saved values).
+func (c *Ctl) currentLightRGB() [3]int {
+	if c.Light == nil {
+		return [3]int{}
+	}
+	if _, v, err := c.Light.edits(); err == nil {
+		return v
+	}
+	return c.Light.cfg.Values
+}
+
+// setSharedHikExposure writes the shared exposure into the config and both
+// exposure fields (Light page and Mono trichrome). source is "user",
+// "leveling", or "load". A re-entrant call is ignored so the two fields
+// cannot loop.
 func (c *Ctl) setSharedHikExposure(us float64, source string) {
 	if c.syncingHikExp {
 		return
@@ -196,11 +221,17 @@ func (c *Ctl) setSharedHikExposure(us float64, source string) {
 	c.syncingHikExp = true
 	defer func() { c.syncingHikExp = false }()
 	c.Cfg.HikExposureUS = us
+	if m := c.Mono; m != nil {
+		m.setExpField(us)
+	}
 	if l := c.Light; l != nil {
 		l.setHikField(us)
 	}
 	if source == "user" || source == "leveling" {
 		c.Save()
+	}
+	if m := c.Mono; m != nil {
+		m.updateCaptureLabel()
 	}
 }
 
@@ -216,13 +247,37 @@ func (c *Ctl) recordLeveledBase(us float64, rgb [3]int, at time.Time) {
 	c.Log.Printf("Leveled base recorded: %.0f us, lights R %d G %d B %d at %s.", us, rgb[0], rgb[1], rgb[2], at.Format("15:04"))
 }
 
-// applySharedHikFromConfig pushes the persisted exposure into the field
+// applySharedHikFromConfig pushes the persisted exposure into both fields
 // once the window exists, then enables user-edit sync.
 func (c *Ctl) applySharedHikFromConfig() {
 	c.hikExpReady = true
 	c.setSharedHikExposure(c.sharedHikExposure(), "load")
+	if m := c.Mono; m != nil {
+		m.MeterEach = c.Cfg.HikMeterEach
+		m.updateCaptureLabel()
+	}
 }
 
-// hikMeterEach is Mono Trichrome's per-channel auto-meter switch (the
-// Mono trichrome page is not on macOS yet, so the saved setting).
-func (c *Ctl) hikMeterEach() bool { return c.Cfg.HikMeterEach }
+func (c *Ctl) withHikExposureMeta(m scanmeta.Metadata, us float64, meterEach bool) scanmeta.Metadata {
+	m.ExposureUS = us
+	m.GainDB = 0
+	if meterEach {
+		m.ExposureMode = hikbase.ModeMetered
+	} else {
+		m.ExposureMode = hikbase.ModeShared
+	}
+	leveled := hikbase.IsLeveled(c.hikSnapshot(), us, c.currentLightRGB())
+	if c.Cfg.HikLeveledAt != "" {
+		m.BaseLeveledAt = c.Cfg.HikLeveledAt
+	}
+	m.BaseLeveled = &leveled
+	return m
+}
+
+// hikMeterEach is Mono trichrome's "Auto-meter each channel" check box.
+func (c *Ctl) hikMeterEach() bool {
+	if c.Mono != nil {
+		return c.Mono.MeterEach
+	}
+	return c.Cfg.HikMeterEach
+}

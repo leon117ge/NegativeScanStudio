@@ -106,6 +106,8 @@ type Ctl struct {
 
 	// Light page link (v0.82 handoff, shared ISO / base shutter / rectangle)
 	Light       *Light
+	Tri         *Tri  // HDR Scan > Trichrome
+	Mono        *Mono // HDR Scan > Mono trichrome
 	Hik         *hikCams
 	handoff     *baseHandoff
 	autoLocking bool
@@ -150,6 +152,8 @@ func New(h Host) *Ctl {
 	c.isoPrev, c.shutPrev = c.Cfg.ISO, c.Cfg.Shutter
 	c.Hik = newHikCams()
 	c.Light = newLight(c)
+	c.Tri = newTri(c)
+	c.Mono = newMono(c)
 	c.initMerge()
 	c.Hair = &Hair{c: c, Status: hairStatusText, Mask: true}
 	return c
@@ -163,6 +167,8 @@ func (c *Ctl) Start() {
 	if c.Light != nil {
 		c.Light.Start()
 	}
+	c.Tri.Start()
+	c.Mono.Start()
 }
 
 // Shutdown runs when the window closes: the Light page's planned
