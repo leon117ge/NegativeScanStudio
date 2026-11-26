@@ -1,0 +1,116 @@
+# QA for the macOS Apple Silicon port (PLAN.md item W8): cross-platform CPU
+# parity of the OFX plugin math. A Windows x64 job builds the plugin math with
+# MinGW-w64 g++ (the shipped Windows toolchain family, same flags as
+# ofx/build.sh) and records the Windows golden. The macOS arm64 job builds the
+# same code with Apple clang (same flags as the macOS bundle) and compares
+# against that fresh golden and against the committed one in ci/qa/golden/.
+# Test-only: no release, no tag, no signing identity, no secrets.
+name: macOS QA parity
+on:
+  push:
+    branches: [qa/macos-parity]
+    paths: ['ofx/src/**', 'ofx/tests/math_runner.cpp', 'ofx/tests/json_params.inc', 'ci/qa/**', '.github/workflows/macos-qa.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+env:
+  CXXFLAGS_REF: -std=c++17 -O3 -fno-math-errno -fno-trapping-math
+jobs:
+  qa-self-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: No CJK in QA files
+        run: python3 ci/qa/check_mac_build.py --cjk-only docs/qa ci/qa .github/workflows
+      - name: W10 checker self-test (text fixtures)
+        run: python3 ci/qa/test_check_mac_build.py
+      - name: Parity inputs are deterministic
+        run: |
+          python3 ci/qa/parity.py cases | sha256sum
+          python3 ci/qa/parity.py cases | sha256sum
+
+  windows-golden:
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: |
+          if ! command -v g++ >/dev/null; then
+            choco install mingw -y --no-progress
+            export PATH="/c/ProgramData/mingw64/mingw64/bin:$PATH"
+          fi
+          command -v g++; g++ --version | head -1; python --version
+      - name: Build math_runner (Windows x64, MinGW, static)
+        run: |
+          mkdir -p build/qa
+          g++ $CXXFLAGS_REF -static -static-libgcc -static-libstdc++ ofx/tests/math_runner.cpp -o build/qa/math_runner.exe
+      - name: Record Windows golden
+        run: |
+          python ci/qa/parity.py run build/qa/math_runner.exe build/qa/ofx_cpu_windows_x64.json \
+            --label "windows-x64 MinGW g++ (CI windows-2022)" \
+            --meta "compiler=$(g++ --version | head -1)" --meta "flags=$CXXFLAGS_REF -static" \
+            --meta "commit=$GITHUB_SHA" --meta "run=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+      - name: Compare with committed golden (informational on Windows)
+        continue-on-error: true
+        run: |
+          if [ -f ci/qa/golden/ofx_cpu_windows_x64.json ]; then
+            python ci/qa/parity.py compare ci/qa/golden/ofx_cpu_windows_x64.json build/qa/ofx_cpu_windows_x64.json
+          else
+            echo "No committed golden yet."
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nss-ofx-parity-windows-golden
+          path: build/qa/ofx_cpu_windows_x64.json
+
+  macos-parity:
+    runs-on: macos-15
+    needs: windows-golden
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: uname -m; sw_vers; clang++ --version
+      - name: Build math_runner (macOS arm64, same flags as the OFX bundle)
+        run: |
+          mkdir -p build/qa
+          clang++ -arch arm64 -mmacosx-version-min=12.0 $CXXFLAGS_REF ofx/tests/math_runner.cpp -o build/qa/math_runner
+          clang++ -arch arm64 -mmacosx-version-min=12.0 $CXXFLAGS_REF -ffp-contract=off ofx/tests/math_runner.cpp -o build/qa/math_runner_nofma
+          file build/qa/math_runner
+      - name: Run parity cases on macOS
+        run: |
+          python3 ci/qa/parity.py run build/qa/math_runner build/qa/ofx_cpu_macos_arm64.json \
+            --label "macos-arm64 Apple clang (CI macos-15)" --meta "compiler=$(clang++ --version | head -1)" \
+            --meta "flags=-arch arm64 $CXXFLAGS_REF" --meta "commit=$GITHUB_SHA"
+          python3 ci/qa/parity.py run build/qa/math_runner_nofma build/qa/ofx_cpu_macos_arm64_nofma.json \
+            --label "macos-arm64 Apple clang -ffp-contract=off (diagnostic)" --meta "commit=$GITHUB_SHA"
+      - uses: actions/download-artifact@v4
+        with:
+          name: nss-ofx-parity-windows-golden
+          path: build/qa/windows
+      - name: Parity gate vs Windows golden from this run
+        run: |
+          python3 ci/qa/parity.py compare build/qa/windows/ofx_cpu_windows_x64.json build/qa/ofx_cpu_macos_arm64.json \
+            --report build/qa/parity_vs_windows_run.json
+      - name: Parity gate vs committed Windows golden
+        run: |
+          if [ -f ci/qa/golden/ofx_cpu_windows_x64.json ]; then
+            python3 ci/qa/parity.py compare ci/qa/golden/ofx_cpu_windows_x64.json build/qa/ofx_cpu_macos_arm64.json \
+              --report build/qa/parity_vs_windows_committed.json
+          else
+            echo "::warning::ci/qa/golden/ofx_cpu_windows_x64.json not committed yet; gated on this run's Windows golden only"
+          fi
+      - name: Diagnostic, FMA contraction off (not a gate)
+        continue-on-error: true
+        run: |
+          python3 ci/qa/parity.py compare build/qa/windows/ofx_cpu_windows_x64.json build/qa/ofx_cpu_macos_arm64_nofma.json \
+            --report build/qa/parity_nofma.json
+      - name: W10 checker self-test with real Mach-O fixtures
+        run: python3 ci/qa/test_check_mac_build.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nss-ofx-parity-macos-reports
+          path: build/qa/*.json
