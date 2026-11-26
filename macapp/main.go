@@ -72,6 +72,7 @@ func run(w *app.Window, selftest bool) error {
 		case app.DestroyEvent:
 			u.drain()
 			u.hdr.Shutdown() // switch the light off and disconnect (Windows: lightui.shutdown on Closing)
+			u.raw.Shutdown() // stop the watch folder and running conversions
 			return e.Err
 		case app.FrameEvent:
 			gtx := app.NewContext(&ops, e)

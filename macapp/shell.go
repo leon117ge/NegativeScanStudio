@@ -22,6 +22,7 @@ import (
 	"gioui.org/widget/material"
 
 	"basetool/macapp/appstate"
+	"basetool/macapp/cropctl"
 	"basetool/macapp/hdrctl"
 	"basetool/macapp/icons"
 )
@@ -47,9 +48,19 @@ type UI struct {
 	dlgOK   Button
 	dlgNo   Button
 
-	hdr *hdrctl.Ctl
-	hp  *hdrPages
-	lp  *lightPage
+	hdr  *hdrctl.Ctl
+	hp   *hdrPages
+	lp   *lightPage
+	crop *cropctl.CropUI
+	raw  *cropctl.RAWUI
+	cp   *cropPage
+	mp   *mergePage
+	hap  *hairPage
+	bp   *batchPage
+
+	// develop is the HDR TIFF "Open in Develop" handed to Convert, which is
+	// not on macOS yet (shown on the Convert placeholder).
+	develop string
 
 	clip    string
 	clipSet bool
@@ -77,6 +88,10 @@ func newUI(th *Theme, inval func()) *UI {
 	u.hp = newHDRPages(u)
 	u.lp = newLightPage(u)
 	u.hdr.Light.OnRouting = u.setNav
+	u.crop = cropctl.NewCrop(u)
+	u.raw = cropctl.NewRaw(u)
+	u.cp, u.mp, u.hap, u.bp = newCropPage(u), newMergePage(u), newHairPage(u), newBatchPage(u)
+	u.hdr.OpenInDevelop = u.openInDevelop
 	return u
 }
 
@@ -121,6 +136,35 @@ func (u *UI) PickFile(title string, save bool, start string, exts []string, done
 		k = pickSave
 	}
 	u.pick(title, k, start, exts, done)
+}
+
+// PickFiles is a native open panel with multiple selection.
+func (u *UI) PickFiles(title, start string, exts []string, done func([]string, bool)) {
+	u.pick(title, pickOpenMulti, start, exts, func(s string, ok bool) {
+		var ps []string
+		for _, p := range strings.Split(s, "\n") {
+			if p = strings.TrimSpace(p); p != "" {
+				ps = append(ps, p)
+			}
+		}
+		done(ps, ok && len(ps) > 0)
+	})
+}
+
+// PickFolder is a native folder panel.
+func (u *UI) PickFolder(title, start string, done func(string, bool)) {
+	u.pick(title, pickFolder, start, nil, done)
+}
+
+// openInDevelop is main.go's hdrui.OpenInDevelop: Windows switches to
+// Convert and opens the file there. Convert is not on macOS yet, so the
+// page shows the file and a message says so.
+func (u *UI) openInDevelop(path string) {
+	u.develop = path
+	if u.nav.SetModule(3) {
+		u.setNav()
+	}
+	u.Message("Open in Develop", "Convert (Develop) is not on macOS yet; it is ported in a later increment.\n\nThe HDR TIFF to open is:\n"+path)
 }
 
 // SetClipboard puts text on the clipboard with the next frame.
@@ -224,7 +268,7 @@ func (u *UI) header(gtx layout.Context) layout.Dimensions {
 func aboutText() string {
 	return appstate.AppVersion + " for macOS (Apple Silicon), Gio user interface (work in progress).\n\n" +
 		"Camera and light control, tethered HDR scanning, RAW to linear TIFF, crop and Convert (RAW to film negative).\n" +
-		"Ported so far: Camera & Light > Camera and Light, and HDR Scan > White light scan. The other pages are placeholders on macOS; use the Windows app for them.\n\n" +
+		"Ported so far: Camera & Light > Camera and Light, HDR Scan > White light scan, and Crop & Merge > Crop, Merge files, Remove hairs and Batch RAW to TIFF. The other pages are placeholders on macOS; use the Windows app for them.\n\n" +
 		"Settings: ~/Library/Application Support/NegativeScanStudio (same files as Windows)\nCrash log: ~/Library/Logs/NegativeScanStudio/crash_log.txt"
 }
 
@@ -358,6 +402,14 @@ func (u *UI) page(gtx layout.Context, p appstate.Page) layout.Dimensions {
 		return u.hp.white(gtx)
 	case appstate.PageLight:
 		return u.lp.layout(gtx)
+	case appstate.PageCrop:
+		return u.cp.layout(gtx)
+	case appstate.PageMerge:
+		return u.mp.layout(gtx)
+	case appstate.PageHairs:
+		return u.hap.layout(gtx)
+	case appstate.PageBatch:
+		return u.bp.layout(gtx)
 	}
 	return u.placeholder(gtx, p)
 }
@@ -377,6 +429,14 @@ func (u *UI) placeholder(gtx layout.Context, p appstate.Page) layout.Dimensions 
 			layout.Rigid(layout.Spacer{Height: 8}.Layout),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				return u.th.hint(gtx, "This page is not on macOS yet; it is ported in a later increment. Use the Windows app for it for now.")
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				if p != appstate.PageConvert || u.develop == "" {
+					return layout.Dimensions{}
+				}
+				return layout.Inset{Top: 8}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return u.th.text(gtx, "Open in Develop was asked for: "+u.develop)
+				})
 			}),
 		)
 	})
