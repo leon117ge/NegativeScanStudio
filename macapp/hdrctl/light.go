@@ -668,7 +668,12 @@ func (l *Light) HikExposureEdited() {
 }
 
 func (l *Light) monoScanExposureUS() float64 {
-	// The Mono trichrome page (its scan settings) is not on macOS yet.
+	if m := l.hdr.Mono; m != nil {
+		st := m.readSettings()
+		if st.ExposureUS >= hikcam.CS240ExpMinUS {
+			return st.ExposureUS
+		}
+	}
 	return hikcam.BestScanQuality().ExposureUS
 }
 
@@ -700,10 +705,13 @@ func (l *Light) hikLights() func() ([3]bool, [3]int) {
 // StartHikPreview shows the Hikrobot (or simulator) preview in the Light
 // page's live view while a monochrome leveling camera is selected.
 func (l *Light) StartHikPreview() {
-	if l.busy || !l.UsesMonoCam() {
+	h := l.hdr
+	if l.busy || !l.UsesMonoCam() || (h.Mono != nil && h.Mono.running.Load()) {
 		return
 	}
-	h := l.hdr
+	if h.Mono != nil {
+		h.Mono.stopPreviewAsync()
+	}
 	gen := l.hikPrevGen.Add(1)
 	alive := func() bool { return l.hikPrevGen.Load() == gen }
 	h.Hik.startPreview(l.camSource() == camSrcHikSim, l.log, func(img image.Image, what string, done func()) {
@@ -722,4 +730,7 @@ func (l *Light) StopHikPreview() { l.stopHikPreview() }
 func (l *Light) stopHikPreview() {
 	l.hikPrevGen.Add(1)
 	l.hdr.Hik.prevGen.Add(1)
+	if m := l.hdr.Mono; m != nil {
+		m.stopPreviewAsync()
+	}
 }

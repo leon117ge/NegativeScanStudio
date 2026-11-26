@@ -57,6 +57,8 @@ type UI struct {
 	mp   *mergePage
 	hap  *hairPage
 	bp   *batchPage
+	tp   *triPage
+	mo   *monoPage
 
 	// develop is the HDR TIFF "Open in Develop" handed to Convert, which is
 	// not on macOS yet (shown on the Convert placeholder).
@@ -91,6 +93,7 @@ func newUI(th *Theme, inval func()) *UI {
 	u.crop = cropctl.NewCrop(u)
 	u.raw = cropctl.NewRaw(u)
 	u.cp, u.mp, u.hap, u.bp = newCropPage(u), newMergePage(u), newHairPage(u), newBatchPage(u)
+	u.tp, u.mo = newTriPage(u), newMonoPage(u)
 	u.hdr.OpenInDevelop = u.openInDevelop
 	return u
 }
@@ -185,11 +188,14 @@ func (u *UI) setNav() {
 	l := u.hdr.Light
 	if k == 3 && l.UsesMonoCam() {
 		u.hdr.SetLiveVisible(false)
-		l.StartHikPreview()
+		l.StartHikPreview() // stops the Mono trichrome preview first
 		return
 	}
-	l.StopHikPreview()
-	u.hdr.SetLiveVisible(k == 0 || k == 1 || k == 3)
+	l.StopHikPreview() // also stops the Mono trichrome preview
+	u.hdr.SetLiveVisible(k >= 0)
+	if u.nav.Page() == appstate.PageMono {
+		u.hdr.Mono.StartPreview()
+	}
 }
 
 func (u *UI) Layout(gtx layout.Context) layout.Dimensions {
@@ -268,7 +274,7 @@ func (u *UI) header(gtx layout.Context) layout.Dimensions {
 func aboutText() string {
 	return appstate.AppVersion + " for macOS (Apple Silicon), Gio user interface (work in progress).\n\n" +
 		"Camera and light control, tethered HDR scanning, RAW to linear TIFF, crop and Convert (RAW to film negative).\n" +
-		"Ported so far: Camera & Light > Camera and Light, HDR Scan > White light scan, and Crop & Merge > Crop, Merge files, Remove hairs and Batch RAW to TIFF. The other pages are placeholders on macOS; use the Windows app for them.\n\n" +
+		"Ported so far: Camera & Light > Camera and Light, HDR Scan > White light scan, Trichrome and Mono trichrome, and Crop & Merge > Crop, Merge files, Remove hairs and Batch RAW to TIFF. The other pages are placeholders on macOS; use the Windows app for them.\n\n" +
 		"Settings: ~/Library/Application Support/NegativeScanStudio (same files as Windows)\nCrash log: ~/Library/Logs/NegativeScanStudio/crash_log.txt"
 }
 
@@ -410,6 +416,10 @@ func (u *UI) page(gtx layout.Context, p appstate.Page) layout.Dimensions {
 		return u.hap.layout(gtx)
 	case appstate.PageBatch:
 		return u.bp.layout(gtx)
+	case appstate.PageTri:
+		return u.tp.layout(gtx)
+	case appstate.PageMono:
+		return u.mo.layout(gtx)
 	}
 	return u.placeholder(gtx, p)
 }
