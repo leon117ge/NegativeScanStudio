@@ -48,21 +48,21 @@ jobs:
           else
             echo "metal compiler not available on this image; runtime compile is still tested below"
           fi
-      - name: Build NegativeScanStudio.ofx.bundle (arm64, Metal + CPU)
+      - name: Build NegativeScanStudio.ofx.bundle (arm64, Metal + CPU) with ofx/build-mac.sh
         run: |
+          # Same script as the W1 CPU build and the release package: version-stamped Info.plist from
+          # ofx/mac/Info.plist.in, licenses, ad-hoc signature, zip. NSS_METAL=1 requires Metal.
+          set -o pipefail
+          NSS_METAL=1 ofx/build-mac.sh build | tee build-mac.log
+          grep -qx 'engine=Metal + CPU' build-mac.log
           B=build/NegativeScanStudio.ofx.bundle/Contents
-          mkdir -p "$B/MacOS" "$B/Resources" build/obj
-          clang++ $CXXFLAGS_COMMON -fobjc-arc -DNSS_METAL -c ofx/src/metal_render.mm -o build/obj/metal_render.o
-          clang++ $CXXFLAGS_COMMON -DNSS_METAL -c ofx/src/plugin.cpp -o build/obj/plugin.o
-          clang++ -arch arm64 -mmacosx-version-min=13.0 -bundle build/obj/plugin.o build/obj/metal_render.o \
-            -framework Metal -framework Foundation -o "$B/MacOS/NegativeScanStudio.ofx"
-          cp ci/macos/Info.plist "$B/Info.plist"
-          codesign --force --sign - --timestamp=none build/NegativeScanStudio.ofx.bundle
+          mkdir -p build/metal
+          plutil -p "$B/Info.plist"
           file "$B/MacOS/NegativeScanStudio.ofx"
           nm -gU "$B/MacOS/NegativeScanStudio.ofx" | grep -E 'OfxGetPlugin|OfxGetNumberOfPlugins'
           otool -L "$B/MacOS/NegativeScanStudio.ofx" | tee build/otool.txt
           grep -q Metal.framework build/otool.txt
-          python3 ofx/tests/check_release_hooks.py "$B/MacOS/NegativeScanStudio.ofx"
+          python3 ofx/tests/check_release_hooks.py "$B/MacOS/NegativeScanStudio.ofx" build/obj/metal_render.o
           /usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$B/Info.plist" | tee build/minos-plist.txt
           grep -qx 13.0 build/minos-plist.txt
           otool -l "$B/MacOS/NegativeScanStudio.ofx" | tee build/otool-l.txt
@@ -101,4 +101,5 @@ jobs:
           name: NegativeScanStudio-ofx-macos-arm64-metal-${{ matrix.os }}
           path: |
             build/NegativeScanStudio.ofx.bundle
+            build/NegativeScanStudio_OFX_v*_macOS_arm64.zip
             build/metal/parity.txt
