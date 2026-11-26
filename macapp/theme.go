@@ -668,6 +668,12 @@ func (c *Card) Layout(gtx layout.Context, th *Theme, title, icon string, onReset
 
 // drawImage paints img scaled into r (GPU texture on Metal).
 func drawImage(gtx layout.Context, img paint.ImageOp, r image.Rectangle) {
+	drawImageFilter(gtx, img, r, paint.FilterLinear)
+}
+
+// drawImageFilter is drawImage with the scaling filter (nearest for a
+// zoomed loupe, as GDI StretchBlt draws it on Windows).
+func drawImageFilter(gtx layout.Context, img paint.ImageOp, r image.Rectangle, f paint.ImageFilter) {
 	sz := img.Size()
 	if sz.X == 0 || sz.Y == 0 || r.Empty() {
 		return
@@ -675,7 +681,7 @@ func drawImage(gtx layout.Context, img paint.ImageOp, r image.Rectangle) {
 	defer op.Offset(r.Min).Push(gtx.Ops).Pop()
 	defer clip.Rect{Max: r.Size()}.Push(gtx.Ops).Pop()
 	sc := op.Affine(scaleAff(float32(r.Dx())/float32(sz.X), float32(r.Dy())/float32(sz.Y))).Push(gtx.Ops)
-	img.Filter = paint.FilterLinear
+	img.Filter = f
 	img.Add(gtx.Ops)
 	paint.PaintOp{}.Add(gtx.Ops)
 	sc.Pop()

@@ -59,6 +59,7 @@ type UI struct {
 	bp   *batchPage
 	tp   *triPage
 	mo   *monoPage
+	fp   *focusPage
 
 	// develop is the HDR TIFF "Open in Develop" handed to Convert, which is
 	// not on macOS yet (shown on the Convert placeholder).
@@ -93,7 +94,7 @@ func newUI(th *Theme, inval func()) *UI {
 	u.crop = cropctl.NewCrop(u)
 	u.raw = cropctl.NewRaw(u)
 	u.cp, u.mp, u.hap, u.bp = newCropPage(u), newMergePage(u), newHairPage(u), newBatchPage(u)
-	u.tp, u.mo = newTriPage(u), newMonoPage(u)
+	u.tp, u.mo, u.fp = newTriPage(u), newMonoPage(u), newFocusPage(u)
 	u.hdr.OpenInDevelop = u.openInDevelop
 	return u
 }
@@ -186,6 +187,14 @@ func (u *UI) SetClipboard(text string) {
 func (u *UI) setNav() {
 	k := u.nav.LiveView()
 	l := u.hdr.Light
+	focus, mono := u.nav.Page() == appstate.PageFocus, u.nav.Page() == appstate.PageMono
+	if !focus && u.hdr.Focus.LeaveThen(func() {
+		if u.nav.Page() == appstate.PageMono {
+			u.hdr.Mono.StartPreview()
+		}
+	}) {
+		mono = false // started after the restore (see Focus.LeaveThen)
+	}
 	if k == 3 && l.UsesMonoCam() {
 		u.hdr.SetLiveVisible(false)
 		l.StartHikPreview() // stops the Mono trichrome preview first
@@ -193,7 +202,10 @@ func (u *UI) setNav() {
 	}
 	l.StopHikPreview() // also stops the Mono trichrome preview
 	u.hdr.SetLiveVisible(k >= 0)
-	if u.nav.Page() == appstate.PageMono {
+	if focus {
+		u.hdr.Focus.Enter() // runs its own preview (k == -1)
+	}
+	if mono {
 		u.hdr.Mono.StartPreview()
 	}
 }
@@ -274,7 +286,7 @@ func (u *UI) header(gtx layout.Context) layout.Dimensions {
 func aboutText() string {
 	return appstate.AppVersion + " for macOS (Apple Silicon), Gio user interface (work in progress).\n\n" +
 		"Camera and light control, tethered HDR scanning, RAW to linear TIFF, crop and Convert (RAW to film negative).\n" +
-		"Ported so far: Camera & Light > Camera and Light, HDR Scan > White light scan, Trichrome and Mono trichrome, and Crop & Merge > Crop, Merge files, Remove hairs and Batch RAW to TIFF. The other pages are placeholders on macOS; use the Windows app for them.\n\n" +
+		"Ported so far: Camera & Light > Camera and Light, HDR Scan > White light scan, Trichrome, Mono trichrome and Focus check, and Crop & Merge > Crop, Merge files, Remove hairs and Batch RAW to TIFF. The other pages are placeholders on macOS; use the Windows app for them.\n\n" +
 		"Settings: ~/Library/Application Support/NegativeScanStudio (same files as Windows)\nCrash log: ~/Library/Logs/NegativeScanStudio/crash_log.txt"
 }
 
@@ -420,6 +432,8 @@ func (u *UI) page(gtx layout.Context, p appstate.Page) layout.Dimensions {
 		return u.tp.layout(gtx)
 	case appstate.PageMono:
 		return u.mo.layout(gtx)
+	case appstate.PageFocus:
+		return u.fp.layout(gtx)
 	}
 	return u.placeholder(gtx, p)
 }
