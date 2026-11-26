@@ -10,6 +10,6 @@
  <key>CFBundlePackageType</key><string>BNDL</string>
  <key>CFBundleShortVersionString</key><string>0.0.0</string>
  <key>CFBundleVersion</key><string>0.0.0</string>
- <key>LSMinimumSystemVersion</key><string>12.0</string>
+ <key>LSMinimumSystemVersion</key><string>13.0</string>
 </dict>
 </plist>

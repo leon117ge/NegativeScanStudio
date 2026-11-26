@@ -26,6 +26,7 @@ NSS_LEVELING_FIXTURE="$BUILD/leveling" go test ./hdrscan -run TestScanMetadataUs
 # Metal (macOS) contract on any OS: embedded MSL source check, then the exact kernel as host C++
 # behind a mocked Metal API. Real Metal runs in .github/workflows/macos-metal.yml.
 python3 ofx/tests/check_metal_source.py "$BUILD"
+python3 ofx/tests/check_release_hooks.py --source ofx/src/metal_render.mm
 "$CXX" -std=c++17 -O3 -fno-math-errno -fno-trapping-math -Wno-attributes -Iofx/vendor/openfx/include -Iofx/vendor/opencl -Iofx/tests/metal_stub -I"$BUILD" ofx/tests/metal_contract.cpp -o "$BUILD/metal_contract"
 "$BUILD/metal_contract"
 # macOS UI variant of the same contract (visible Rendering controls), then per-platform parameter

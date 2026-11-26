@@ -55,13 +55,20 @@ id<MTLComputePipelineState> buildPipeline(id<MTLDevice> device,NSString *source,
 struct CacheEntry {id<MTLDevice> device;id<MTLComputePipelineState> pipeline;std::string error;};
 std::mutex cacheMutex;
 std::map<uint64_t,CacheEntry> &cache(){static auto *entries=new std::map<uint64_t,CacheEntry>();return *entries;}
-id<MTLComputePipelineState> pipelineFor(id<MTLDevice> device,int fault,std::string &error){
- // Forced failures bypass the cache so they never poison it.
+id<MTLComputePipelineState> pipelineFor(id<MTLDevice> device,std::string &error
+#ifdef NSS_TEST_HOOKS
+ ,int fault
+#endif
+){
+#ifdef NSS_TEST_HOOKS
+ // Forced failures bypass the cache so they never poison a release pipeline. Compiled only
+ // into test builds (-DNSS_TEST_HOOKS); the hook strings must not appear in a release binary.
  if(fault==nss::kMetalFaultCompile)return buildPipeline(device,@"this is not Metal source",@"nss_render_metal",error);
  if(fault==nss::kMetalFaultPipeline){
   id<MTLComputePipelineState> pipeline=buildPipeline(device,@(nss::metalSource),@"nss_render_metal_missing",error);
   return pipeline;
  }
+#endif
  std::lock_guard<std::mutex> lock(cacheMutex);
  auto &entry=cache()[device.registryID];
  if(entry.pipeline)return entry.pipeline;
@@ -82,20 +89,32 @@ bool encode(void *queuePointer,void *sourcePointer,void *destPointer,const float
  const std::shared_ptr<nss::MetalStatus> &status,std::string &deviceName,std::string &error){
  @autoreleasepool{
   @try{
+#ifdef NSS_TEST_HOOKS
    int fault=nss::MetalApi::get().fault.load();
+#endif
    id<MTLCommandQueue> queue=(__bridge id<MTLCommandQueue>)queuePointer;
    id<MTLBuffer> source=(__bridge id<MTLBuffer>)sourcePointer,dest=(__bridge id<MTLBuffer>)destPointer;
    if(!queue){error="Metal: host did not provide a command queue";return false;}
    if(!source||!dest){error="Metal: host did not provide image buffers";return false;}
    id<MTLDevice> device=queue.device;
-   if(!device||fault==nss::kMetalFaultNoDevice){error="Metal: no device";return false;}
+   if(!device
+#ifdef NSS_TEST_HOOKS
+      ||fault==nss::kMetalFaultNoDevice
+#endif
+     ){error="Metal: no device";return false;}
    if(source.device!=device||dest.device!=device){error="Metal: image buffers belong to another device";return false;}
    if(count*sizeof(float)>4096){error="Metal: parameter block too large for setBytes";return false;}
    if(!fits(source,args.sx1,args.sy1,args.sx2,args.sy2,args.sourceStride)||!fits(dest,args.dx1,args.dy1,args.dx2,args.dy2,args.destStride)){
     error="Metal: image buffer smaller than its bounds and row bytes";return false;}
-   id<MTLComputePipelineState> pipeline=pipelineFor(device,fault,error);
+#ifdef NSS_TEST_HOOKS
+   id<MTLComputePipelineState> pipeline=pipelineFor(device,error,fault);
+#else
+   id<MTLComputePipelineState> pipeline=pipelineFor(device,error);
+#endif
    if(!pipeline)return false;
+#ifdef NSS_TEST_HOOKS
    if(fault==nss::kMetalFaultEncode){error="Metal encode failed (forced by test)";return false;}
+#endif
    deviceName=device.name.UTF8String?device.name.UTF8String:"Metal device";
    if(args.width<=0||args.height<=0)return true;
    id<MTLCommandBuffer> commands=[queue commandBuffer];

@@ -17,7 +17,7 @@ jobs:
         os: [macos-15, macos-26]
     runs-on: ${{ matrix.os }}
     env:
-      CXXFLAGS_COMMON: -arch arm64 -mmacosx-version-min=12.0 -std=c++17 -O3 -fno-math-errno -fno-trapping-math -Wall -Wextra -Wno-unused-parameter -Iofx/vendor/openfx/include -Iofx/vendor/opencl
+      CXXFLAGS_COMMON: -arch arm64 -mmacosx-version-min=13.0 -std=c++17 -O3 -fno-math-errno -fno-trapping-math -ffp-contract=off -fvisibility=hidden -Wall -Wextra -Wno-unused-parameter -Iofx/vendor/openfx/include -Iofx/vendor/opencl
     steps:
       - uses: actions/checkout@v4
       - name: Toolchain
@@ -34,7 +34,7 @@ jobs:
           import pathlib,re,sys
           han=re.compile("[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\U00020000-\U000323af]")
           files=[*pathlib.Path('ofx/src').glob('*metal*'),*pathlib.Path('ofx/src').glob('render.metal'),pathlib.Path('ofx/src/plugin.cpp'),
-                 *pathlib.Path('ofx/tests').glob('metal*'),pathlib.Path('ofx/tests/param_dump.cpp'),pathlib.Path('ofx/tests/check_param_defs.py'),*pathlib.Path('ofx/tests/metal_stub').glob('*'),pathlib.Path('.github/workflows/macos-metal.yml'),
+                 *pathlib.Path('ofx/tests').glob('metal*'),pathlib.Path('ofx/tests/param_dump.cpp'),pathlib.Path('ofx/tests/check_param_defs.py'),pathlib.Path('ofx/tests/check_release_hooks.py'),pathlib.Path('ofx/tests/check_mac_minos.py'),*pathlib.Path('ofx/tests/metal_stub').glob('*'),pathlib.Path('.github/workflows/macos-metal.yml'),
                  pathlib.Path('ofx/README.md'),pathlib.Path('ofx/CHANGELOG.md'),pathlib.Path('ofx/ROADMAP.md')]
           bad=[f'{f}:{n}' for f in files if f.is_file() for n,l in enumerate(f.read_text(encoding='utf-8').splitlines(),1) if han.search(l)]
           print('\n'.join(bad) or f'PASS: {len(files)} files, zero CJK characters');sys.exit(1 if bad else 0)
@@ -54,7 +54,7 @@ jobs:
           mkdir -p "$B/MacOS" "$B/Resources" build/obj
           clang++ $CXXFLAGS_COMMON -fobjc-arc -DNSS_METAL -c ofx/src/metal_render.mm -o build/obj/metal_render.o
           clang++ $CXXFLAGS_COMMON -DNSS_METAL -c ofx/src/plugin.cpp -o build/obj/plugin.o
-          clang++ -arch arm64 -mmacosx-version-min=12.0 -bundle build/obj/plugin.o build/obj/metal_render.o \
+          clang++ -arch arm64 -mmacosx-version-min=13.0 -bundle build/obj/plugin.o build/obj/metal_render.o \
             -framework Metal -framework Foundation -o "$B/MacOS/NegativeScanStudio.ofx"
           cp ci/macos/Info.plist "$B/Info.plist"
           codesign --force --sign - --timestamp=none build/NegativeScanStudio.ofx.bundle
@@ -62,6 +62,11 @@ jobs:
           nm -gU "$B/MacOS/NegativeScanStudio.ofx" | grep -E 'OfxGetPlugin|OfxGetNumberOfPlugins'
           otool -L "$B/MacOS/NegativeScanStudio.ofx" | tee build/otool.txt
           grep -q Metal.framework build/otool.txt
+          python3 ofx/tests/check_release_hooks.py "$B/MacOS/NegativeScanStudio.ofx"
+          /usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$B/Info.plist" | tee build/minos-plist.txt
+          grep -qx 13.0 build/minos-plist.txt
+          otool -l "$B/MacOS/NegativeScanStudio.ofx" | tee build/otool-l.txt
+          python3 ofx/tests/check_mac_minos.py build/otool-l.txt
       - name: Metal contract (mock API, exact kernel as host C++)
         run: |
           clang++ $CXXFLAGS_COMMON -Wno-unknown-attributes -Iofx/tests/metal_stub -Ibuild/metal ofx/tests/metal_contract.cpp -o build/metal/metal_contract
@@ -78,8 +83,9 @@ jobs:
           NSS_METAL_REQUIRE_DEVICE: '1'
         run: |
           clang++ $CXXFLAGS_COMMON -fobjc-arc -c ofx/tests/metal_test_support.mm -o build/obj/metal_test_support.o
-          clang++ $CXXFLAGS_COMMON -DNSS_METAL -c ofx/tests/metal_plugin_test.cpp -o build/obj/metal_plugin_test.o
-          clang++ -arch arm64 -mmacosx-version-min=12.0 build/obj/metal_plugin_test.o build/obj/metal_render.o build/obj/metal_test_support.o \
+          clang++ $CXXFLAGS_COMMON -fobjc-arc -DNSS_METAL -DNSS_TEST_HOOKS -c ofx/src/metal_render.mm -o build/obj/metal_render_hooks.o
+          clang++ $CXXFLAGS_COMMON -DNSS_METAL -DNSS_TEST_HOOKS -c ofx/tests/metal_plugin_test.cpp -o build/obj/metal_plugin_test.o
+          clang++ -arch arm64 -mmacosx-version-min=13.0 build/obj/metal_plugin_test.o build/obj/metal_render_hooks.o build/obj/metal_test_support.o \
             -framework Metal -framework Foundation -o build/metal/metal_plugin_test
           build/metal/metal_plugin_test | tee build/metal/parity.txt
       - name: Existing native unit tests (CPU-only build, unchanged)
