@@ -67,6 +67,10 @@ All UI labels, statuses, and prompts are in English. The inversion math and all 
 
 Technical parameters (18 matrix coefficients, camera strength, individual channel gammas, Density In constants, black subtraction, white code, gray-pick handle, pipeline stage, and render engine selection) are hidden via OFX `kOfxParamPropSecret` with all parameter IDs and defaults preserved for existing project compatibility.
 
+## macOS (Apple Silicon): Metal render path
+
+macOS builds compiled with `-DNSS_METAL` and linked with `src/metal_render.mm` (`-fobjc-arc -framework Metal -framework Foundation`) offer Metal to the host. Render uses the host's Metal command queue and image buffers with no copies and no waiting. The embedded kernel is compiled at run time once per GPU with fast math off. On any Metal failure the node switches itself to the CPU and keeps rendering; `Show render engine` says why. Builds without `-DNSS_METAL` (Windows, Linux, macOS CPU-only) do not contain Metal code. Real Metal parity and the forced-failure fallback run in `.github/workflows/macos-metal.yml`.
+
 ## Verification and limitations
 Native CPU math/parity, Tone math (off = 0.90.11 bit for bit, ramps, hue, no clipping), mock-host lifecycle/UI-visibility/camera-dropdown/preset/tone-preset/metadata/overlay, PoCL OpenCL execution, CUDA Driver contract and offline PTX assembly checks pass in `ofx/test.sh`. Real Windows Resolve, physical NVIDIA/GPU execution, host UI inspection, and real film negative scan acceptance remain untested.
 

@@ -2,6 +2,11 @@
 
 Current plugin: **0.90.14** · [Plugin changelog](CHANGELOG.md) · [Scanning app roadmap](../docs/ROADMAP.md) · [Versioning](../docs/VERSIONING.md)
 
+## In progress: macOS Metal render path (branch feat/metal-render, local)
+
+- Metal declared next to CUDA/OpenCL; host command queue and MTLBuffers, commit without wait, per-device pipeline cache, threadgroups from the pipeline, CPU fallback with per-instance withdrawal. Mock contract passes in `test.sh`; real Metal parity runs in `macos-metal.yml` on macos-14/15 runners.
+- Next: merge with the macOS CPU bundle and installer (W1), assign the version, test in Resolve on the user's Mac (Metal render engine line, speed vs CPU, CPU fallback message), then the same Metal path for Print 2383 (W3).
+
 ## Implemented in 0.90.14 (Resolve pending)
 
 - Separate Tone Color group: three switches, its own preset menu, then sliders; Tone keeps shoulder/toe with switches, preset, sliders. Each preset menu only loads its own group.
