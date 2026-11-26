@@ -110,7 +110,16 @@ func TestMockConnectLiveViewDisconnect(t *testing.T) {
 		}
 		return m, nil
 	}
+	// ListDevices defaults to the ImageCaptureCore scan on macOS.
+	// Start queues that scan on the camera worker; Connect is queued
+	// behind it, so a slow first ICC enumeration (seen as >5s on a
+	// macos-15 runner) makes this test time out even though the mock
+	// camera itself is instant. The listing is covered by the ICC
+	// tests; this test stubs it so connect and live view stay
+	// deterministic.
+	c.ListDevices = func() ([]Device, error) { return nil, nil }
 	c.Start()
+	h.pump(t, "device list", 2*time.Second, func() bool { return c.LogSeq > 0 })
 	b := c.Buttons()
 	if b.ConnText != "Connect" || b.Test || b.Meter || b.Capture || !b.DevList {
 		t.Fatalf("idle buttons %+v", b)
@@ -202,6 +211,37 @@ func TestCancelledSceneDoesNotConnect(t *testing.T) {
 	}
 }
 
+// simNeedsUncompressed reports the two OpenSim errors for a RAW that
+// LibRaw can decode but whose sensor values are not stored as
+// uncompressed 16-bit samples in the file (typical of the public
+// pixls.us Fujifilm samples). Other errors are real failures.
+func simNeedsUncompressed(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	return strings.Contains(s, "uncompressed RAW") ||
+		strings.Contains(s, "sensor data not found") ||
+		strings.Contains(s, "layout not recognised")
+}
+
+// requireSimRAF skips when NSS_SIM_RAF is a compressed or otherwise
+// unreadable simulated scene, and fails for a missing or unreadable path.
+func requireSimRAF(t *testing.T, raf string) {
+	t.Helper()
+	if _, err := os.Stat(raf); err != nil {
+		t.Fatalf("NSS_SIM_RAF %s: %v", raf, err)
+	}
+	s, err := camera.OpenSim(raf, camera.NewLogger(t.TempDir()))
+	if err != nil {
+		if simNeedsUncompressed(err) {
+			t.Skipf("NSS_SIM_RAF is a compressed or packed RAW; the simulator needs uncompressed sensor data in the file (%v)", err)
+		}
+		t.Fatalf("NSS_SIM_RAF %s: %v", raf, err)
+	}
+	s.Close()
+}
+
 // TestSimMeterCaptureMerge runs the real simulator (LibRaw) on an
 // uncompressed RAF given by NSS_SIM_RAF: meter, capture 0/+2, merge.
 func TestSimMeterCaptureMerge(t *testing.T) {
@@ -209,17 +249,23 @@ func TestSimMeterCaptureMerge(t *testing.T) {
 	if raf == "" {
 		t.Skip("NSS_SIM_RAF not set")
 	}
+	requireSimRAF(t, raf)
 	isolate(t)
 	h := newHost()
 	h.scene = raf
 	c := New(h)
+	c.ListDevices = func() ([]Device, error) { return nil, nil }
 	c.Cfg.OutDir = t.TempDir()
 	c.Cfg.Roll = "simroll"
 	c.Connect()
 	h.pump(t, "connect", 30*time.Second, func() bool { return c.Connected() || len(h.messages) > 0 })
 	if !c.Connected() {
-		if len(h.messages) > 0 && strings.Contains(h.messages[0], "layout not recognised") {
-			t.Skip("NSS_SIM_RAF is a compressed RAF; the simulator needs an uncompressed one")
+		var msg string
+		if len(h.messages) > 0 {
+			msg = h.messages[0]
+		}
+		if simNeedsUncompressed(errors.New(msg)) {
+			t.Skipf("NSS_SIM_RAF is a compressed or packed RAW; the simulator needs uncompressed sensor data in the file (%s)", msg)
 		}
 		t.Fatalf("sim connect: %q", h.messages)
 	}
@@ -242,4 +288,19 @@ func TestSimMeterCaptureMerge(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.Disconnect()
+}
+
+func TestSimNeedsUncompressed(t *testing.T) {
+	if simNeedsUncompressed(nil) {
+		t.Fatal("nil")
+	}
+	if !simNeedsUncompressed(errors.New("simulated camera needs an uncompressed RAW (sensor data not found in file)")) {
+		t.Fatal("sensor data error")
+	}
+	if !simNeedsUncompressed(errors.New("simulated camera: sensor data layout not recognised")) {
+		t.Fatal("layout error")
+	}
+	if simNeedsUncompressed(errors.New("cannot open RAW: Input/output error")) {
+		t.Fatal("must not skip a real I/O error")
+	}
 }
