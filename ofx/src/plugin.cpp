@@ -8,6 +8,7 @@
 #include "ofxGPURender.h"
 #include "opencl.hpp"
 #include "cuda.hpp"
+#include "metal.hpp"
 #include "prepared_cache.hpp"
 #include <chrono>
 #include "cpu_render.hpp"
@@ -69,6 +70,8 @@ struct Instance {
  // One bounded cache entry; no stale metadata reused for another clip.
  std::string path;std::filesystem::file_time_type stamp{};std::optional<nss::Metadata> meta;
  std::string metadataError,lastRender="No render yet";nss::CLRender opencl;nss::CudaRender cuda;nss::PreparedCache preparedCache;
+ // Metal: async command-buffer status, and the per-instance withdrawal after any Metal failure.
+ std::shared_ptr<nss::MetalStatus> metal=std::make_shared<nss::MetalStatus>();std::atomic<bool> metalWithdrawn{false};
  std::chrono::steady_clock::time_point nextMetadataCheck{};uint64_t metadataReads=0,metadataProbes=0;
 };
 Instance *instance(OfxImageEffectHandle e){void *p=nullptr;check(prop->propGetPointer(properties(e),kOfxPropInstanceData,0,&p));if(!p)throw kOfxStatErrBadHandle;return static_cast<Instance*>(p);}
@@ -91,6 +94,10 @@ nss::Metadata load(Instance *i,const std::string &input,bool force=false) {
 }
 std::string shortError(const std::exception &x){std::string text=x.what();return text.size()<=40?text:"Invalid NSS info";}
 void setLastRender(Instance *i,const std::string &text){std::lock_guard<std::mutex> lock(i->mutex);i->lastRender=text;}
+// Never lets a Metal probe fail describe, createInstance or instanceChanged.
+bool metalAvailable(){try{return nss::MetalApi::get().available;}catch(...){return false;}}
+// Stop offering Metal for this instance after a failure; later frames come as CPU buffers.
+void withdrawMetal(OfxImageEffectHandle e,Instance *i){i->metalWithdrawn=true;OfxPropertySetHandle p=nullptr;if(effect->getPropertySet(e,&p)==kOfxStatOK&&p)prop->propSetString(p,kOfxImageEffectPropMetalRenderSupported,0,"false");}
 Pipeline readParams(OfxParamSetHandle set,double time) {
  Pipeline p;
 #include "read_params.inc"
@@ -137,7 +144,8 @@ OfxStatus describe(OfxImageEffectHandle e) {
  prop->propSetString(p,kOfxImageEffectPropOpenCLRenderSupported,0,nss::CLApi::get().available?"true":"false");
  prop->propSetString(p,kOfxImageEffectPropOpenCLSupported,0,"false");
  prop->propSetString(p,kOfxImageEffectPropCudaRenderSupported,0,nss::CudaApi::get().available?"true":"false");
- prop->propSetString(p,kOfxImageEffectPropCudaStreamSupported,0,"true");return kOfxStatOK;
+ prop->propSetString(p,kOfxImageEffectPropCudaStreamSupported,0,"true");
+ prop->propSetString(p,kOfxImageEffectPropMetalRenderSupported,0,metalAvailable()?"true":"false");return kOfxStatOK;
 }
 OfxStatus describeContext(OfxImageEffectHandle e) {
  for(auto name:{kOfxImageEffectSimpleSourceClipName,kOfxImageEffectOutputClipName}) {
@@ -430,9 +438,11 @@ OfxStatus changed(OfxImageEffectHandle e,OfxPropertySetHandle a) {
   bool automatic=integer(s,"render_device",time)==0;
   prop->propSetString(properties(e),kOfxImageEffectPropOpenCLRenderSupported,0,automatic&&nss::CLApi::get().available?"true":"false");
   prop->propSetString(properties(e),kOfxImageEffectPropCudaRenderSupported,0,automatic&&nss::CudaApi::get().available?"true":"false");
+  prop->propSetString(properties(e),kOfxImageEffectPropMetalRenderSupported,0,automatic&&metalAvailable()&&!instance(e)->metalWithdrawn?"true":"false");
  }else if(key=="render_info"){
   auto i=instance(e);std::string text;{std::lock_guard<std::mutex> lock(i->mutex);text=i->lastRender;}
   text+="\n"+nss::CudaApi::get().availability+"\nOpenCL runtime: "+(nss::CLApi::get().available?"available":"unavailable");
+  text+="\n"+nss::MetalApi::get().availability+(i->metalWithdrawn?" (withdrawn for this node after a failure)":"");
   if(message)message->message(e,kOfxMessageMessage,"nss.render","%s",text.c_str());
  }
  return kOfxStatOK;
@@ -462,8 +472,8 @@ OfxRectD fetchRegion(OfxImageClipHandle clip,OfxParamSetHandle s,double time,con
 void cpuThread(unsigned int index,unsigned int count,void *arg){static_cast<nss::CpuJob*>(arg)->rows(index,count);}
 OfxStatus render(OfxImageEffectHandle e,OfxPropertySetHandle a) {
  double time=0;check(prop->propGetDouble(a,kOfxPropTime,0,&time));int win[4];check(prop->propGetIntN(a,kOfxImageEffectPropRenderWindow,4,win));
- int gpu=0,cuda=0;prop->propGetInt(a,kOfxImageEffectPropOpenCLEnabled,0,&gpu);prop->propGetInt(a,kOfxImageEffectPropCudaEnabled,0,&cuda);
- if(gpu&&cuda)return kOfxStatGPURenderFailed;
+ int gpu=0,cuda=0,metal=0;prop->propGetInt(a,kOfxImageEffectPropOpenCLEnabled,0,&gpu);prop->propGetInt(a,kOfxImageEffectPropCudaEnabled,0,&cuda);prop->propGetInt(a,kOfxImageEffectPropMetalEnabled,0,&metal);
+ if((gpu!=0)+(cuda!=0)+(metal!=0)>1)return kOfxStatGPURenderFailed;
  auto i=instance(e);auto s=params(e);bool pick=integer(s,"pick_auto",time)!=0;auto p=readParams(s,time);
  auto sourceRegion=fetchRegion(i->src,s,time,win,a,pick),destRegion=fetchRegion(i->dst,s,time,win,a,false);
  Image src,dst;src.get(i->src,time,&sourceRegion);dst.get(i->dst,time,&destRegion);
@@ -475,6 +485,19 @@ OfxStatus render(OfxImageEffectHandle e,OfxPropertySetHandle a) {
  void *queue=nullptr;if(gpu)prop->propGetPointer(a,kOfxImageEffectPropOpenCLCommandQueue,0,&queue);
  if((gpu||cuda)&&integer(s,"render_device",time)!=0)return kOfxStatGPURenderFailed;
  void *cudaStream=nullptr;bool cudaStreamProvided=cuda&&prop->propGetPointer(a,kOfxImageEffectPropCudaStream,0,&cudaStream)==kOfxStatOK;
+ void *metalQueue=nullptr;if(metal)prop->propGetPointer(a,kOfxImageEffectPropMetalCommandQueue,0,&metalQueue);
+ // Metal on unified memory: after the host queue has drained, the host MTLBuffers are readable and
+ // writable from the CPU (zero copy). Only the picker and the CPU fallback use this; the normal
+ // Metal render never waits.
+ float *metalGpuSource=src.data,*metalGpuDest=dst.data;bool metalMapped=false,metalMapTried=false;
+ auto mapMetal=[&]{
+  if(metalMapTried)return metalMapped;
+  metalMapTried=true;auto &api=nss::MetalApi::get();
+  if(!api.contents||!api.drain)return false;
+  void *sp=api.contents(metalGpuSource),*dp=api.contents(metalGpuDest);
+  if(!sp||!dp||!api.drain(metalQueue))return false;
+  src.data=static_cast<float*>(sp);dst.data=static_cast<float*>(dp);return metalMapped=true;
+ };
  bool pickUnavailable=false;
  if(pick){
   double x=0,y=0,scaleX=1,scaleY=1,aspect=1;
@@ -484,12 +507,35 @@ OfxStatus render(OfxImageEffectHandle e,OfxPropertySetHandle a) {
   int rect[4],radius=int(std::clamp(number(s,"pick_radius",time),0.,32.));
   double px=std::floor(x*scaleX/aspect),py=std::floor(y*scaleY);
   if(!std::isfinite(px)||!std::isfinite(py)||px<INT32_MIN+64.||px>INT32_MAX-64.||py<INT32_MIN+64.||py>INT32_MAX-64.||!nss::pickRect(src.bounds,int(px),int(py),radius,rect))pickUnavailable=true;
-  else if(gpu||cuda){
+  else if(metal&&!mapMetal())pickUnavailable=true;
+  else if(!metal&&(gpu||cuda)){
    try{auto patch=cuda?i->cuda.readPatch(cudaStream,src.data,src.bounds,src.row,rect):i->opencl.readPatch(queue,src.data,src.bounds,src.row,rect);nss::FrameView view{patch.data(),{rect[0],rect[1],rect[2],rect[3]},(rect[2]-rect[0])*4*int(sizeof(float))};pickUnavailable=!nss::grayFromPatch(p,view,rect,premult);}
    catch(const std::exception &x){setLastRender(i,x.what());return kOfxStatGPURenderFailed;}
   }else{nss::FrameView view{src.data,{src.bounds[0],src.bounds[1],src.bounds[2],src.bounds[3]},src.row};pickUnavailable=!nss::grayFromPatch(p,view,rect,premult);}
  }
  auto prepared=i->preparedCache.get(p);
+ std::string metalNote;
+ if(metal){
+  auto &api=nss::MetalApi::get();std::string why;bool cpuRequested=integer(s,"render_device",time)!=0;
+  if(cpuRequested)why="CPU requested";
+  else if(!api.available||!api.encode)why=api.availability;
+  else if(i->metalWithdrawn)why="Metal withdrawn after an earlier failure";
+  else if(i->metal->failures.load())why="Metal command buffer failed: "+i->metal->error();
+  else{
+   nss::MetalArgs args{src.bounds[0],src.bounds[1],src.bounds[2],src.bounds[3],src.row/int(sizeof(float)),dst.bounds[0],dst.bounds[1],dst.bounds[2],dst.bounds[3],dst.row/int(sizeof(float)),win[0],win[1],win[2]-win[0],win[3]-win[1],int(premult)};
+   std::string device,error;bool ok=false;
+   if(src.row<=0||dst.row<=0||src.row%int(sizeof(float))||dst.row%int(sizeof(float)))error="Unsupported Metal buffer layout";
+   else try{ok=api.encode(metalQueue,metalGpuSource,metalGpuDest,prepared.values.data(),prepared.values.size(),args,i->metal,device,error);}
+   catch(const std::exception &x){error=x.what();}catch(...){error="unknown Metal error";}
+   if(ok){setLastRender(i,"Metal buffers (host queue, "+device+")"+(pickUnavailable?"; pick unavailable":""));return kOfxStatOK;}
+   why="Metal failed: "+error;
+  }
+  // Any Metal failure: withdraw Metal for this instance and render this frame on the CPU,
+  // in place on the shared buffers. GPU-private buffers cannot be reached from the CPU.
+  if(!cpuRequested)withdrawMetal(e,i);
+  if(!mapMetal()){setLastRender(i,why+"; CPU fallback needs shared (unified memory) buffers");return kOfxStatGPURenderFailed;}
+  metalNote=why+"; CPU fallback on shared Metal buffers, ";
+ }
  if(cuda){
   try{i->cuda.enqueue(cudaStream,cudaStreamProvided,src.data,dst.data,src.bounds,dst.bounds,src.row,dst.row,win,premult,prepared);setLastRender(i,std::string(cudaStreamProvided?"CUDA PTX (host stream)":"CUDA PTX (default stream waited)")+(pickUnavailable?"; pick unavailable":""));return kOfxStatOK;}
   catch(const std::exception &x){setLastRender(i,std::string("CUDA failed; select CPU. ")+x.what());return kOfxStatGPURenderFailed;}
@@ -504,7 +550,7 @@ OfxStatus render(OfxImageEffectHandle e,OfxPropertySetHandle a) {
  unsigned count=nss::cpuThreads(win[3]-win[1]);bool done=false;
  if(multithread){unsigned available=1;if(multithread->multiThreadNumCPUs(&available)==kOfxStatOK)count=std::min(count,std::max(available,1u));done=multithread->multiThread(cpuThread,count,&job)==kOfxStatOK;}
  if(!done)nss::parallelCpu(job,count);
- setLastRender(i,"CPU "+std::to_string(count)+" threads"+(pickUnavailable?"; pick unavailable":""));return kOfxStatOK;
+ setLastRender(i,metalNote+"CPU "+std::to_string(count)+" threads"+(pickUnavailable?"; pick unavailable":""));return kOfxStatOK;
 }
 OfxStatus regionsOfInterest(OfxImageEffectHandle e,OfxPropertySetHandle in,OfxPropertySetHandle out){
  double time=0;prop->propGetDouble(in,kOfxPropTime,0,&time);auto s=params(e);
