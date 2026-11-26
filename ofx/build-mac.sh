@@ -67,6 +67,9 @@ else
   "$CXX" -arch arm64 -mmacosx-version-min=13.0 -bundle "$OBJ/plugin.o" -o "$C/MacOS/NegativeScanStudio.ofx"
   ENGINE="CPU"
 fi
+# Release builds never contain the Metal test hooks (NSS Builder's -DNSS_TEST_HOOKS guard;
+# test builds compile their own metal_render object with it).
+python3 "$ROOT/ofx/tests/check_release_hooks.py" "$C/MacOS/NegativeScanStudio.ofx"
 sed "s/@VERSION@/$VERSION/g" "$ROOT/ofx/mac/Info.plist.in" > "$C/Info.plist"
 if command -v plutil >/dev/null; then plutil -lint "$C/Info.plist"; fi
 cp "$ROOT/LICENSE" "$C/Resources/licenses/NegativeScanStudio-LICENSE.txt"
