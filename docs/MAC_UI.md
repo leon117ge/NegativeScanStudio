@@ -29,6 +29,10 @@ to DB, Manage and the leveling-metadata switch are shown but not active yet (lat
 increments). The film stock list is read from the shared `film_base_db.json`; the
 Fixed frame 0 film-stock comparison is not on macOS yet.
 
+The camera list shows the Fujifilm cameras that ImageCaptureCore reports (W6
+transport: `camera.ListICC`, `camera.OpenICC`, `camera.OpenFuji`), then the simulated
+camera. Cameras that do not accept PTP commands are skipped with a log line.
+
 Copied declarations (item lists, `hdr_config.txt` parsing, nav icons) are checked
 against the Windows source by tests (`internal/drift`), so the two front ends read and
 write the same settings files in `~/Library/Application Support/NegativeScanStudio`.

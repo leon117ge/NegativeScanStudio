@@ -49,9 +49,9 @@ type Ctl struct {
 	Log  *camera.Logger
 	DB   *filmdb.DB
 
-	// ListDevices lists real cameras (nil: none on this platform yet; the
-	// macOS ImageCaptureCore transport plugs in here). OpenSim opens the
-	// simulated camera (tests replace it with a mock).
+	// ListDevices lists real cameras (ImageCaptureCore on macOS, nil
+	// elsewhere). OpenSim opens the simulated camera (tests replace it
+	// with a mock).
 	ListDevices func() ([]Device, error)
 	OpenSim     func(scene string, log *camera.Logger) (camera.Device, error)
 
@@ -103,6 +103,7 @@ func New(h Host) *Ctl {
 		c.Log.Printf("camera job panic: %v\n%s", r, st)
 		c.Host.Post(func() { c.Busy = false; c.camJob.Store(false) })
 	}
+	c.ListDevices = c.platformDevices()
 	c.OpenSim = func(scene string, log *camera.Logger) (camera.Device, error) {
 		s, err := camera.OpenSim(scene, log)
 		if err != nil {
@@ -202,9 +203,6 @@ func (c *Ctl) RefreshDevices() {
 			c.devs = nil
 			switch {
 			case list == nil:
-				if runtime.GOOS == "darwin" {
-					c.say("Fujifilm USB tether on macOS needs the ImageCaptureCore transport (not in this build yet). The simulated camera works.")
-				}
 			case err != nil:
 				c.say("Camera list: " + err.Error())
 			case len(devs) == 0:
