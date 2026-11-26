@@ -268,7 +268,8 @@ require(instance(e)->lastRender.find("pick unavailable")!=std::string::npos);
  setS(s,"balance_preset_name","");
  require(call(kOfxActionInstanceChanged,e,bag(changed),nullptr)==kOfxStatOK);
  require(stringParam(s,"balance_preset_status")=="Enter a preset name");
- setS(s,"balance_preset_name","\xE6\xB5\x8B\xE8\xAF\x95");
+ // Non-ASCII name (UTF-8 "Caf\u00e9 \u00dcber"): rejected, presets keep plain ASCII names.
+ setS(s,"balance_preset_name","Caf\xC3\xA9 \xC3\x9C" "ber");
  require(call(kOfxActionInstanceChanged,e,bag(changed),nullptr)==kOfxStatOK);
  require(stringParam(s,"balance_preset_status")=="Use English (ASCII) names only");
  auto rejected=nss::loadBalancePresets();
