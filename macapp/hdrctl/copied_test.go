@@ -47,6 +47,12 @@ func TestCopiedHairDeclsMatchWindows(t *testing.T) {
 }
 
 // Every declaration in copied_tri.go must still equal its Windows original.
+func TestCopiedFocusDeclsMatchWindows(t *testing.T) {
+	ours := drift.Decls(t, "copied_focus.go")
+	drift.Same(t, ours, drift.Decls(t, "../../focuspage.go"), "zoomItems", "zoomVals", "imageToGray16", "gray16Pix")
+	drift.Same(t, drift.Decls(t, "copied.go"), drift.Decls(t, "../../focuspage.go"), "liveGrabMessage")
+}
+
 func TestCopiedTrichromeDeclsMatchWindows(t *testing.T) {
 	ours := drift.Decls(t, "copied_tri.go")
 	for file, names := range map[string][]string{

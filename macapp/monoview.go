@@ -164,8 +164,18 @@ func (p *monoPage) view(gtx layout.Context) layout.Dimensions {
 // centerMarks is paintCenterMarks (../focusmark_paint.go): 1-px white
 // lines with a black outline at the focusmark positions; arms in dp.
 func centerMarks(gtx layout.Context, ir image.Rectangle, imgW, imgH int) {
-	v := focusmark.View{ImgW: imgW, ImgH: imgH, SrcW: imgW, SrcH: imgH,
-		DstX: ir.Min.X, DstY: ir.Min.Y, DstW: ir.Dx(), DstH: ir.Dy()}
+	centerMarksView(gtx, focusmark.View{ImgW: imgW, ImgH: imgH, SrcW: imgW, SrcH: imgH,
+		DstX: ir.Min.X, DstY: ir.Min.Y, DstW: ir.Dx(), DstH: ir.Dy()}, ir, imgW, imgH)
+}
+
+// centerMarksView draws the marks through a source-to-screen mapping (the
+// Focus check loupe: src is the visible crop, dst where it lands); lines
+// are clipped to clipR.
+func centerMarksView(gtx layout.Context, v focusmark.View, clipR image.Rectangle, imgW, imgH int) {
+	if imgW <= 0 || imgH <= 0 || v.DstW <= 0 || v.DstH <= 0 {
+		return
+	}
+	ir := clipR
 	d := func(n int) int { return gtx.Dp(unit.Dp(n)) }
 	line := func(x0, y0, x1, y1 int) {
 		if x0 > x1 {
