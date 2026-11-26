@@ -43,7 +43,8 @@ fi
 
 # Same math flags as the Windows build. -ffp-contract=off keeps a*b+c as two rounded
 # operations (no fused multiply-add), as on the x64 build. No chip-specific -mcpu.
-MAC_FLAGS=(-arch arm64 -mmacosx-version-min=12.0 -std=c++17 -O3 -fno-math-errno -fno-trapping-math -ffp-contract=off)
+MAC_FLAGS=(-arch arm64 -mmacosx-version-min=13.0 -std=c++17 -O3 -fno-math-errno -fno-trapping-math -ffp-contract=off)
+export MACOSX_DEPLOYMENT_TARGET=13.0
 WARN=(-Wall -Wextra -Wno-unused-parameter)
 INC=(-I"$ROOT/ofx/vendor/openfx/include" -I"$ROOT/ofx/vendor/opencl")
 python3 "$ROOT/ofx/tools/generate.py"
@@ -57,13 +58,13 @@ if [ "$METAL" = 1 ]; then
   echo "Building $VERSION with the Metal and CPU render paths"
   "$CXX" "${MAC_FLAGS[@]}" -fvisibility=hidden "${WARN[@]}" -fobjc-arc -DNSS_METAL "${INC[@]}" -c "$SRC/metal_render.mm" -o "$OBJ/metal_render.o"
   "$CXX" "${MAC_FLAGS[@]}" -fvisibility=hidden "${WARN[@]}" -DNSS_METAL "${INC[@]}" -c "$SRC/plugin.cpp" -o "$OBJ/plugin.o"
-  "$CXX" -arch arm64 -mmacosx-version-min=12.0 -bundle "$OBJ/plugin.o" "$OBJ/metal_render.o" \
+  "$CXX" -arch arm64 -mmacosx-version-min=13.0 -bundle "$OBJ/plugin.o" "$OBJ/metal_render.o" \
     -framework Metal -framework Foundation -o "$C/MacOS/NegativeScanStudio.ofx"
   ENGINE="Metal + CPU"
 else
   echo "Building $VERSION with the CPU render path only"
   "$CXX" "${MAC_FLAGS[@]}" -fvisibility=hidden "${WARN[@]}" "${INC[@]}" -c "$SRC/plugin.cpp" -o "$OBJ/plugin.o"
-  "$CXX" -arch arm64 -mmacosx-version-min=12.0 -bundle "$OBJ/plugin.o" -o "$C/MacOS/NegativeScanStudio.ofx"
+  "$CXX" -arch arm64 -mmacosx-version-min=13.0 -bundle "$OBJ/plugin.o" -o "$C/MacOS/NegativeScanStudio.ofx"
   ENGINE="CPU"
 fi
 sed "s/@VERSION@/$VERSION/g" "$ROOT/ofx/mac/Info.plist.in" > "$C/Info.plist"

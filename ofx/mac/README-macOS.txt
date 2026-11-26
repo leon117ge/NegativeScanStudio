@@ -16,7 +16,7 @@ The installer copies the plugin to /Library/OFX/Plugins, clears the download qua
 flag (without this, Resolve skips the plugin silently) and signs it ad hoc for this Mac.
 
 Notes
-- Apple Silicon Macs only (M1 and later), macOS 12 or later. If Resolve runs under
+- Apple Silicon Macs only (M1 and later), macOS 13 or later. If Resolve runs under
   Rosetta (Intel mode), it cannot load this plugin.
 - Render engine: Metal when the build includes it and Resolve offers it, otherwise the
   CPU path, which uses every core macOS reports. CUDA and OpenCL are not used on macOS.

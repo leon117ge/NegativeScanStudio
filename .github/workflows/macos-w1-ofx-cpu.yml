@@ -11,7 +11,7 @@ permissions:
 env:
   # Windows release toolchain flags (ofx/build.sh) and macOS flags (ofx/build-mac.sh).
   WIN_FLAGS: -std=c++17 -O3 -fno-math-errno -fno-trapping-math -static -static-libgcc -static-libstdc++
-  MAC_FLAGS: -arch arm64 -mmacosx-version-min=12.0 -std=c++17 -O3 -fno-math-errno -fno-trapping-math -ffp-contract=off
+  MAC_FLAGS: -arch arm64 -mmacosx-version-min=13.0 -std=c++17 -O3 -fno-math-errno -fno-trapping-math -ffp-contract=off
   INC: -Iofx/vendor/openfx/include -Iofx/vendor/opencl
   # The Windows translation unit must equal this ref's (W1 changes nothing on Windows).
   # Use origin/main for W1 alone; after merging W2 (Metal), use origin/feat/metal-render.
@@ -120,8 +120,8 @@ jobs:
           codesign -dv --verbose=2 "$B" 2>&1 | tee /tmp/sign.txt
           grep -q 'Signature=adhoc' /tmp/sign.txt
           codesign --verify --strict --verbose=2 "$B"
-      - name: No CJK text in the package
-        run: python3 ofx/tests/check_no_cjk.py build/mac/NegativeScanStudio_OFX_v*_macOS_arm64
+      - name: No CJK text in the package or the OFX tree
+        run: python3 ofx/tests/check_no_cjk.py build/mac/NegativeScanStudio_OFX_v*_macOS_arm64 ofx
       - uses: actions/download-artifact@v4
         with:
           name: w1-fixtures

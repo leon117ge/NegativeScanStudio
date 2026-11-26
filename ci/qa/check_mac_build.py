@@ -226,6 +226,18 @@ def collect(root, rep, versions, args):
                             rep.add("FAIL", "version", f"{rel}: {k} missing")
                     if CJK.search(str(pl.get("CFBundleDevelopmentRegion", ""))):
                         rep.add("FAIL", "cjk", f"{rel}: development region is not English")
+                    min_os = str(pl.get("LSMinimumSystemVersion", "")).strip()
+                    if not min_os:
+                        rep.add("FAIL", "plist", f"{rel}: LSMinimumSystemVersion missing")
+                    else:
+                        try:
+                            parts = tuple(int(x) for x in min_os.split("."))
+                        except ValueError:
+                            parts = ()
+                        if not parts or parts < (13,):
+                            rep.add("FAIL", "plist", f"{rel}: LSMinimumSystemVersion is {min_os}, need 13.0 or later")
+                        else:
+                            rep.add("PASS", "plist", f"{rel}: LSMinimumSystemVersion {min_os}")
                 continue
             ext = os.path.splitext(name)[1].lower()
             try:

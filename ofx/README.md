@@ -7,7 +7,7 @@ Auto uses CUDA or OpenCL buffers when offered by the host. CPU fallback is avail
 
 ## macOS (Apple Silicon) installation
 
-macOS test builds come as `NegativeScanStudio_OFX_v<version>_macOS_arm64.zip` for Apple Silicon Macs (M1 and later, macOS 12 or later). The Windows instructions above do not apply on a Mac.
+macOS test builds come as `NegativeScanStudio_OFX_v<version>_macOS_arm64.zip` for Apple Silicon Macs (M1 and later, macOS 13 or later). The Windows instructions above do not apply on a Mac.
 
 1. Quit Resolve and unzip the download. It contains `NegativeScanStudio.ofx.bundle`, `Install.command` and `README-macOS.txt`.
 2. Right-click `Install.command` and choose Open (or run `bash Install.command` in Terminal), then enter your administrator password.

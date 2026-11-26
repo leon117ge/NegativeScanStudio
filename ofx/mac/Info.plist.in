@@ -11,6 +11,6 @@
  <key>CFBundleShortVersionString</key><string>@VERSION@</string>
  <key>CFBundleVersion</key><string>@VERSION@</string>
  <key>CFBundleSupportedPlatforms</key><array><string>MacOSX</string></array>
- <key>LSMinimumSystemVersion</key><string>12.0</string>
+ <key>LSMinimumSystemVersion</key><string>13.0</string>
 </dict>
 </plist>
