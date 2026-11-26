@@ -195,6 +195,9 @@ func (l *Light) StartLevel() {
 		}
 		if hikSetup != nil {
 			hik.stopPreviewSync()
+			if hik.stopOther != nil {
+				hik.stopOther() // the Mono trichrome preview (MonoUI worker StopSync)
+			}
 			d, herr := hik.ensureHik(wantHikSim)
 			if herr != nil {
 				l.ui(func() {
@@ -368,6 +371,9 @@ func (l *Light) finishLevelExposure(cam lightlevel.Camera, iso int, fixedSh uint
 		us, gain := hk.GetExposure()
 		desc = fmt.Sprintf("%.0f us, %.2f dB", us, gain)
 		l.hdr.setSharedHikExposure(us, "leveling")
+		if m := l.hdr.Mono; m != nil {
+			m.setGainField(0)
+		}
 		if res.Fit.Changed {
 			l.log("Hikrobot exposure saved as the shared exposure: %.0f us, 0.00 dB (was %.0f us).", us, res.Fit.StartedUS)
 		}
