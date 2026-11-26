@@ -1,0 +1,73 @@
+# Toolchain proof for the macOS Apple Silicon port. Not a release: the artifact is an
+# ad-hoc signed test build of the OFX plugin CPU path plus a Metal kernel compile/parity check.
+name: macOS arm64 proof
+on:
+  push:
+    branches: [ci/macos-arm64-proof]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  ofx-cpu:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: uname -m; sw_vers; xcodebuild -version; clang++ --version
+      - name: Generate sources
+        run: python3 ofx/tools/generate.py && python3 ofx/tools/cuda_source.py
+      - name: Build NegativeScanStudio.ofx.bundle (arm64, CPU path)
+        run: |
+          B=build/NegativeScanStudio.ofx.bundle/Contents
+          mkdir -p "$B/MacOS" "$B/Resources"
+          clang++ -arch arm64 -mmacosx-version-min=12.0 -std=c++17 -O3 -fno-math-errno -fno-trapping-math \
+            -Wall -Wextra -Wno-unused-parameter -bundle -Iofx/vendor/openfx/include -Iofx/vendor/opencl \
+            ofx/src/plugin.cpp -o "$B/MacOS/NegativeScanStudio.ofx"
+          cp ci/macos/Info.plist "$B/Info.plist"
+          codesign --force --sign - --timestamp=none build/NegativeScanStudio.ofx.bundle
+          codesign -dv build/NegativeScanStudio.ofx.bundle 2>&1
+          file "$B/MacOS/NegativeScanStudio.ofx"
+          nm -gU "$B/MacOS/NegativeScanStudio.ofx" | grep -E 'OfxGetPlugin|OfxGetNumberOfPlugins'
+          otool -L "$B/MacOS/NegativeScanStudio.ofx"
+      - name: Native arm64 unit tests
+        run: |
+          mkdir -p build/tests
+          for t in tone_test overlay_test cuda_contract; do
+            clang++ -arch arm64 -std=c++17 -O3 -fno-math-errno -fno-trapping-math -Iofx/vendor/openfx/include -Iofx/vendor/opencl \
+              ofx/tests/$t.cpp -o build/tests/$t
+            build/tests/$t
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NegativeScanStudio-ofx-macos-arm64-proof
+          path: build/NegativeScanStudio.ofx.bundle
+  metal:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate sources
+        run: python3 ofx/tools/generate.py
+      - name: Compile Metal kernel (no fast math)
+        run: |
+          mkdir -p build/metal
+          bash ci/macos/make_msl.sh build/metal/render_math_msl.h
+          if ! xcrun -sdk macosx metal -v >/dev/null 2>&1; then xcodebuild -downloadComponent MetalToolchain; fi
+          xcrun -sdk macosx metal -std=metal3.0 -fno-fast-math -Ibuild/metal -c ci/macos/nss_render.metal -o build/metal/nss_render.air
+          xcrun -sdk macosx metallib build/metal/nss_render.air -o build/metal/nss_render.metallib
+          ls -l build/metal
+      - name: Metal vs CPU parity
+        run: |
+          clang++ -arch arm64 -std=c++17 -O2 -fobjc-arc -fno-math-errno -fno-trapping-math ci/macos/metal_parity.mm \
+            -framework Metal -framework Foundation -o build/metal/metal_parity
+          build/metal/metal_parity build/metal/nss_render.metallib
+  go-core:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Portable Go packages on darwin/arm64 (no GUI, no LibRaw)
+        run: |
+          go env GOOS GOARCH
+          CGO_ENABLED=0 go test ./develop ./convert ./cropper ./lightlevel ./rgblight ./hikcam ./hikbase ./filmdb ./scanconfig ./scanmeta ./focusmark
