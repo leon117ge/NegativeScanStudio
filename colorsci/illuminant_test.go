@@ -19,7 +19,9 @@ func TestVision3Illuminant(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if r.Density[0] >= 0 || r.Density[1] != 0 || r.Density[2] <= 0 {
+	// Green is the reference: zero up to rounding (arm64 fuses multiply-add, so
+	// log10(x)-green can leave a 1e-17 residue instead of an exact 0).
+	if r.Density[0] >= 0 || math.Abs(r.Density[1]) > 1e-12 || r.Density[2] <= 0 {
 		t.Fatal(r)
 	}
 	if math.Abs(r.Mired-130.6818) > .001 {

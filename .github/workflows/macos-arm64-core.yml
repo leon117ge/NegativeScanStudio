@@ -151,6 +151,7 @@ jobs:
           go vet -composites=false $PKGS  # composites: pre-existing unkeyed literals in hdrscan tests
           go test -v -count=1 $PKGS 2>&1 | tee go-test-darwin.log
       - name: rgblight without cgo (ioreg enumerator)
+        if: ${{ !cancelled() }}
         run: |
           set -o pipefail
           CGO_ENABLED=0 go test -v -count=1 ./rgblight 2>&1 | tee go-test-darwin-nocgo.log
@@ -160,6 +161,7 @@ jobs:
           bash ci/macos/test_summary.sh go-test-darwin.log "darwin/arm64 ${{ matrix.os }} (cgo)" | tee -a "$GITHUB_STEP_SUMMARY"
           bash ci/macos/test_summary.sh go-test-darwin-nocgo.log "darwin/arm64 ${{ matrix.os }} rgblight (no cgo)" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Build tools and list serial ports
+        if: ${{ !cancelled() }}
         run: |
           mkdir -p out
           go build -o out/rgblightports ./cmd/rgblightports
@@ -172,15 +174,18 @@ jobs:
           out/rgblightports-nocgo | tee -a out/rgblightports.txt
           ls -l /dev/cu.* /dev/tty.* 2>/dev/null | head -20 || true
       - uses: actions/cache@v4
+        if: ${{ !cancelled() }}
         with:
           path: sample
           key: raw-sample-${{ env.SAMPLE_SHA256 }}
       - uses: actions/download-artifact@v4
+        if: ${{ !cancelled() }}
         with:
           pattern: decode-*
           path: decode
           merge-multiple: true
       - name: Decode the sample raw and compare with Linux and Windows
+        if: ${{ !cancelled() }}
         run: |
           set -o pipefail
           bash ci/macos/fetch_sample.sh
@@ -196,6 +201,7 @@ jobs:
       - name: Checksums
         if: always()
         run: |
+          mkdir -p out
           cp go-test-darwin*.log out/ 2>/dev/null || true
           cp third_party/libraw/lib/darwin_arm64/BUILDINFO.txt out/ 2>/dev/null || true
           (cd out && shasum -a 256 * > SHA256SUMS.txt; cat SHA256SUMS.txt)
