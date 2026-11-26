@@ -24,6 +24,12 @@ jobs:
       SAMPLE_URL: https://raw.pixls.us/data/Fujifilm/X-T3/AFXT2721.RAF
       SAMPLE_SHA256: 95b33021160b239ceb1a09d46a1b29cb60cb7dd47581feb126b337c219091754
       SAMPLE: AFXT2721.RAF
+      # NSS_TEST_RAF: an uncompressed X-T3 RAF (raw.pixls.us, CC0) for the
+      # RAW golden tests (Batch RAW to TIFF, Crop & Merge shots). Not in the
+      # repo; downloaded, sha256-checked and cached.
+      TEST_RAF_URL: https://raw.pixls.us/data/Fujifilm/X-T3/AFXT2720.RAF
+      TEST_RAF_SHA256: 24abd27b4a200f3170ea1579672944b807d0eb35bf21422a3937bb644f27f2eb
+      TEST_RAF: AFXT2720.RAF
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -34,6 +40,15 @@ jobs:
         run: uname -m; sw_vers; go version; xcodebuild -version; clang --version | head -1
       - name: LibRaw 0.22.1 static (darwin/arm64, pinned sources)
         run: bash ci/macos/build_libraw.sh
+      - name: Cache the RAW test fixture
+        uses: actions/cache@v4
+        with:
+          path: sample/${{ env.TEST_RAF }}
+          key: nss-test-raf-${{ env.TEST_RAF_SHA256 }}
+      - name: RAW test fixture (NSS_TEST_RAF, uncompressed, pinned sha256)
+        run: |
+          SAMPLE="$TEST_RAF" SAMPLE_URL="$TEST_RAF_URL" SAMPLE_SHA256="$TEST_RAF_SHA256" bash ci/macos/fetch_sample.sh
+          echo "NSS_TEST_RAF=$PWD/sample/$TEST_RAF" >> "$GITHUB_ENV"
       - name: Vet
         working-directory: macapp
         run: go vet ./...
