@@ -3,7 +3,7 @@
 name: macOS Metal
 on:
   push:
-    branches: [feat/metal-render]
+    branches: [feat/metal-render, mac/integration]
   pull_request:
     paths: ['ofx/**', '.github/workflows/macos-metal.yml']
   workflow_dispatch:
