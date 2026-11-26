@@ -1,59 +1,59 @@
-# 算法 / Algorithms
+# Algorithms
 
 > Historical reference through v0.90. App v0.91 removes the DCTL page, all DCTL generation/export, and related write controls. The formulas below remain relevant to the built-in Develop preview, but the old page layout and export instructions are retired. See [current app workflow](APP_WORKFLOW.md), [v0.91 changelog](CHANGELOG.md#v091), and [OFX usage](../ofx/README.md).
 
 
-所有描述来自源码注释与实现。
+All descriptions come from source code comments and the implementation.
 
-## 1. 片基统计与检测（`basestat`, `hdrscan/basefind.go`）
-- 值域：线性 16-bit / 65535。对干净片基区域按 R+G+B 剔除漏光（偏离干净片基的像素），然后逐通道取中位数。
-- 自动模式：`hdrscan` 在画面中找最亮且均匀的片基区域。
-- 手选（v0.87 起）：用户在实时画面上拖一个矩形（归一化坐标 `lightlevel.Rect`），设为 Rectangle 模式后只测该框；未画框时拒绝调平。Auto 模式记录的归一化框为全零。
+## 1. Film base statistics and detection (`basestat`, `hdrscan/basefind.go`)
+- Value range: linear 16-bit / 65535. In a clean film base region, light leaks (pixels that deviate from clean film base) are rejected by R+G+B, then the median is taken per channel.
+- Auto mode: `hdrscan` finds the brightest and most uniform film base region in the frame.
+- Manual selection (since v0.87): the user drags a rectangle on the live view (normalized coordinates `lightlevel.Rect`); in Rectangle mode only that box is measured, and leveling is refused when no box is drawn. The normalized box recorded in Auto mode is all zeros.
 
 ## 2. Film-base light leveling in v0.92
 
 The current solver uses measured slopes, bounded secant steps, bisection, matrix-aware integer refinement, and a fresh final RGB capture. Control and the calibration TIFF use the same pixels and median. The default limit is 10 coarse rounds. See [the complete leveling reference](LIGHT_LEVELING.md).
 
-## 3. 相机色卡校准（`colorsci/camcal.go`, `chartcal.go`, v0.84）
-- 24 块透射色卡（4×6，A 行为中性灰阶 A1–A6），参考数据为 IT8.7/1 CGATS（XYZ D50 或 Lab）。
-- `DetectCamChart` 在线性 16-bit 图里找网格并定向（A 行亮度递增、通道比稳定 → `rampScore`）。
-- 削顶检测：超过阈值的像素比例判定色块削顶。
-- 拟合 **保持中性的 3×3 矩阵**（每行和约束使灰保持灰），最小化平均 **CIEDE2000**；色彩转换 XYZ D50 → Bradford → D65 线性 Rec709。
+## 3. Camera color chart calibration (`colorsci/camcal.go`, `chartcal.go`, v0.84)
+- 24-patch transmissive color chart (4×6, row A is the neutral gray scale A1–A6); the reference data is IT8.7/1 CGATS (XYZ D50 or Lab).
+- `DetectCamChart` finds and orients the grid in the linear 16-bit image (row A luminance increasing, channel ratios stable → `rampScore`).
+- Clipping detection: the fraction of pixels above a threshold decides whether a patch is clipped.
+- Fits a **neutral-preserving 3×3 matrix** (a per-row sum constraint keeps gray gray), minimizing the mean **CIEDE2000**; color conversion XYZ D50 → Bradford → D65 linear Rec709.
 
-## 4. 密度空间 DCTL
-- **FilmScan_Density_In**：线性扫描 / 片基 (`base_r/g/b`) → Cineon 风格密度码。参数：片基码 `dmin_code`=95、每码密度 0.002、满量程 1023、背光曝光偏移、黑位扣除等。
-- **FilmScan_MaskCrosstalk**：密度空间橙色片基补偿（`bd_r/g/b`）与 3×3 染料串扰矩阵，默认无变化。
-- **FilmScan_Positive_Out**：逐通道 gamma（默认 R 0.55 / G 0.635 / B 0.62）、曝光、平衡、灰点、输出编码（Rec709 / DaVinci Intermediate / Cineon / ACEScct / Linear），可接 Kodak 2383 打印 LUT。
-- `develop` 包以 float32 1:1 复现上述链用于程序内预览。
+## 4. Density-space DCTLs
+- **FilmScan_Density_In**: linear scan / film base (`base_r/g/b`) → Cineon-style density code. Parameters: film base code `dmin_code`=95, density per code 0.002, full scale 1023, backlight exposure offset, black level subtraction, etc.
+- **FilmScan_MaskCrosstalk**: orange film base compensation in density space (`bd_r/g/b`) and a 3×3 dye crosstalk matrix; no change by default.
+- **FilmScan_Positive_Out**: per-channel gamma (default R 0.55 / G 0.635 / B 0.62), exposure, balance, gray point, output encoding (Rec709 / DaVinci Intermediate / Cineon / ACEScct / Linear); a Kodak 2383 print LUT can follow it.
+- The `develop` package reproduces this chain 1:1 in float32 for the in-app preview.
 
-## 5. HDR 合成（`hdrscan/merge*.go`）
-- `MergeN`：frame 0 + 更亮的 +2/+3/+4 EV 帧，以 frame 0 尺度合成。
-  1. 帧间比值在“亮帧未削顶、暗帧高于 1 % 噪声底”的像素上逐通道中位数测得并链式相乘；
-  2. 失败则用曝光时间×ISO 的名义比值，并按 +2 帧实测/名义修正；
-  3. 无曝光信息时 +2 帧假设为 4 倍。
-- 从暗到亮混合，混合带由亮帧（膨胀后）削顶掩膜驱动；距片基 ~1 EV 内保持 frame 0 原值。
-- Weighted / 传感器马赛克方法（v0.80）：片基保护带 ≥0.85·L 用 frame 0，<0.70·L 用合成结果；可按感光点平均。
-- 支持对齐（中央绿色裁切 ±r px 位移估计）。
+## 5. HDR merge (`hdrscan/merge*.go`)
+- `MergeN`: frame 0 + brighter +2/+3/+4 EV frames, merged on the frame 0 scale.
+  1. Inter-frame ratios are measured as per-channel medians on pixels where "the bright frame is not clipped and the dark frame is above the 1 % noise floor", and multiplied in a chain;
+  2. On failure, the nominal ratio of exposure time × ISO is used, corrected by the measured/nominal ratio of the +2 frame;
+  3. Without exposure information, the +2 frame is assumed to be 4×.
+- Blending goes from dark to bright; the blend band is driven by the (dilated) clipping mask of the bright frame; within ~1 EV of the film base, the original frame 0 values are kept.
+- Weighted / sensor mosaic method (v0.80): film base protection band ≥0.85·L uses frame 0, <0.70·L uses the merged result; can average per photosite.
+- Supports alignment (shift estimation of ±r px on a central green crop).
 
-## 6. 去毛发 / 纤维（`hdrscan/hair.go`, v0.77）
-用户框选区域内：L = log2(R+G+B+3) 半分辨率 → 24 方向二阶导核 → 鲁棒 Z 值（MAD）+ 非极大抑制 Z≥2 → 连通分组取最长纤维 → 全分辨率中心线细化、生成修补带 → 沿中心线 24 px 分块，从 24 个偏移候选块中按环域对数匹配选最佳，再用 Shepard 膜插值无缝融合。带外像素不变；不提供全幅自动检测（会误检真实线条）。
+## 6. Hair / fiber removal (`hdrscan/hair.go`, v0.77)
+Inside the user-selected region: L = log2(R+G+B+3) at half resolution → 24-direction second-derivative kernels → robust Z score (MAD) + non-maximum suppression Z≥2 → connected grouping, taking the longest fiber → full-resolution centerline refinement and repair band generation → split into 24 px blocks along the centerline, pick the best of 24 offset candidate blocks by annulus log matching, then blend seamlessly with Shepard membrane interpolation. Pixels outside the band are unchanged; full-frame automatic detection is not offered (it would falsely detect real lines).
 
-## 7. 裁切（`cropper`）
-检测画面与片基/片夹的四条边界（`Side`/`Edge`），几何拟合后裁切，输出 TIFF（含 LZW）。
+## 7. Cropping (`cropper`)
+Detects the four borders between the image and the film base/film holder (`Side`/`Edge`), crops after a geometric fit, and outputs TIFF (including LZW).
 
-## 8. 三色扫描（`hdrscan/trichrome.go`）
-R、G、B 灯分别点亮各拍一张（可包围），每帧只取对应相机通道，合成 RGB TIFF；片基同样用 `basestat` 统计，可直接送 DCTL。
+## 8. Trichrome scanning (`hdrscan/trichrome.go`)
+The R, G and B lights are lit one at a time with one shot each (bracketing possible); each frame takes only the matching camera channel, and an RGB TIFF is assembled; the film base is likewise measured with `basestat` and can be sent straight to the DCTL.
 
-## 9. 500T 3200K 光源平衡（v0.89）
+## 9. 500T 3200K illuminant balance (v0.89)
 
-500T 5219/7219 的标称平衡是 3200K 钨丝灯。Kodak H-1-5219 rev.3-26
-给出光谱感度和 ECN-2 特性曲线。[转录记录](data/5219_digitization.md)
-包含来源、图像坐标、10 nm 采样值的路径和误差说明。
+The nominal balance of 500T 5219/7219 is 3200K tungsten. Kodak H-1-5219 rev.3-26
+gives the spectral sensitivity and ECN-2 characteristic curves. The [transcription record](data/5219_digitization.md)
+contains the source, image coordinates, the path to the 10 nm sampled values, and error notes.
 
-### 计算
+### Calculation
 
-令 `L_c(λ)` 为 Kodak 图的 log sensitivity，`S_c(λ)=10^L_c(λ)`。
-缺失曲线段的感度设为零，不把空白当作 logS=0。
+Let `L_c(λ)` be the log sensitivity from the Kodak chart, and `S_c(λ)=10^L_c(λ)`.
+Sensitivity for missing curve segments is set to zero; blanks are not treated as logS=0.
 
 ```text
 P(λ,T) ∝ λ^-5 / (exp(c2/(λT)) - 1), c2 = 1.438776877e7 nm K
@@ -64,13 +64,13 @@ q_c = log10(E_c(T)/E_c(3200))
 cast_c = -ΔD_c
 ```
 
-`P` 在 550 nm 归一化。归一化常数在减去 `q_G` 后抵消。
-感度单位是倒数能量曝光，不能再乘一次光子数量因子 `λ`。
-积分只用可见曲线样本。省略 UV 和未画出的尾部是模型限制。
-`γ_R/G/B = 0.4482/0.5266/0.5096` 来自 ECN-2 中间直线段，
-不是 Positive_Out 的创作 gamma。绿色曝光保持不变，因此 `cast_g=0`。
+`P` is normalized at 550 nm. The normalization constant cancels after subtracting `q_G`.
+The sensitivity unit is reciprocal energy exposure, so the photon count factor `λ` must not be applied again.
+The integration uses only the visible curve samples. Omitting the UV and the undrawn tails is a model limitation.
+`γ_R/G/B = 0.4482/0.5266/0.5096` comes from the ECN-2 middle straight-line section,
+and is not the creative gamma of Positive_Out. The green exposure is held constant, so `cast_g=0`.
 
-相机扫描仍用原片基归一化：
+The camera scan still uses the original film base normalization:
 
 ```text
 D_c = -log10((I_c - black_c) * 2^EV / base_c)
@@ -78,46 +78,46 @@ D'_c = D_c + cast_c                 (cast_on = 1)
 code_c = (dmin_code + D'_c / dens_step) / full_code
 ```
 
-默认 `cast_on=0`、偏移为零。不开校正时数学行为不变。
-`out_trans=1` 是原始透射率诊断输出，不应用密度偏移。
-`develop` 的 Density In 节点使用相同公式。
+By default `cast_on=0` and the offsets are zero. With the correction off, the math is unchanged.
+`out_trans=1` is the raw transmittance diagnostic output and does not apply the density offset.
+The Density In node of `develop` uses the same formula.
 
-5500K Planck 模型的额外密度约为 `[-0.09256, 0, +0.18864] D`，
-所以 DCTL 加 `[+0.09256, 0, -0.18864] D`。
-[完整计算结果](data/5219_5500K_result.json) 可用下面的命令重算：
+The extra density of the 5500K Planck model is about `[-0.09256, 0, +0.18864] D`,
+so the DCTL adds `[+0.09256, 0, -0.18864] D`.
+The [complete calculation result](data/5219_5500K_result.json) can be recomputed with the command below:
 
 ```sh
 go run ./cmd/illuminantcalc -kelvin 5500
 ```
 
-### 与 85 系列滤镜的量级比较
+### Magnitude comparison with 85-series filters
 
-5500K 转到 3200K 是 `1e6/3200 - 1e6/5500 = +130.68 mired`。
-这与通常标作 85B 的色温转换量相同。
-85 的常见标称转换是 5500K 到 3400K，即 +112.30 mired。
-Kodak 的 500T 数据表推荐日光用 85、EI 320，不能据此把 85 与 85B
-视为同一透射谱。参考 [Kodak 85 系列透射曲线](https://www.kodak.com/content/products-brochures/Film/Color-Conversion-Filters-85-Series-Spectral-Transmittance.pdf)。
-这只是色温量级核对，不是对实物 85 滤镜光谱积分的独立验证。
+5500K to 3200K is `1e6/3200 - 1e6/5500 = +130.68 mired`.
+This is the same color temperature conversion usually labeled 85B.
+The common nominal conversion of an 85 is 5500K to 3400K, i.e. +112.30 mired.
+Kodak's 500T data sheet recommends an 85 and EI 320 for daylight; this does not mean 85 and 85B
+can be treated as the same transmission spectrum. See [Kodak 85-series transmittance curves](https://www.kodak.com/content/products-brochures/Film/Color-Conversion-Filters-85-Series-Spectral-Transmittance.pdf).
+This is only a color temperature magnitude check, not an independent verification by spectral integration of a physical 85 filter.
 
-### 准确性边界
+### Accuracy limits
 
-- 数值是有公开来源的模型推导，不是该卷底片的实测白平衡。
-- Planck 5500K 和 CIE D55 光谱不同。LED、荧光灯和混光不能只由 K 数确定。
-- 中性物体近似平坦反射。真实物体的反射谱可能产生不同偏移。
-- Kodak 的代表性 ECN-2 曲线不等于每卷的冲洗结果，toe 和 shoulder 也不是常斜率。
-- 感光层密度轴不等于任意相机与背光的 RGB 密度轴。此版本把两者近似对应，
-  没有测扫描系统的密度串扰矩阵。不能把结果宣传成精确去偏色。
-- 如果拍摄时用了 85 滤镜，不要再按未滤镜的 5500K 重复校正。
-- 3200K 的此项偏移为零。这只表示无需光源转换，并不保证整个转正链自然中性。
-  Positive_Out 的灰点、各通道 gamma 和已有自动白平衡仍需单独检查。
-- 灰点实测和灰阶交叉偏色拟合留到后续版本。
+- The values are a model derivation from public sources, not a measured white balance for this roll of negative.
+- Planck 5500K and the CIE D55 spectrum differ. LED, fluorescent and mixed light cannot be determined by the K value alone.
+- Neutral objects are approximated as flat reflectors. Real object reflectance spectra may produce different offsets.
+- Kodak's representative ECN-2 curves are not the processing result of every roll, and the toe and shoulder do not have a constant slope.
+- The emulsion layer density axes are not the RGB density axes of an arbitrary camera and backlight. This version maps them approximately,
+  without measuring the density crosstalk matrix of the scanning system. The result must not be advertised as exact cast removal.
+- If an 85 filter was used when shooting, do not correct again as unfiltered 5500K.
+- At 3200K this offset is zero. This only means no illuminant conversion is needed; it does not guarantee the whole inversion chain is naturally neutral.
+  The gray point, per-channel gamma and any existing auto white balance of Positive_Out still need separate checks.
+- Measured gray points and gray-scale cross cast fitting are left to a later version.
 
-### 状态与灯光
+### State and lights
 
-Light 页只计算、保存和发送 DCTL 参数，不调用串口、不拍摄、不改曝光。
-`colour_cast.json` 保存当前导出设置。它独立于片基 preset，下次导出所有
-Density_In 都使用这组设置，切换片基不会自动清除偏色校正。
-`filmdb.Entry.ColourCast` 保存每种胶片的参数，加载后须显式写入才激活。
-片基数据保持原值，不用假片基偷偷代替密度偏移。
-日志使用原 `leveling_log.csv` 格式，mode 为 Colour cast，source 记密度偏移，
-base 和 light 的零列表示本次没有测量这些值，不代表灯被设成零。
+The Light page only calculates, saves and sends DCTL parameters; it does not use the serial port, does not shoot, and does not change exposure.
+`colour_cast.json` stores the current export settings. It is independent of the film base preset; on the next export every
+Density_In uses this set of settings, and switching film base does not clear the colour cast correction automatically.
+`filmdb.Entry.ColourCast` stores the parameters per film stock; after loading they must be written explicitly to take effect.
+Film base data keeps its original values; a fake film base is never used to silently replace the density offset.
+The log uses the original `leveling_log.csv` format, with mode Colour cast and source recording the density offset;
+the zero columns for base and light mean these values were not measured this time, not that the light was set to zero.

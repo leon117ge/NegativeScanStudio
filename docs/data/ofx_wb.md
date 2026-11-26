@@ -1,14 +1,14 @@
-# OFX T/D 白平衡密度补偿（OFX 0.90.1）
+# OFX T/D white balance density compensation (OFX 0.90.1)
 
-使用 `ofx/tools/generate.py` 复现；10 nm 能量感度积分，Planck visible SPD：
+Reproduce with `ofx/tools/generate.py`; 10 nm energy sensitivity integration, Planck visible SPD:
 
 `E_c(K) = Σ 10^logS_c(λ) B_λ(K) Δλ`
 
 `ΔlogH_c = log10[E_c(K)/E_c(K0)] − log10[E_G(K)/E_G(K0)]`
 
-`cast_c = −gamma_c ΔlogH_c`，直接 **加到** Density In 的 D，不是改斜率。等效 `base_effective = base × 10^cast`。Green anchor=0；没有给它额外的全局曝光补偿。
+`cast_c = −gamma_c ΔlogH_c`, **added** directly to the D of Density In; it does not change the slope. Equivalent to `base_effective = base × 10^cast`. Green anchor=0; no extra global exposure compensation is given to it.
 
-T：5219 感度 + 名义 Status M gamma 0.4482/0.5266/0.5096，K0=3200；沿用 v0.89 方法，不应用取消的400K设计。D：官方5207感度与中段gamma，K0=5600（Kodak标称5500，端点近似，见 [5207读取说明](5207_digitization.md)）。所有场景温度包括5600均为黑体近似，**不是 CIE daylight / 实测LED光谱**。
+T: 5219 sensitivity + nominal Status M gamma 0.4482/0.5266/0.5096, K0=3200; follows the v0.89 method and does not apply the canceled 400K design. D: official 5207 sensitivity and midscale gamma, K0=5600 (Kodak nominal 5500, endpoint approximation, see [5207 reading notes](5207_digitization.md)). All scene temperatures, including 5600, are blackbody approximations, **not CIE daylight / measured LED spectra**.
 
 | Film | Scene K | cast R / D | cast G / D | cast B / D |
 |---|---:|---:|---:|---:|
@@ -23,17 +23,17 @@ T：5219 感度 + 名义 Status M gamma 0.4482/0.5266/0.5096，K0=3200；沿用 
 | D | 5000 | -0.017411 | 0.000000 | +0.032640 |
 | D | 5600 | 0.000000 | 0.000000 | 0.000000 |
 
-数据表保存完整精度于 [ofx_wb_presets.json](ofx_wb_presets.json)。模型 sensitivity 是拍摄感光层，cast 应用在扫描 RGB 轴是近似；未用完整独立层响应、实际scanner QE、实际光谱/ECN-2批次标定，也没用新LED gamma代替这里的感度→密度 slope。可用作起点、同卷灰卡验证；不是精确去色保证。Portra/Gold/UltraMax 默认 D，但**共用5207色温模型**，只 gamma 各有官方曲线读取。offset 不随手调 positive gamma 重算，两者独立。
+The data table keeps full precision in [ofx_wb_presets.json](ofx_wb_presets.json). The model sensitivity is that of the taking emulsion layers, and applying the cast on the scan RGB axes is an approximation; no complete independent layer response, actual scanner QE, or actual spectrum/ECN-2 batch calibration was used, and the new LED gamma was not used to replace the sensitivity→density slope here. It can be used as a starting point and verified with a gray card on the same roll; it is not a guarantee of exact cast removal. Portra/Gold/UltraMax default to D, but **share the 5207 color temperature model**; only their gamma comes from their own official curve readings. The offset is not recomputed when the positive gamma is adjusted by hand; the two are independent.
 
-## OFX 0.90.1：直接写 Film base
+## OFX 0.90.1: writing Film base directly
 
-不再暴露 cast 字段/Apply 按钮。选择 T/D 或温度时立即写 Film base sliders：
+The cast fields/Apply button are no longer exposed. Choosing T/D or a temperature immediately writes the Film base sliders:
 
 `base_effective_c = baseline_c × 10^(+cast_c)`
 
-**正号**来自 `D = −log10(pixel/base)`；`base × 10^cast` 正好使 D 增加 cast。用负号会把补偿反过来。10 个预设均有回归测试，对照旧 DCTL additive cast。该等价关系指密度分支，受同样的 epsilon/clamp 边界限制；transmittance 输出现在也跟随 base，不等同于旧 cast（旧 cast 在该分支不生效）。
+The **plus sign** comes from `D = −log10(pixel/base)`; `base × 10^cast` increases D by exactly cast. Using a minus sign would reverse the compensation. All 10 presets have regression tests against the old DCTL additive cast. This equivalence refers to the density branch and is subject to the same epsilon/clamp limits; the transmittance output now also follows base and is not equivalent to the old cast (the old cast had no effect in that branch).
 
-新实例 baseline = 0.5/0.5/0.5；Load 成功后 baseline = 文件片基经 pending camera 矩阵处理后的值。隐藏持久参数保存 baseline；反复切换/Load 不在已经补偿过的值上累乘。手改 sliders 可精调；下一次选择预设将从 baseline 重置该微调。物理灯光、扫描 TIFF 像素和 app 片基均不改。
+New instance baseline = 0.5/0.5/0.5; after a successful Load, baseline = the file's film base after the pending camera matrix. A hidden persistent parameter stores the baseline; repeated switching/Load does not multiply onto an already compensated value. Hand-editing the sliders allows fine-tuning; the next preset choice resets that fine-tuning from the baseline. The physical light, scan TIFF pixels and the app film base are all unchanged.
 
 | Film | Scene K | Film base R / G / B (baseline 0.5) |
 |---|---:|---|
@@ -48,12 +48,12 @@ T：5219 感度 + 名义 Status M gamma 0.4482/0.5266/0.5096，K0=3200；沿用 
 | D | 5000 | 0.480351 / 0.500000 / 0.539026 |
 | D | 5600 | 0.500000 / 0.500000 / 0.500000 |
 
-完整数值：[ofx_0901_base_presets.json](ofx_0901_base_presets.json)。片种 gamma 仍为独立参数。500T 默认 T，其余 stock 默认 D，均可覆盖；场景温度不自动改。Positive Out Film white balance保留，原Legacy项更名 **500T Base**，以可见balance loader写+1.07/0/+0.67，None复位0；T/D和gamma不暗改balance。旧500T Base测于T5600+LED gamma，0.90.2改为用户眼调，保持T5600表不变，两者可叠加。[Base记录](ofx_film_bases.md)。
+Full values: [ofx_0901_base_presets.json](ofx_0901_base_presets.json). Stock gamma is still a separate parameter. 500T defaults to T and other stocks default to D; all can be overridden; the scene temperature does not change automatically. Positive Out Film white balance is kept; the original Legacy entry is renamed **500T Base**, and as a visible balance loader writes +1.07/0/+0.67, with None resetting to 0; T/D and gamma do not silently change the balance. The old 500T Base was measured under T5600 + LED gamma; 0.90.2 changed it to the user's eye adjustment, keeping the T5600 table unchanged, and the two can be stacked. [Base record](ofx_film_bases.md).
 
-## OFX0.90.2的500T Base更新
+## 500T Base update in OFX 0.90.2
 
-T/D片基表（包括T5600）不变。Positive Out的500T Base loader由旧R+1.57/G0/B+1.00改为 **R+1.40/G0/B+0.80 stops**，选择后立即写入可见balance sliders，仍无隐藏叠加。新值是用户在 **Gamma scale1.15 / Exposure0.90** 默认下的眼调决定，**不是新测量/曲线拟合**；先前的重测请求已取消。旧实测记录保留于 [ofx_500t_base_measurements.json](ofx_500t_base_measurements.json)，当前表/历史见 [ofx_film_bases.md](ofx_film_bases.md)。
+The T/D film base table (including T5600) is unchanged. Positive Out's 500T Base loader changed from the old R+1.57/G0/B+1.00 to **R+1.40/G0/B+0.80 stops**; selecting it immediately writes the visible balance sliders, still with no hidden stacking. The new values are the user's eye-adjustment decision under the **Gamma scale 1.15 / Exposure 0.90** defaults, **not a new measurement/curve fit**; the earlier re-measurement request was canceled. The old measured record is kept in [ofx_500t_base_measurements.json](ofx_500t_base_measurements.json); for the current table/history see [ofx_film_bases.md](ofx_film_bases.md).
 
-## OFX0.90.3用户眼调更新
+## OFX 0.90.3 user eye-adjustment update
 
-500T Base改为 **R+1.07/G0/B+0.67 stops**（原+1.40/0/+0.80）。loader与新实例可见balance默认值同步更新；不是新测量。T/D片基表、gamma、Gamma scale1.15、Exposure0.90不变。已有工程可重选500T Base加载新值。
+500T Base changed to **R+1.07/G0/B+0.67 stops** (previously +1.40/0/+0.80). The loader and the visible balance defaults for new instances were updated together; this is not a new measurement. The T/D film base table, gamma, Gamma scale 1.15 and Exposure 0.90 are unchanged. Existing projects can re-select 500T Base to load the new values.
