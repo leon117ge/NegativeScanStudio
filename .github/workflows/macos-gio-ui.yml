@@ -1,0 +1,92 @@
+# W9 of the macOS port: the Gio user interface (macapp/, its own Go module, so
+# the Windows walk build never sees it). Builds the app and NegativeScan
+# Studio.app on Apple Silicon, runs the UI-state and controller tests, renders
+# the pages headlessly through Metal, and checks that the main run loop keeps
+# delivering main-queue and CFRunLoop callbacks while Gio's app.Main runs
+# (ImageCaptureCore needs that). Test-only: no release, no secrets beyond
+# the read-only GITHUB_TOKEN. Scripts are called with bash/python3 because the
+# GitHub connector does not keep exec bits.
+name: macOS Gio UI (W9)
+on:
+  push:
+    branches: [mac/integration, mac/w9-gio-ui]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  gio-app:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-26]
+    runs-on: ${{ matrix.os }}
+    env:
+      SAMPLE_URL: https://raw.pixls.us/data/Fujifilm/X-T3/AFXT2721.RAF
+      SAMPLE_SHA256: 95b33021160b239ceb1a09d46a1b29cb60cb7dd47581feb126b337c219091754
+      SAMPLE: AFXT2721.RAF
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: macapp/go.mod
+          cache-dependency-path: macapp/go.sum
+      - name: Environment
+        run: uname -m; sw_vers; go version; xcodebuild -version; clang --version | head -1
+      - name: LibRaw 0.22.1 static (darwin/arm64, pinned sources)
+        run: bash ci/macos/build_libraw.sh
+      - name: Vet
+        working-directory: macapp
+        run: go vet ./...
+      - name: Tests (UI state, controller with a mock camera, crash log, headless Metal render)
+        working-directory: macapp
+        run: |
+          set -o pipefail
+          mkdir -p ../out/shots
+          NSS_SHOTS="$PWD/../out/shots" go test -v -count=1 ./... 2>&1 | tee ../go-test-gio.log
+      - name: Simulated camera end to end (sample RAF; skipped if it is compressed)
+        if: ${{ !cancelled() }}
+        working-directory: macapp
+        run: |
+          set -o pipefail
+          (cd .. && bash ci/macos/fetch_sample.sh)
+          NSS_SIM_RAF="$PWD/../sample/$SAMPLE" go test -v -count=1 -run TestSimMeterCaptureMerge ./hdrctl 2>&1 | tee ../go-test-gio-sim.log
+      - name: Build NegativeScan Studio.app
+        run: |
+          set -o pipefail
+          app=$(bash macapp/packaging/build-app.sh "$PWD/out" | tail -1)
+          echo "APP=$app" >> "$GITHUB_ENV"
+          B="$app/Contents/MacOS/NegativeScanStudio"
+          file "$B"; lipo -info "$B"; otool -L "$B"
+          vtool -show-build "$B" | tee out/minos.txt
+          minos=$(awk '/minos/ {print $2; exit}' out/minos.txt); echo "minos $minos"
+          case "$minos" in 1[4-9]*|2*) echo "minos $minos is above 13.0"; exit 1;; esac
+          test "$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$app/Contents/Info.plist")" = 13.0
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist"
+          file "$app/Contents/Resources/AppIcon.icns"
+          file "$app/Contents/Resources/appicon.png" | grep -q '256 x 256'
+          codesign -dv "$app" 2>&1 | head -5
+      - name: Main run loop delivers callbacks under app.Main
+        run: |
+          set -o pipefail
+          "$APP/Contents/MacOS/NegativeScanStudio" -selftest-runloop 2>&1 | tee out/runloop-selftest.txt
+          grep -q 'runloop selftest: PASS' out/runloop-selftest.txt
+      - name: CJK, version and plist check (report only)
+        if: ${{ !cancelled() }}
+        run: python3 ci/qa/check_mac_build.py --product app --repo . "$APP" || true
+      - name: Test summary
+        if: always()
+        run: |
+          bash ci/macos/test_summary.sh go-test-gio.log "Gio UI ${{ matrix.os }}" | tee -a "$GITHUB_STEP_SUMMARY"
+          bash ci/macos/test_summary.sh go-test-gio-sim.log "Gio UI sim camera ${{ matrix.os }}" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Zip the app and checksums
+        if: always()
+        run: |
+          mkdir -p out
+          cp go-test-gio*.log out/ 2>/dev/null || true
+          if [ -n "${APP:-}" ] && [ -d "$APP" ]; then (cd "$(dirname "$APP")" && ditto -c -k --keepParent "$(basename "$APP")" NegativeScanStudio-macos-arm64-test.zip && rm -rf "$(basename "$APP")" NegativeScanStudio); fi
+          (cd out && find . -type f ! -name SHA256SUMS.txt -exec shasum -a 256 {} + > SHA256SUMS.txt; cat SHA256SUMS.txt)
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: w9-gio-ui-${{ matrix.os }}
+          path: out
