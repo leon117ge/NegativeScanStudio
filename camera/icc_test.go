@@ -206,4 +206,7 @@ func TestICCStub(t *testing.T) {
 	if _, _, err := OpenICC("", 0); err == nil {
 		t.Fatal("OpenICC without ImageCaptureCore succeeded")
 	}
+	if _, _, err := ICCAuthorization(0); err == nil {
+		t.Fatal("ICCAuthorization without ImageCaptureCore succeeded")
+	}
 }

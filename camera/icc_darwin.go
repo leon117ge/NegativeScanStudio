@@ -51,16 +51,16 @@ func ListICC(timeout time.Duration) ([]ICCCamera, error) {
 	return out, nil
 }
 
-// ICCAuthorization reports ImageCaptureCore's control and contents
-// authorization for this process (macOS privacy settings) without prompting.
+// ICCAuthorizedMacOS is what ICCAuthorization reports on macOS.
+const ICCAuthorizedMacOS = "authorized (macOS has no ImageCaptureCore authorization API)"
+
+// ICCAuthorization keeps the cross-platform API: on macOS it reports
+// authorized for both control and contents without calling ImageCaptureCore.
+// ICDeviceBrowser's control/contents authorization API is iOS/iPadOS only
+// (IC_UNAVAILABLE(macos) in the macOS SDK); whether a newer macOS shows any
+// privacy prompt for a tethered camera is checked on hardware (docs/MACTETHER.md).
 func ICCAuthorization(timeout time.Duration) (control, contents string, err error) {
-	a := make([]C.char, 64)
-	b := make([]C.char, 64)
-	errb := make([]C.char, iccErrLen)
-	if C.icc_auth(&a[0], &b[0], 64, C.double(timeout.Seconds()), &errb[0], iccErrLen) != 0 {
-		return "", "", iccErr(errb)
-	}
-	return C.GoString(&a[0]), C.GoString(&b[0]), nil
+	return ICCAuthorizedMacOS, ICCAuthorizedMacOS, nil
 }
 
 // OpenICC opens a camera by ICDevice UUID ("" = the first camera that

@@ -14,7 +14,7 @@ RAW capture work over USB on your Mac.
 
 | Command | What it does |
 |---|---|
-| `list` (default) | Cameras ImageCaptureCore sees, with USB IDs and UUID. No camera is not an error. Also prints this app's ImageCaptureCore access (control, contents). |
+| `list` (default) | Cameras ImageCaptureCore sees, with USB IDs and UUID. No camera is not an error. Also prints the ImageCaptureCore access line; on macOS it always reads authorized, because macOS has no ImageCaptureCore authorization API. |
 | `info` | Opens the camera: model, firmware, serial, vendor operations, exposure (ISO, shutter, f-number) and exposure mode. |
 | `lv [FILE]` | Saves one live view JPEG (default `lv.jpg`). With `-n N` it fetches N frames and reports frames per second. |
 | `capture [DIR]` | Takes one picture and downloads the RAF into DIR (default `.`), named `mactether_DSCFnnnn.RAF`. The file is deleted from the camera after download, as in the app. |
@@ -55,5 +55,8 @@ Errors are printed as `error: ...` on stdout and the exit code is 1.
 - A card in the camera, or SHOOT WITHOUT CARD = ON.
 
 Before you start, quit Image Capture, Photos, X Acquire, Capture One and Lightroom: they open the
-camera themselves. The first run may show a macOS privacy prompt for Terminal to access the camera.
-Allow it. If you denied it, allow it in System Settings > Privacy & Security, then run again.
+camera themselves. ImageCaptureCore on macOS has no authorization API of its own (the
+control/contents authorization calls exist only on iOS and iPadOS), so mactether asks for
+nothing. If macOS still shows a privacy prompt for Terminal, allow it, note its exact wording
+in your report, and run again; if you denied it, allow it in System Settings > Privacy &
+Security first.

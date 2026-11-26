@@ -15,9 +15,6 @@ typedef struct {
 // icc_list fills up to max cameras and returns the count, or -1 with err set.
 int icc_list(icc_cam *out, int max, double timeout, char *err, int errlen);
 
-// icc_auth copies the control and contents authorization status (no prompt); 0 on success.
-int icc_auth(char *control, char *contents, int n, double timeout, char *err, int errlen);
-
 // icc_open opens a session on the camera with this UUID; NULL with err set on failure.
 void *icc_open(const char *uuid, double timeout, char *err, int errlen);
 

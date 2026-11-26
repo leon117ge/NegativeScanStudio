@@ -5,10 +5,15 @@
 // -[ICCameraDevice requestSendPTPCommand:outData:completion:] (macOS 10.15+).
 // All PTP logic stays in Go (icc.go, fuji.go); this file only moves bytes.
 //
-// Threading: ImageCaptureCore delivers delegate calls and completions on the
-// main run loop. When called on the main thread (mactether locks its main
-// goroutine to it) the waits below pump the run loop; on another thread they
-// block on a semaphore and rely on the app's running main run loop.
+// Threading: ImageCaptureCore delivers delegate calls on the main thread;
+// request completion blocks may run on any queue (ICDevice.h). Every result a
+// wait looks at is an atomic property, set exactly once. When called on the
+// main thread (mactether locks its main goroutine to it) the waits pump the
+// run loop; on another thread they poll and rely on the app's main run loop.
+//
+// Authorization: the ICDeviceBrowser control/contents authorization API is
+// iOS/iPadOS only (IC_UNAVAILABLE(macos) in the SDK), so nothing here asks for
+// or checks it; on macOS access is not gated by an ImageCaptureCore prompt.
 
 #import <Foundation/Foundation.h>
 #import <ImageCaptureCore/ImageCaptureCore.h>
@@ -120,32 +125,6 @@ static BOOL startBrowser(double timeout, char *err, int errlen) {
 	return YES;
 }
 
-// requestAuth asks for camera control and contents access (macOS 10.15+
-// privacy prompts, shown for the terminal app on first use).
-static NSString *requestAuth(double timeout) {
-	NSSICCBrowser *b = gBrowser;
-	__block NSString *control = nil;
-	__block NSString *contents = nil;
-	runOnMain(^{
-		[b.browser requestControlAuthorizationWithCompletion:^(ICAuthorizationStatus st) {
-			control = st;
-		}];
-		[b.browser requestContentsAuthorizationWithCompletion:^(ICAuthorizationStatus st) {
-			contents = st;
-		}];
-	});
-	waitUntil(timeout, ^BOOL {
-		return control != nil && contents != nil;
-	});
-	if (control != nil && ![control isEqualToString:ICAuthorizationStatusAuthorized]) {
-		return [NSString stringWithFormat:@"camera control access is %@: allow it in System Settings > Privacy & Security for the terminal app", control];
-	}
-	if (contents != nil && ![contents isEqualToString:ICAuthorizationStatusAuthorized]) {
-		return [NSString stringWithFormat:@"camera contents access is %@: allow it in System Settings > Privacy & Security for the terminal app", contents];
-	}
-	return nil;
-}
-
 int icc_list(icc_cam *out, int max, double timeout, char *err, int errlen) {
 	@autoreleasepool {
 		if (!startBrowser(timeout, err, errlen)) return -1;
@@ -169,26 +148,43 @@ int icc_list(icc_cam *out, int max, double timeout, char *err, int errlen) {
 	}
 }
 
-int icc_auth(char *control, char *contents, int n, double timeout, char *err, int errlen) {
-	@autoreleasepool {
-		if (!startBrowser(timeout, err, errlen)) return -1;
-		copyStr(control, (size_t)n, [gBrowser.browser controlAuthorizationStatus]);
-		copyStr(contents, (size_t)n, [gBrowser.browser contentsAuthorizationStatus]);
-		return 0;
-	}
-}
+// NSSICCResult holds one completion's outcome; the completion may run on any queue.
+@interface NSSICCResult : NSObject
+@property(atomic) BOOL done;
+@property(atomic, strong) NSError *error;
+@property(atomic, strong) NSData *data;
+@property(atomic, strong) NSData *response;
+@end
+@implementation NSSICCResult
+@end
 
 @interface NSSICCSession : NSObject <ICCameraDeviceDelegate>
 @property(strong) ICCameraDevice *camera;
 @property(atomic) BOOL ready;
 @property(atomic) BOOL removed;
 @property(atomic) NSUInteger ptpEvents;
+// Set by the required ICDeviceDelegate session callbacks.
+@property(atomic) BOOL openSignalled;
+@property(atomic, strong) NSError *openError;
+@property(atomic) BOOL closeSignalled;
+@property(atomic, strong) NSError *lastError;
 @end
 
 @implementation NSSICCSession
-// ICDeviceDelegate
+// ICDeviceDelegate (required)
+- (void)device:(ICDevice *)device didOpenSessionWithError:(NSError *)error {
+	self.openError = error;
+	self.openSignalled = YES;
+}
+- (void)device:(ICDevice *)device didCloseSessionWithError:(NSError *)error {
+	self.closeSignalled = YES;
+}
 - (void)didRemoveDevice:(ICDevice *)device {
 	self.removed = YES;
+}
+// ICDeviceDelegate (optional)
+- (void)device:(ICDevice *)device didEncounterError:(NSError *)error {
+	if (error != nil) self.lastError = error;
 }
 - (void)deviceDidBecomeReady:(ICDevice *)device {
 	self.ready = YES;
@@ -218,14 +214,17 @@ int icc_auth(char *control, char *contents, int n, double timeout, char *err, in
 }
 @end
 
+// detach clears the camera's delegate on the main thread. ICDevice.delegate is
+// assign (not weak), so the block keeps the session alive until it is cleared.
+static void detach(ICCameraDevice *cam, NSSICCSession *s) {
+	runOnMain(^{
+		if (cam.delegate == s) cam.delegate = nil;
+	});
+}
+
 void *icc_open(const char *uuid, double timeout, char *err, int errlen) {
 	@autoreleasepool {
 		if (!startBrowser(timeout, err, errlen)) return NULL;
-		NSString *auth = requestAuth(timeout);
-		if (auth != nil) {
-			setErr(err, errlen, auth);
-			return NULL;
-		}
 		NSString *want = [NSString stringWithUTF8String:uuid];
 		ICCameraDevice *cam = nil;
 		@synchronized(gBrowser) {
@@ -239,24 +238,35 @@ void *icc_open(const char *uuid, double timeout, char *err, int errlen) {
 		}
 		NSSICCSession *s = [[NSSICCSession alloc] init];
 		s.camera = cam;
-		__block BOOL opened = NO;
-		__block NSError *openErr = nil;
+		NSSICCResult *r = [[NSSICCResult alloc] init];
 		runOnMain(^{
 			cam.delegate = s;
 			[cam requestOpenSessionWithOptions:@{}
 			                        completion:^(NSError *e) {
-				                        openErr = e;
-				                        opened = YES;
+				                        r.error = e;
+				                        r.done = YES;
 			                        }];
 		});
+		// One wait for whichever arrives first: the completion block or the
+		// required delegate call device:didOpenSessionWithError:. Both report
+		// the same open; the other one is ignored.
 		if (!waitUntil(timeout, ^BOOL {
-			    return opened;
+			    return r.done || s.openSignalled;
 		    })) {
+			// The open may still finish later: ask for a close so no session is left behind.
+			runOnMain(^{
+				[cam requestCloseSessionWithOptions:@{}
+				                         completion:^(NSError *e){
+				                         }];
+			});
+			detach(cam, s);
 			setErr(err, errlen, @"opening the camera session timed out (close Image Capture, Photos and X Acquire, then retry)");
 			return NULL;
 		}
+		NSError *openErr = r.done ? r.error : s.openError;
 		if (openErr != nil) {
-			setErr(err, errlen, [NSString stringWithFormat:@"open session: %@", openErr.localizedDescription]);
+			detach(cam, s);
+			setErr(err, errlen, [NSString stringWithFormat:@"open session: %@ (%ld)", openErr.localizedDescription, (long)openErr.code]);
 			return NULL;
 		}
 		// Ready (catalog enumerated) is not needed for PTP pass-through; give
@@ -271,6 +281,7 @@ void *icc_open(const char *uuid, double timeout, char *err, int errlen) {
 				                         completion:^(NSError *e){
 				                         }];
 			});
+			detach(cam, s);
 			return NULL;
 		}
 		return (__bridge_retained void *)s;
@@ -292,27 +303,32 @@ int icc_send(void *h, const unsigned char *cmd, int cmdlen, const unsigned char 
 		}
 		NSData *cmdData = [NSData dataWithBytes:cmd length:(NSUInteger)cmdlen];
 		NSData *outData = hasOut ? [NSData dataWithBytes:out length:(NSUInteger)outlen] : nil;
-		__block BOOL done = NO;
-		__block NSData *gotData = nil;
-		__block NSData *gotResp = nil;
-		__block NSError *gotErr = nil;
+		NSSICCResult *r = [[NSSICCResult alloc] init];
 		ICCameraDevice *cam = s.camera;
 		runOnMain(^{
 			[cam requestSendPTPCommand:cmdData
 			                   outData:outData
 			                completion:^(NSData *responseData, NSData *ptpResponseData, NSError *e) {
-				                gotData = responseData;
-				                gotResp = ptpResponseData;
-				                gotErr = e;
-				                done = YES;
+				                r.data = responseData;
+				                r.response = ptpResponseData;
+				                r.error = e;
+				                r.done = YES;
 			                }];
 		});
 		if (!waitUntil(timeout, ^BOOL {
-			    return done;
+			    return r.done || s.removed;
 		    })) {
-			setErr(err, errlen, @"PTP command timed out");
+			NSError *last = s.lastError;
+			setErr(err, errlen, last != nil ? [NSString stringWithFormat:@"PTP command timed out (last device error: %@)", last.localizedDescription] : @"PTP command timed out");
 			return -1;
 		}
+		if (!r.done) {
+			setErr(err, errlen, @"camera disconnected");
+			return -1;
+		}
+		NSError *gotErr = r.error;
+		NSData *gotResp = r.response;
+		NSData *gotData = r.data;
 		if (gotErr != nil) {
 			setErr(err, errlen, [NSString stringWithFormat:@"PTP command: %@ (%ld)", gotErr.localizedDescription, (long)gotErr.code]);
 			return -1;
@@ -337,18 +353,18 @@ void icc_close(void *h, double timeout) {
 	@autoreleasepool {
 		NSSICCSession *s = (__bridge_transfer NSSICCSession *)h;
 		ICCameraDevice *cam = s.camera;
-		__block BOOL done = NO;
+		NSSICCResult *r = [[NSSICCResult alloc] init];
 		runOnMain(^{
 			[cam requestCloseSessionWithOptions:@{}
 			                         completion:^(NSError *e) {
-				                         done = YES;
+				                         r.error = e;
+				                         r.done = YES;
 			                         }];
 		});
+		// Completion or the required delegate call device:didCloseSessionWithError:.
 		waitUntil(timeout, ^BOOL {
-			return done;
+			return r.done || s.closeSignalled || s.removed;
 		});
-		runOnMain(^{
-			cam.delegate = nil;
-		});
+		detach(cam, s);
 	}
 }

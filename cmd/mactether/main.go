@@ -143,7 +143,7 @@ func list(o options) error {
 		return err
 	}
 	if ctl, cnt, err := camera.ICCAuthorization(o.timeout / 2); err == nil {
-		fmt.Printf("ImageCaptureCore access for this app: control %s, contents %s\n", ctl, cnt)
+		fmt.Printf("ImageCaptureCore access: control %s, contents %s\n", ctl, cnt)
 	}
 	if len(cams) == 0 {
 		fmt.Println("no cameras found (connect the X-T3 by USB, switch it on, CONNECTION MODE = USB TETHER SHOOTING AUTO)")
