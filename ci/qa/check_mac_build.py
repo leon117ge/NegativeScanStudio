@@ -16,10 +16,17 @@ Checks
      in the binary ("NegativeScan Studio OFX X.Y.Z"), the OFX plugin version
      from OfxGetPlugin (optional --probe JSON), the Go app version string
      ("NegativeScan Studio vX.YY"), the artifact file name and --expect-version.
-  3. Docs: with --repo, the changelog for the product has an entry headed with
+  3. Layout and binaries: OFX artifacts must contain the *.ofx.bundle folder
+     itself (not a bare Contents/), with Contents/Info.plist and the
+     CFBundleExecutable in Contents/MacOS; every Mach-O must have an arm64
+     slice and a code signature (ad-hoc is reported as WARN until a
+     Developer ID exists, PLAN.md Q1; unsigned is FAIL).
+  4. Docs: with --repo, the changelog for the product has an entry headed with
      the version and mentions macOS; the README has macOS install notes.
 
-Exit code 0 = all checks pass, 1 = at least one FAIL. WARN lines do not fail.
+Exit code 0 = all checks pass, 1 = at least one FAIL (with --mode enforce,
+the default). With --mode report the verdict is printed but the exit code is
+0. WARN lines never fail.
 A JSON report is written with --report and a summary to GITHUB_STEP_SUMMARY.
 """
 import argparse
@@ -109,6 +116,29 @@ def macho_sections(sl):
         off += size
 
 
+def macho_signature(sl):
+    """Return 'unsigned', 'adhoc' or 'signed' for a thin 64-bit Mach-O."""
+    ncmds = struct.unpack("<I", sl[16:20])[0]
+    off = 32
+    for _ in range(ncmds):
+        cmd, size = struct.unpack("<II", sl[off:off + 8])
+        if cmd == 0x1D:  # LC_CODE_SIGNATURE
+            doff, dsize = struct.unpack("<II", sl[off + 8:off + 16])
+            blob = sl[doff:doff + dsize]
+            count = struct.unpack(">I", blob[8:12])[0]
+            adhoc, cms = False, 0
+            for i in range(count):
+                _, o = struct.unpack(">II", blob[12 + 8 * i:20 + 8 * i])
+                magic = struct.unpack(">I", blob[o:o + 4])[0]
+                if magic == 0xFADE0C02:
+                    adhoc = adhoc or bool(struct.unpack(">I", blob[o + 12:o + 16])[0] & 0x2)
+                elif magic == 0xFADE0B01:
+                    cms = struct.unpack(">I", blob[o + 4:o + 8])[0]
+            return "adhoc" if adhoc or cms <= 8 else "signed"
+        off += size
+    return "unsigned"
+
+
 def utf8_runs(buf, min_cjk):
     """Printable UTF-8 runs that contain at least min_cjk consecutive CJK chars."""
     hits = []
@@ -146,6 +176,21 @@ def scan_macho(path, data, rep, rel):
                     rep.add("FAIL", "cjk", f"{rel} {seg},{sect}+0x{off:x} (check, may be a numeric table): {text!r}")
                     found = True
         rep.add("INFO", "binary", f"{rel}: Mach-O slice cputype 0x{cpu & 0xffffffff:x} scanned")
+    slices = macho_slices(data)
+    cpus = [struct.unpack("<i", x[4:8])[0] & 0xFFFFFFFF for x in slices]
+    if 0x0100000C not in cpus:
+        rep.add("FAIL", "binary", f"{rel}: no arm64 slice (cputypes {[hex(c) for c in cpus]})")
+    else:
+        rep.add("PASS", "binary", f"{rel}: arm64 slice present")
+    for x in slices:
+        sig = macho_signature(x)
+        if sig == "unsigned":
+            rep.add("FAIL", "signature", f"{rel}: no code signature (Apple Silicon refuses to load it)")
+        elif sig == "adhoc":
+            rep.add("WARN", "signature", f"{rel}: ad-hoc signature (expected until a Developer ID exists; needs quarantine clearing)")
+        else:
+            rep.add("PASS", "signature", f"{rel}: signed with an identity (verify with codesign/spctl on macOS)")
+        break
     return found
 
 
@@ -244,6 +289,37 @@ def collect(root, rep, versions, args):
     return files
 
 
+def check_layout(root, product, rep, label):
+    if product not in ("ofx", "print2383"):
+        return
+    bundles = []
+    for dirpath, dirnames, _ in os.walk(root):
+        for d in dirnames:
+            if d.endswith(".ofx.bundle"):
+                bundles.append(os.path.join(dirpath, d))
+    bare = os.path.isdir(os.path.join(root, "Contents"))
+    if not bundles:
+        rep.add("FAIL", "layout", f"{label}: no *.ofx.bundle folder" + (" (bare Contents/ at the top: the bundle folder itself was not packed)" if bare else ""))
+        return
+    for b in bundles:
+        rel = os.path.relpath(b, root)
+        plist = os.path.join(b, "Contents", "Info.plist")
+        if not os.path.isfile(plist):
+            rep.add("FAIL", "layout", f"{label}: {rel}/Contents/Info.plist missing")
+            continue
+        with open(plist, "rb") as f:
+            pl = plistlib.load(f)
+        exe = pl.get("CFBundleExecutable", "")
+        if pl.get("CFBundlePackageType") != "BNDL":
+            rep.add("FAIL", "layout", f"{label}: {rel}: CFBundlePackageType is {pl.get('CFBundlePackageType')!r}, not BNDL")
+        if not exe or not os.path.isfile(os.path.join(b, "Contents", "MacOS", exe)):
+            rep.add("FAIL", "layout", f"{label}: {rel}: Contents/MacOS/{exe or '?'} missing")
+        elif os.path.isdir(os.path.join(b, "Contents", "Win64")):
+            rep.add("FAIL", "layout", f"{label}: {rel}: has a Win64 folder in a Mac build")
+        else:
+            rep.add("PASS", "layout", f"{label}: {rel} has Info.plist and Contents/MacOS/{exe}")
+
+
 # ---------------------------------------------------------------- docs
 
 
@@ -297,6 +373,8 @@ def main():
     ap.add_argument("--repo", help="repository root for the docs/changelog check")
     ap.add_argument("--probe", help="JSON from ofx_version_probe (OfxGetPlugin major/minor)")
     ap.add_argument("--report", help="write a JSON report here")
+    ap.add_argument("--mode", choices=["enforce", "report"], default="enforce",
+                    help="enforce: exit 1 on FAIL (release builds); report: print the verdict, exit 0")
     args = ap.parse_args()
     if not args.cjk_only and not args.product:
         ap.error("--product is required unless --cjk-only")
@@ -311,7 +389,10 @@ def main():
             m = re.search(r"_v?(\d[0-9A-Za-z.\-+]*?)(?:_(?:mac|macos|darwin|arm64|win64)|\.zip$|\.dmg$)", base, re.I)
             if m and os.path.isfile(art):
                 versions.append((f"artifact file name ({base})", m.group(1)))
-            n = collect(expand(art, work), rep, versions, args)
+            root = expand(art, work)
+            n = collect(root, rep, versions, args)
+            if not args.cjk_only:
+                check_layout(root, args.product, rep, art)
             rep.add("INFO", "files", f"{art}: {n} files scanned")
     finally:
         shutil.rmtree(work, ignore_errors=True)
@@ -351,15 +432,18 @@ def main():
     print(f"RESULT: {verdict}")
     if args.report:
         with open(args.report, "w", encoding="utf-8") as f:
-            json.dump({"result": verdict, "versions": versions, "items": rep.items}, f, indent=1)
+            json.dump({"result": verdict, "mode": args.mode, "versions": versions, "items": rep.items}, f, indent=1)
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
         with open(summary, "a", encoding="utf-8") as f:
-            f.write(f"### Mac build checks ({args.product}): **{verdict}**\n\n")
+            f.write(f"### Mac build checks ({args.product}, {args.mode} mode): **{verdict}**\n\n")
             for i in rep.items:
                 if i["level"] in ("FAIL", "WARN", "PASS"):
                     f.write(f"- {i['level']} [{i['check']}] {i['message']}\n")
             f.write("\n")
+    if args.mode == "report" and rep.failed:
+        print("report mode: FAIL recorded, exit code 0")
+        return 0
     return 1 if rep.failed else 0
 
 

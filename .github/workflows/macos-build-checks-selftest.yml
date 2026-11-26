@@ -1,0 +1,31 @@
+# Exercises macos-build-checks.yml through workflow_call, the same way the Mac
+# build workflows call it, against existing Mac artifacts (read-only), in
+# report mode. Runs on push to qa/macos-parity only.
+name: macOS build checks (self-test)
+on:
+  push:
+    branches: [qa/macos-parity]
+    paths: ['ci/qa/check_mac_build.py', 'ci/qa/ofx_version_probe.c', '.github/workflows/macos-build-checks*.yml']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  existing-artifacts:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # W2 Metal build, feat/metal-render daf4d32
+          - {run: '45807551550', artifact: NegativeScanStudio-ofx-macos-arm64-metal-macos-15, runner: macos-15, expected: ''}
+          - {run: '45807551550', artifact: NegativeScanStudio-ofx-macos-arm64-metal-macos-26, runner: macos-26, expected: ''}
+          # same artifact against the tentative next plugin number (docs/examples only)
+          - {run: '45807551550', artifact: NegativeScanStudio-ofx-macos-arm64-metal-macos-15, runner: macos-15, expected: '0.90.16'}
+    uses: ./.github/workflows/macos-build-checks.yml
+    with:
+      artifact-name: ${{ matrix.artifact }}
+      run-id: ${{ matrix.run }}
+      product: ofx
+      expected-version: ${{ matrix.expected }}
+      runner: ${{ matrix.runner }}
+      source-ref: daf4d326c8f4fbfc9e15a28b35f4993abf047209   # the commit the W2 artifacts were built from
+      mode: report

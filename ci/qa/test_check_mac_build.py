@@ -22,7 +22,7 @@ def bundle(root, short, build, label_version, readme_text="English only.\n"):
     os.makedirs(os.path.join(c, "MacOS"))
     with open(os.path.join(c, "Info.plist"), "wb") as f:
         plistlib.dump({"CFBundleShortVersionString": short, "CFBundleVersion": build,
-                       "CFBundleExecutable": "NegativeScanStudio.ofx"}, f)
+                       "CFBundleExecutable": "NegativeScanStudio.ofx", "CFBundlePackageType": "BNDL"}, f)
     with open(os.path.join(c, "MacOS", "NegativeScanStudio.ofx"), "wb") as f:
         # Not a Mach-O: scanned as a plain binary. Carries the label string.
         f.write(b"\0\1\2NegativeScan Studio OFX " + label_version.encode() + b"\0\xff\xfe")
@@ -58,6 +58,13 @@ def main():
         bundle(name, "0.90.16", "0.90.16", "0.90.16")
         open(os.path.join(name, HAN + ".txt"), "w").write("x")
         results.append(run(name, True, "CJK in a file name fails"))
+        bare = os.path.join(tmp, "bare")
+        bundle(bare, "0.90.16", "0.90.16", "0.90.16")
+        shutil.move(os.path.join(bare, "NegativeScanStudio.ofx.bundle", "Contents"), os.path.join(bare, "Contents"))
+        os.rmdir(os.path.join(bare, "NegativeScanStudio.ofx.bundle"))
+        results.append(run(bare, True, "bare Contents/ without the .ofx.bundle folder fails"))
+        results.append(run(bundle(os.path.join(tmp, "report"), "0.90.16-beta", "0.90.16", "0.90.16"), False,
+                           "--mode report records a FAIL but exits 0", "--mode", "report"))
         clang = shutil.which("clang")
         if clang and sys.platform == "darwin":
             mo = os.path.join(tmp, "macho")
