@@ -94,7 +94,15 @@ type Ctl struct {
 	scanCancel context.CancelFunc
 	sessFirst  time.Time
 	LastCap    *hdrscan.Result
-	camFn      float64
+	LastMerge  *hdrscan.Result // Merge files (merge.go)
+	MF         MergeFiles
+	MRes       string // Merge files result box (mRes)
+	MResSeq    int
+	Hair       *Hair
+	// OpenInDevelop opens an HDR TIFF in Develop (main.go's hook).
+	OpenInDevelop func(path string)
+	mergeCancel   context.CancelFunc
+	camFn         float64
 
 	// Light page link (v0.82 handoff, shared ISO / base shutter / rectangle)
 	Light       *Light
@@ -137,6 +145,8 @@ func New(h Host) *Ctl {
 	c.isoPrev, c.shutPrev = c.Cfg.ISO, c.Cfg.Shutter
 	c.Hik = newHikCams()
 	c.Light = newLight(c)
+	c.initMerge()
+	c.Hair = &Hair{c: c, Status: hairStatusText, Mask: true}
 	return c
 }
 
@@ -927,45 +937,72 @@ func (c *Ctl) Capture() {
 				names = append(names, filepath.Base(r))
 			}
 			c.say("Downloaded " + strings.Join(names, ", ") + " to " + dir)
-			c.process(raws, opts)
+			c.process(raws, opts, false)
 		})
 	})
 }
 
-// process merges in the background (the camera stays usable).
-func (c *Ctl) process(srcs []string, o hdrscan.ProcessOptions) {
+// process merges in the background (the camera stays usable). merge is
+// the Merge files page (te == u.mRes on Windows): its text box gets the
+// progress and the result, and the result is the last merge.
+func (c *Ctl) process(srcs []string, o hdrscan.ProcessOptions, merge bool) {
 	c.Working, c.Progress = true, true
-	o.Progress = func(m string) { c.Host.Post(func() { c.Res = m }) }
+	set := func(s string) {
+		if merge {
+			c.MRes = s
+			c.MResSeq++
+		} else {
+			c.Res = s
+		}
+	}
+	o.Progress = func(m string) { c.Host.Post(func() { set(m) }) }
 	go func() {
 		res, err := hdrscan.ProcessN(srcs, o)
 		c.Host.Post(func() {
 			c.Working, c.Progress = false, false
+			if merge {
+				c.mergeCancel = nil
+			}
 			if err != nil && o.Ctx != nil && errors.Is(err, context.Canceled) {
+				if merge {
+					// Merge files never deletes its sources (Stop is macOS only).
+					set("Merge stopped. Partial output removed; the source files are not changed.")
+					c.say("Merge files: " + c.MRes)
+					return
+				}
 				c.scanStopped(srcs, "merge")
 				return
 			}
-			if o.Ctx != nil {
+			if o.Ctx != nil && !merge {
 				c.endScan()
 			}
 			if err != nil {
-				c.Res = "Merge failed: " + err.Error()
-				c.say(c.Res)
+				set("Merge failed: " + err.Error())
+				c.say("Merge failed: " + err.Error())
 				return
 			}
-			c.Res = resultText(res)
-			c.LastCap = res
-			c.say(strings.ReplaceAll(c.Res, "\n", " | "))
+			msg := resultText(res, o.Metadata)
+			if merge {
+				c.LastMerge = res
+			} else {
+				c.LastCap = res
+			}
+			set(msg)
+			c.say(strings.ReplaceAll(msg, "\n", " | "))
 		})
 	}()
 }
 
-func resultText(res *hdrscan.Result) string {
+// resultText is the result message of process() on Windows (the film-stock
+// compare of a capture is not on macOS yet).
+func resultText(res *hdrscan.Result, md scanmeta.Metadata) string {
 	msg := fmt.Sprintf("Saved %s  (%d frames, %.1f s)", res.HDR, res.Frames, res.Elapsed.Seconds())
+	msg += "\n" + levelMetadataSummary(md)
 	for _, st := range res.StatsN {
 		if st.Dropped {
 			msg += fmt.Sprintf("\nWARNING: the %s frame could not be used - this is a %d-frame HDR.", st.Label, res.Frames)
 		} else if st.Warning != "" {
-			msg += "\nWARNING: " + st.Warning
+			msg += fmt.Sprintf("\nNote: %s ratio taken from the exposure times (the frame is too clipped to measure).", st.Label)
 		}
 	}
 	for _, st := range res.StatsN {

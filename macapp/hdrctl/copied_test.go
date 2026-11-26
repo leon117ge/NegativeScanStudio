@@ -33,3 +33,15 @@ func TestCopiedLightDeclsMatchWindows(t *testing.T) {
 		drift.Same(t, ours, drift.Decls(t, "../../"+file), names...)
 	}
 }
+
+// Every declaration in copied_crop.go must still equal its Windows original.
+func TestCopiedHairDeclsMatchWindows(t *testing.T) {
+	ours := drift.Decls(t, "copied_crop.go")
+	for file, names := range map[string][]string{
+		"hairpage.go":      {"hairModes", "hairNoteRE", "newer"},
+		"hairview.go":      {"hairLUT", "hairPreview", "fitRect"},
+		"levelmetadata.go": {"levelMetadataSummary"},
+	} {
+		drift.Same(t, ours, drift.Decls(t, "../../"+file), names...)
+	}
+}
