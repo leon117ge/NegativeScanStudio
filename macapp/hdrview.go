@@ -21,9 +21,8 @@ import (
 
 	"basetool/hdrscan"
 	"basetool/macapp/appstate"
+	"basetool/macapp/hdrctl"
 )
-
-const calTip = "Camera + light input profile from a 24-patch transmission chart. Not on macOS yet (later increment)."
 
 const laterTip = "Not on macOS yet: comes with a later increment (film-base DB tools)."
 
@@ -54,7 +53,6 @@ type hdrPages struct {
 	targetCB, areaCB, slowCB, f0CB, isoCB, shutCB, stockCB, tolCB Combo
 	rec, saveDB, saveF0, manage, meter                            Button
 	levelMeta                                                     Check
-	levelOn                                                       bool
 	tips                                                          [8]Tip
 	// Capture and merge card
 	outEd, rollEd                                         Field
@@ -334,9 +332,7 @@ func (p *hdrPages) cameraCard(gtx layout.Context) layout.Dimensions {
 					return hbox(gtx, 6,
 						layout.Flexed(1, p.combo(&p.devCB, c.DeviceItems(), &c.DevIdx, !b.DevList, "", nil)),
 						layout.Rigid(p.button(&p.refresh, "Refresh", btnOpts{minW: 70}, c.RefreshDevices)),
-						layout.Rigid(p.button(&p.calib, "Chart calibration...", btnOpts{tip: calTip}, func() {
-							p.u.Message("Chart calibration", "Chart calibration is not on macOS yet; it comes with a later increment. Use the Windows app for now.")
-						})),
+						layout.Rigid(p.button(&p.calib, "Chart calibration...", btnOpts{tip: hdrctl.CalTip()}, c.Cal.Open)),
 					)
 				})
 			},
@@ -415,11 +411,20 @@ func (p *hdrPages) meterCard(gtx layout.Context) layout.Dimensions {
 			},
 			p.readouts,
 			func(gtx layout.Context) layout.Dimensions {
-				d, _ := p.levelMeta.Layout(gtx.Disabled(), th, "Film base for metadata: Last leveling (after profile)", &p.levelOn,
-					"Uses the Light page's last accepted leveling. Leveling metadata is not on macOS yet (later increment).")
+				lv := c.RefreshLevelingUI()
+				on, g := lv.On, gtx
+				if !lv.Enabled {
+					g = gtx.Disabled()
+				}
+				d, ch := p.levelMeta.Layout(g, th, "Film base for metadata: Last leveling (after profile)", &on, hdrctl.LevelMetadataTip())
+				if ch && lv.Enabled {
+					c.SetUseLastLeveling(on)
+				}
 				return d
 			},
-			func(gtx layout.Context) layout.Dimensions { return th.text(gtx, "Last leveling: unavailable") },
+			func(gtx layout.Context) layout.Dimensions {
+				return th.text(gtx, c.RefreshLevelingUI().Text)
+			},
 			func(gtx layout.Context) layout.Dimensions { return th.bold(gtx, c.ExpLbl, cGreenText) },
 			func(gtx layout.Context) layout.Dimensions {
 				t := c.BaseLbl

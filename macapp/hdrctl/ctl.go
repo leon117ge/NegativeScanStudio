@@ -105,9 +105,10 @@ type Ctl struct {
 
 	// Light page link (v0.82 handoff, shared ISO / base shutter / rectangle)
 	Light       *Light
-	Tri         *Tri   // HDR Scan > Trichrome
-	Focus       *Focus // HDR Scan > Focus check
-	Mono        *Mono  // HDR Scan > Mono trichrome
+	Tri         *Tri      // HDR Scan > Trichrome
+	Focus       *Focus    // HDR Scan > Focus check
+	Cal         *ChartCal // Camera & Light > Camera: Chart calibration
+	Mono        *Mono     // HDR Scan > Mono trichrome
 	Hik         *hikCams
 	handoff     *baseHandoff
 	autoLocking bool
@@ -155,6 +156,7 @@ func New(h Host) *Ctl {
 	c.Tri = newTri(c)
 	c.Mono = newMono(c)
 	c.Focus = newFocus(c)
+	c.Cal = newChartCal(c)
 	c.initMerge()
 	c.Hair = &Hair{c: c, Status: hairStatusText, Mask: true}
 	return c

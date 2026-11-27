@@ -62,6 +62,7 @@ type UI struct {
 	tp   *triPage
 	mo   *monoPage
 	fp   *focusPage
+	cal  *calPanel
 
 	clip    string
 	clipSet bool
@@ -93,6 +94,7 @@ func newUI(th *Theme, inval func()) *UI {
 	u.raw = cropctl.NewRaw(u)
 	u.cp, u.mp, u.hap, u.bp = newCropPage(u), newMergePage(u), newHairPage(u), newBatchPage(u)
 	u.tp, u.mo, u.fp = newTriPage(u), newMonoPage(u), newFocusPage(u)
+	u.cal = newCalPanel(u)
 	return u
 }
 
@@ -225,6 +227,7 @@ func (u *UI) Layout(gtx layout.Context) layout.Dimensions {
 		layout.Flexed(1, u.module),
 		layout.Rigid(u.pageBar),
 	)
+	u.cal.layout(gtx)
 	u.layoutDialog(gtx)
 	return dims
 }
