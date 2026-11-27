@@ -357,7 +357,7 @@ func (l *Light) castCalculate() (filmdb.ColourCast, error) {
 	if c.Enabled {
 		state = "ON"
 	}
-	l.CastText = fmt.Sprintf("%s — 500T @ %.0f K (Planck approximation)\nAdd density: R %+.4f  G %+.4f  B %+.4f\n3200K conversion: %+.1f mired; light unchanged.\nApproximate stock model, not measured WB. Send to Develop to apply.", state, k, c.Offset[0], c.Offset[1], c.Offset[2], r.Mired)
+	l.CastText = fmt.Sprintf("%s — 500T @ %.0f K (Planck approximation)\nAdd density: R %+.4f  G %+.4f  B %+.4f\n3200K conversion: %+.1f mired; light unchanged.\nApproximate stock model, not measured WB.", state, k, c.Offset[0], c.Offset[1], c.Offset[2], r.Mired)
 	return c, nil
 }
 
@@ -366,17 +366,4 @@ func (l *Light) CastPreview() {
 	if _, e := l.castCalculate(); e != nil {
 		l.msg("500T colour cast", e.Error())
 	}
-}
-
-// CastToDevelop is Send to Develop (main.go's toDevelop on Windows: Convert
-// does not use the Develop cast controls, so it only explains that).
-func (l *Light) CastToDevelop() {
-	if l.busy || l.hdr.Busy {
-		return
-	}
-	if _, e := l.castCalculate(); e != nil {
-		l.msg("500T colour cast", e.Error())
-		return
-	}
-	l.msg("500T colour cast", "Convert models a digital-to-negative exposure and does not use the Develop Density In cast controls. Colour cast stays on the 500T calculator page.")
 }

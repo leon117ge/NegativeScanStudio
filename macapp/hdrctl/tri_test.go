@@ -135,7 +135,7 @@ func TestTriReasonsAndButtons(t *testing.T) {
 	h, c, l := newLightCtl(t)
 	tr := c.Tri
 	b := tr.Buttons()
-	if b.Capture || b.Stop || !b.Mode || b.Meter || b.Send {
+	if b.Capture || b.Stop || !b.Mode || b.Meter {
 		t.Fatalf("idle buttons %+v", b)
 	}
 	if tr.WhyText != "Capture disabled: camera not connected" || tr.CamText != "Camera: not connected" ||
@@ -195,11 +195,6 @@ func TestTriReasonsAndButtons(t *testing.T) {
 	l.busy = false
 	if tr.Running() || !strings.Contains(tr.LogText(), "Capture refused: RGB light busy (leveling or a light command).") {
 		t.Fatal(tr.LogText())
-	}
-	// Send base needs an accepted leveling for these values
-	tr.SendBase()
-	if len(h.messages) != 0 {
-		t.Fatal(h.messages)
 	}
 	c.Disconnect()
 	h.pump(t, "disconnect", 30*time.Second, func() bool { return !c.Connected() })

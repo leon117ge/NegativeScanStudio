@@ -27,8 +27,6 @@ const calTip = "Camera + light input profile from a 24-patch transmission chart.
 
 const laterTip = "Not on macOS yet: comes with a later increment (film-base DB tools)."
 
-const sendBaseMsg = "Convert does not apply a scanned film-base reference. Use the OFX plugin for negative-to-positive grading of scanned film."
-
 // liveView is one of the shared live views (HDRUI.liveView(k)).
 type liveView struct {
 	k        int
@@ -54,7 +52,7 @@ type hdrPages struct {
 	refresh, calib, conn, diag, test Button
 	// Meter card
 	targetCB, areaCB, slowCB, f0CB, isoCB, shutCB, stockCB, tolCB Combo
-	rec, saveDB, saveF0, manage, meter, send                      Button
+	rec, saveDB, saveF0, manage, meter                            Button
 	levelMeta                                                     Check
 	levelOn                                                       bool
 	tips                                                          [8]Tip
@@ -438,7 +436,7 @@ func (p *hdrPages) meterCard(gtx layout.Context) layout.Dimensions {
 // readouts is the 4-column grid of big read-only fields.
 func (p *hdrPages) readouts(gtx layout.Context) layout.Dimensions {
 	c, th := p.u.hdr, p.u.th
-	b := c.Buttons()
+	c.Buttons() // as before: Buttons also runs a pending light handoff's lock
 	cell := func(s string, col color.NRGBA) layout.FlexChild {
 		return layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return th.readout(gtx, s, col, true, nil, "") })
 	}
@@ -464,9 +462,9 @@ func (p *hdrPages) readouts(gtx layout.Context) layout.Dimensions {
 		row(lbl("Brighter", cText, 0, brTip), layout.Flexed(3, func(gtx layout.Context) layout.Dimensions {
 			return th.readout(gtx, c.P2Sh, cText, true, &p.tips[1], brTip)
 		})),
-		row(lbl("Base level", cText, -1, ""), cell(c.BaseLv, cText), layout.Flexed(2, p.button(&p.send, "Send base to Develop",
-			btnOpts{disabled: !(b.Capture || (c.Locked() && !c.Busy)), tip: "Send the saved after-profile leveling base when the metadata option is on. Otherwise measure the locked probe explicitly."},
-			func() { p.u.Message("Film base", sendBaseMsg) }))),
+		// Windows' "Send base to Develop" sits here; its only consumer is the
+		// Develop / Convert hook in main.go, which the macOS app does not have
+		row(lbl("Base level", cText, -1, ""), cell(c.BaseLv, cText), layout.Flexed(2, layout.Spacer{}.Layout)),
 		row(lbl("Base R / G / B", cText, -1, ""), cell(c.BaseR, cRedText), cell(c.BaseG, cGreenCh), cell(c.BaseB, cBlueCh)),
 	)
 }

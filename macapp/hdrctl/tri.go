@@ -24,10 +24,6 @@ import (
 	"basetool/rgblight"
 )
 
-// sendBaseText is main.go's hdrui.SendBase message (Develop / Convert does
-// not take a scanned film base).
-const sendBaseText = "Convert does not apply a scanned film-base reference. Use the OFX plugin for negative-to-positive grading of scanned film."
-
 // Tri is the state of the Trichrome page. All fields belong to the UI
 // goroutine.
 type Tri struct {
@@ -167,8 +163,8 @@ func (t *Tri) reason() (short, full string) {
 // TriButtons is updateButtons: which controls are enabled and the
 // Capture label.
 type TriButtons struct {
-	Capture, Stop, Mode, Bracket, Meter, Send, LevelMeta bool
-	CapText                                              string
+	Capture, Stop, Mode, Bracket, Meter, LevelMeta bool
+	CapText                                        string
 }
 
 // Buttons is updateButtons: the enabled controls, and it refreshes the
@@ -178,14 +174,12 @@ func (t *Tri) Buttons() TriButtons {
 	h.Buttons() // runs a pending light handoff's lock, as HDRUI.updateButtons does
 	why, whyFull := t.reason()
 	v, _, _ := t.scanValues()
-	l := h.metadataLeveling()
 	b := TriButtons{
 		Capture:   why == "",
 		Stop:      t.cancel != nil || t.mergeCancel != nil,
 		Mode:      !t.running,
 		Bracket:   !t.running && t.mode() == 1,
 		Meter:     h.dev != nil && !h.Busy,
-		Send:      l.Matches(v),
 		LevelMeta: !t.running && !t.merging,
 		CapText:   t.captureText(t.evs()),
 	}
@@ -493,18 +487,6 @@ func triSavedText(res *hdrscan.TriResult, j triJob) string {
 
 // Meter is the page's Meter base button (the Camera page's Meter base).
 func (t *Tri) Meter() { t.hdr.Meter() }
-
-// SendBase is Send base to Develop: the same accepted reference that is
-// written to scan metadata; main.go's SendBase explains that Convert does
-// not take it.
-func (t *Tri) SendBase() {
-	v, _, _ := t.scanValues()
-	l := t.hdr.metadataLeveling()
-	if !l.Matches(v) {
-		return
-	}
-	t.hdr.Host.Message("Film base", sendBaseText)
-}
 
 // SetUseLastLeveling is the page's Film base metadata check box.
 func (t *Tri) SetUseLastLeveling(on bool) { t.hdr.SetUseLastLeveling(on) }
