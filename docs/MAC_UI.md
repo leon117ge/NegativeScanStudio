@@ -17,7 +17,7 @@ the same titles, rows and control order. Ported so far:
 
 | Module | Sub-page | macOS |
 |---|---|---|
-| Camera & Light | Camera | ported (cards Camera and Meter the clear film base, live view, log; Chart calibration and the leveling-metadata switch since group f) |
+| Camera & Light | Camera | ported (cards Camera and Meter the clear film base, live view, log; Chart calibration and the leveling-metadata switch since group f, slice 1; the film-base DB tools since slice 2) |
 | Camera & Light | Light | ported (RGB Light Air, Channels, Auto film-base leveling, Scan config presets, Faults, last leveling captures, 500T illuminant, log) |
 | HDR Scan | White light scan | ported (live view, Capture and merge card) |
 | HDR Scan | Trichrome | ported (live view, Trichrome scan card, film-base metadata) |
@@ -27,10 +27,10 @@ the same titles, rows and control order. Ported so far:
 | Convert | | not part of the macOS app (user's decision); Windows keeps it |
 
 On the Camera page, Chart calibration and the switch "Film base for metadata: Last
-leveling (after profile)" work since group (f), slice 1. Record base, Save base to DB,
-Save last frame 0 to DB and Manage are shown but not active yet (group f, slice 2). The
-film stock list is read from the shared `film_base_db.json`; the Fixed frame 0
-film-stock comparison is not on macOS yet (slice 2).
+leveling (after profile)" work since group (f), slice 1; Record base, Save base to DB,
+Save last frame 0 to DB, Manage and the Film stock / Tol. selectors since slice 2 (the
+shared `film_base_db.json`). The Fixed frame 0 film-stock comparison of a metering or a
+capture is not on macOS yet.
 
 The camera list shows the Fujifilm cameras that ImageCaptureCore reports (W6
 transport: `camera.ListICC`, `camera.OpenICC`, `camera.OpenFuji`), then the simulated
@@ -77,9 +77,10 @@ Differences from Windows, and why:
   field (`monoScanExposureUS`, as on Windows), falling back to the best-quality scan
   preset only without that page; "Auto-meter each channel" is the page's check box. The
   exposure is a plain field in us instead of a spin box.
-- The film-stock comparison of frame 0 stays off until the film-base DB slice (group f,
-  slice 2). The leveling metadata switch on the Camera page works since group (f), slice
-  1. The leveling itself, its records and the handoff work.
+- The Fixed frame 0 film-stock comparison after Meter base, after a stock change and in
+  the capture result stays off ("Film stock check: not on macOS yet"); Record base
+  already shows its comparison line. The leveling metadata switch on the Camera page
+  works since group (f), slice 1. The leveling itself, its records and the handoff work.
 - The 500T card is titled "500T illuminant" and has no "Send to Develop" button: on
   Windows that button only passes the cast to main.go's Develop / Convert hook, which
   shows a message and stores nothing (`castpage.go`, `main.go` `toDevelop`). Calculate
@@ -347,9 +348,63 @@ Differences from Windows, and why:
 - Strength is a text field with the NumberEdit range and decimals applied when
   editing ends.
 
-Left for group (f), slice 2: Record base, Save base to DB, Save last frame 0
-to DB, Manage (film_base_db.json), and the Fixed frame 0 film-stock
-comparison.
+## Film-base DB (W9 group f, slice 2)
+
+Camera & Light > Camera, Meter the clear film base card: Film stock, Tol.,
+Record base, Save base to DB, Save last frame 0 to DB and Manage are ported
+from `hdrdb.go` with the same labels, tooltips, enable rules
+(`updateButtons`), messages and log lines. The logic is
+`macapp/hdrctl/filmdb.go`; the two dialogs are `macapp/dbview.go`.
+
+- The DB file is `film_base_db.json` through `filmdb.Path(configDir())`, the
+  file name and JSON format of Windows (`filmdb` is shared and unchanged). On
+  macOS the folder is `~/Library/Application Support/NegativeScanStudio`
+  (`os.UserConfigDir()` + `NegativeScanStudio`, as `configDir()` on Windows),
+  so a DB copied between the two machines works on both. `loadDB` runs at
+  start as on Windows: the Film base presets of `config.txt` (or the
+  default "Session 1") that are not in the DB yet are imported; deleted
+  presets stay hidden.
+- Save to film-base DB (Record base, Save base to DB, Save last frame 0 to
+  DB): the info text, Action (Save as a new film stock / Update an existing
+  film stock), New stock name (the roll name, cue "e.g. Portra 400"),
+  Existing stock, Update mode (Replace / Average with the stored values
+  (weighted)), the Stored line, Light source (cue "optional, e.g. CS-LITE
+  5000K"), Save, Cancel. The current stock preselects Update; the name,
+  duplicate and "nothing to update" checks keep the panel open, as the
+  Windows Save handler does. `filmdb.Put` stores the entry (an unknown
+  aperture is `filmdb.ApertureUnknown`), then the stock is selected and
+  "Film-base DB: saved ..." (or "...: not saved") is logged.
+- Manage ("Film-base DB"): the DB path, Film stock, the stored values,
+  conditions, light and crosstalk line, Name, Rename, Delete (Yes / No
+  question), Close; renaming the selected stock follows it.
+- Record base shoots the standalone fixed frame 0 on the camera worker
+  (`Session.RecordBase`, ISO 250 and the base shutter), keeps
+  `<roll>_..._BASE.RAF`, shows the RAW and its base, and leaves live view
+  paused until the panel closes. Save base to DB reads the locked metering
+  probe (`ProbeBase`); the aperture is the one reported at the lock, else the
+  camera's. Save last frame 0 to DB uses the base of the last capture's frame
+  0 (`setLastF0`: frame 0's exposure and reading at Capture, the merge's
+  `Base1F0`), and only a clean, unclipped base.
+- `stockNone`, `frame0Base`, `rgbText`, `entryText`, `compareText`,
+  `fnText` and the preset import (`Preset`, `loadConfig`, `parsePresets`, ...)
+  are verbatim copies in `hdrctl/copied_filmdb.go`, checked by
+  `TestCopiedFilmDBDeclsMatchWindows`.
+
+Tests: `hdrctl/filmdb_test.go` replays the dialogs against `filmdb.Put` on a
+fresh DB (new, replace, weighted average), checks every message, the file on
+disk, the preset import and hiding, Manage rename / delete / close, and the
+`setLastF0` reasons; with `NSS_TEST_RAF` a mock camera whose shots are a copy
+of the RAW runs Record base, a Fixed lock, Save base to DB, a capture and
+merge, and Save last frame 0 to DB end to end. `dbview_ui_test.go` drives the
+panels in the headless window (`NSS_SHOTS` keeps the screenshots).
+
+Differences from Windows, and why:
+
+- The two modal dialogs are in-window panels (Gio has one window); the page
+  underneath takes no input while one is open. Enter and Escape do not press
+  Save / Cancel (the walk DefaultButton / CancelButton); use the buttons.
+- Save base to DB reads the probe RAW off the UI goroutine with the controls
+  off meanwhile (Windows reads it on the UI thread and the window stalls).
 
 ## Known follow-ups
 
@@ -406,4 +461,4 @@ uploads each new frame once as a GPU texture (Metal on macOS) and scales it on t
   recovered panics, with stacks). Camera log and settings stay in
   `~/Library/Application Support/NegativeScanStudio`.
 - Tests: `cd macapp && go test ./...` on macOS; on Linux add `-tags gio` (needs the
-  Wayland/X11/EGL headers). `NSS_SHOTS=<dir>` saves headless screenshots of the pages. `NSS_TEST_RAF` is a list of real RAW files for the batch conversion golden test (skipped if unset).
+  Wayland/X11/EGL headers). `NSS_SHOTS=<dir>` saves headless screenshots of the pages. `NSS_TEST_RAF` is a list of real RAW files for the batch conversion golden test and the film-base DB camera tests (skipped if unset).

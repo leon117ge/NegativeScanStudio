@@ -102,6 +102,14 @@ type Ctl struct {
 	Hair        *Hair
 	mergeCancel context.CancelFunc
 	camFn       float64
+	lockFn      float64 // f-number reported when frame 0 was locked (0 = lens reports none)
+
+	// film-base DB (filmdb.go)
+	DBSave     *DBSave
+	DBMan      *DBManage
+	lastF0     *frame0Base
+	capExp     camera.Exposure
+	capReading hdrscan.Reading
 
 	// Light page link (v0.82 handoff, shared ISO / base shutter / rectangle)
 	Light       *Light
@@ -147,9 +155,8 @@ func New(h Host) *Ctl {
 		s.SetDials(camera.Exposure{ISO: 160, Shutter: 3906})
 		return s, nil
 	}
-	if db, err := filmdb.Load(filmdb.Path(appstate.ConfigDir())); err == nil {
-		c.DB = db
-	}
+	c.DBSave, c.DBMan = &DBSave{}, &DBManage{}
+	c.loadDB()
 	c.isoPrev, c.shutPrev = c.Cfg.ISO, c.Cfg.Shutter
 	c.Hik = newHikCams()
 	c.Light = newLight(c)
@@ -230,6 +237,7 @@ type Buttons struct {
 	Conn, DevList, Diag, Test, Live, Meter   bool
 	LiveText, MeterText, CapText             string
 	Capture, Stop, ISO, Shutter, Rec, SaveDB bool
+	SaveF0                                   bool
 }
 
 func (c *Ctl) Buttons() Buttons {
@@ -241,6 +249,7 @@ func (c *Ctl) Buttons() Buttons {
 		Meter: conn && !c.Busy, MeterText: map[bool]string{true: "Re-meter base", false: "Meter base"}[locked],
 		Capture: locked && !c.Busy && !c.Working, Stop: c.scanCancel != nil,
 		ISO: c.Cfg.Frame0 == 1, Shutter: !c.Busy,
+		Rec: conn && !c.Busy, SaveDB: locked && !c.Busy, SaveF0: c.lastF0 != nil && !c.Busy,
 		CapText: "Capture HDR",
 	}
 	if len(appstate.EVs(c.Cfg)) <= 1 {
@@ -777,8 +786,10 @@ func (c *Ctl) meterSrc(ho *baseHandoff) {
 			if c.sess == s {
 				c.lock = lock
 			}
+			c.lockFn = 0
 			if sterr == nil {
 				c.showCamera(st, fn)
+				c.lockFn = fn
 			}
 			if prev != nil {
 				c.setImage(prev, "Last metering probe (RAW) - live view resumes in 4 s")
@@ -972,6 +983,7 @@ func (c *Ctl) Capture() {
 	evs := appstate.EVs(c.Cfg)
 	opts.MeteredBase = s.Reading.RGB
 	e0 := *c.lock
+	c.capExp, c.capReading = e0, s.Reading
 	roll, last := c.Cfg.Roll, c.Cfg.Counter
 	c.Res = fmt.Sprintf("Capturing %s ...", appstate.EVText(evs))
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1073,6 +1085,7 @@ func (c *Ctl) process(srcs []string, o hdrscan.ProcessOptions, merge bool) {
 				c.LastMerge = res
 			} else {
 				c.LastCap = res
+				c.setLastF0(res)
 			}
 			set(msg)
 			c.say(strings.ReplaceAll(msg, "\n", " | "))

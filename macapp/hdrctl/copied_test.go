@@ -71,3 +71,9 @@ func TestCopiedChartCalDeclsMatchWindows(t *testing.T) {
 	drift.Same(t, ours, drift.Decls(t, "../../chartcal.go"), "calTip")
 	drift.Same(t, ours, drift.Decls(t, "../../presets.go"), "cleanName")
 }
+
+func TestCopiedFilmDBDeclsMatchWindows(t *testing.T) {
+	ours := drift.Decls(t, "copied_filmdb.go")
+	drift.Same(t, ours, drift.Decls(t, "../../hdrdb.go"), "stockNone", "frame0Base", "rgbText", "entryText", "compareText", "fnText")
+	drift.Same(t, ours, drift.Decls(t, "../../presets.go"), "Preset", "maxPresets", "defaultPresets", "Config", "parsePresetLine", "parsePresets", "loadConfig")
+}

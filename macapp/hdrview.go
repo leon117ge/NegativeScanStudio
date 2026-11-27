@@ -24,8 +24,6 @@ import (
 	"basetool/macapp/hdrctl"
 )
 
-const laterTip = "Not on macOS yet: comes with a later increment (film-base DB tools)."
-
 // liveView is one of the shared live views (HDRUI.liveView(k)).
 type liveView struct {
 	k        int
@@ -396,10 +394,13 @@ func (p *hdrPages) meterCard(gtx layout.Context) layout.Dimensions {
 			func(gtx layout.Context) layout.Dimensions {
 				return layout.Inset{Bottom: 3}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 					return hbox(gtx, 4,
-						layout.Rigid(p.button(&p.rec, "Record base", btnOpts{disabled: true, tip: laterTip}, nil)),
-						layout.Rigid(p.button(&p.saveDB, "Save base to DB", btnOpts{disabled: true, tip: laterTip}, nil)),
-						layout.Rigid(p.button(&p.saveF0, "Save last frame 0 to DB", btnOpts{disabled: true, tip: laterTip}, nil)),
-						layout.Rigid(p.button(&p.manage, "Manage", btnOpts{disabled: true, tip: laterTip}, nil)),
+						layout.Rigid(p.button(&p.rec, "Record base", btnOpts{disabled: !b.Rec,
+							tip: "Shoot a standalone fixed frame 0 at ISO 250 and the base shutter (set f/4 on the lens) of the clear base,\nkeep it as <roll>_..._BASE.RAF and save it as a new film stock or update one."}, c.RecordBase)),
+						layout.Rigid(p.button(&p.saveDB, "Save base to DB", btnOpts{disabled: !b.SaveDB,
+							tip: "Save the locked frame 0's base (metering probe) as a new film stock or update one."}, c.SaveBaseToDB)),
+						layout.Rigid(p.button(&p.saveF0, "Save last frame 0 to DB", btnOpts{disabled: !b.SaveF0,
+							tip: "Save the base of the last captured frame 0 without reshooting (only when that frame 0 was a clean, unclipped base)."}, c.SaveLastFrame0)),
+						layout.Rigid(p.button(&p.manage, "Manage", btnOpts{tip: "Rename or delete film stocks."}, c.ManageDB)),
 					)
 				})
 			},
