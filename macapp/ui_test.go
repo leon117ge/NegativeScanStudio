@@ -286,10 +286,14 @@ func TestLightPageLayout(t *testing.T) {
 	s.save("11-light-hik-sim-1280x800.png")
 	u.nav.SetSub(0)
 	u.setNav() // Camera page: the Hikrobot preview stops
+	// Wait for the loop itself to end, then apply the frames it posted before
+	// it stopped: after that no frame may arrive (no sleep-and-hope window).
+	s.pump("hik preview stopped", func() bool { return !u.hdr.HikPreviewRunning() })
+	u.drain()
 	seq = u.hdr.FrameSeq
-	time.Sleep(500 * time.Millisecond)
 	s.frame()
-	if u.hdr.FrameSeq > seq+1 {
+	u.drain()
+	if u.hdr.FrameSeq != seq || u.hdr.HikPreviewRunning() {
 		t.Fatal("Hikrobot preview still running off the Light page")
 	}
 	u.hdr.Shutdown()
