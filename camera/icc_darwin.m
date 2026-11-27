@@ -17,6 +17,7 @@
 
 #import <Foundation/Foundation.h>
 #import <ImageCaptureCore/ImageCaptureCore.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 #include "icc_darwin.h"
@@ -99,20 +100,23 @@ static NSSICCBrowser *gBrowser;
 // startBrowser creates the shared browser once (on the main thread) and
 // waits for the initial enumeration of local devices.
 static BOOL startBrowser(double timeout, char *err, int errlen) {
+	// Create the browser object and queue the ICDeviceBrowser start exactly
+	// once: two callers (the camera worker and a device-list refresh) can
+	// arrive here together, and a check-then-set of a flag would let both
+	// start a browser.
 	static dispatch_once_t once;
 	dispatch_once(&once, ^{
-		gBrowser = [[NSSICCBrowser alloc] init];
+		NSSICCBrowser *nb = [[NSSICCBrowser alloc] init];
+		gBrowser = nb;
+		nb.started = YES;
+		runOnMain(^{
+			nb.browser = [[ICDeviceBrowser alloc] init];
+			nb.browser.delegate = nb;
+			nb.browser.browsedDeviceTypeMask = (ICDeviceTypeMask)(ICDeviceTypeMaskCamera | ICDeviceLocationTypeMaskLocal);
+			[nb.browser start];
+		});
 	});
 	NSSICCBrowser *b = gBrowser;
-	if (!b.started) {
-		b.started = YES;
-		runOnMain(^{
-			b.browser = [[ICDeviceBrowser alloc] init];
-			b.browser.delegate = b;
-			b.browser.browsedDeviceTypeMask = (ICDeviceTypeMask)(ICDeviceTypeMaskCamera | ICDeviceLocationTypeMaskLocal);
-			[b.browser start];
-		});
-	}
 	// No callback arrives when there are no cameras on older systems: the
 	// timeout then just means "nothing found".
 	waitUntil(timeout, ^BOOL {
@@ -299,7 +303,7 @@ int icc_send(void *h, const unsigned char *cmd, int cmdlen, const unsigned char 
 		NSSICCSession *s = (__bridge NSSICCSession *)h;
 		if (s.removed) {
 			setErr(err, errlen, @"camera disconnected");
-			return -1;
+			return ICC_SEND_LOST;
 		}
 		NSData *cmdData = [NSData dataWithBytes:cmd length:(NSUInteger)cmdlen];
 		NSData *outData = hasOut ? [NSData dataWithBytes:out length:(NSUInteger)outlen] : nil;
@@ -320,11 +324,12 @@ int icc_send(void *h, const unsigned char *cmd, int cmdlen, const unsigned char 
 		    })) {
 			NSError *last = s.lastError;
 			setErr(err, errlen, last != nil ? [NSString stringWithFormat:@"PTP command timed out (last device error: %@)", last.localizedDescription] : @"PTP command timed out");
-			return -1;
+			// The request may still complete later: the session is out of step.
+			return ICC_SEND_LOST;
 		}
 		if (!r.done) {
 			setErr(err, errlen, @"camera disconnected");
-			return -1;
+			return ICC_SEND_LOST;
 		}
 		NSError *gotErr = r.error;
 		NSData *gotResp = r.response;
@@ -337,11 +342,28 @@ int icc_send(void *h, const unsigned char *cmd, int cmdlen, const unsigned char 
 			setErr(err, errlen, [NSString stringWithFormat:@"PTP response container missing (%lu bytes)", (unsigned long)gotResp.length]);
 			return -1;
 		}
+		if (gotResp.length > INT_MAX) {
+			setErr(err, errlen, [NSString stringWithFormat:@"PTP response container too large (%lu bytes)", (unsigned long)gotResp.length]);
+			return -1;
+		}
 		*resp = malloc(gotResp.length);
+		if (*resp == NULL) {
+			setErr(err, errlen, [NSString stringWithFormat:@"out of memory for the PTP response (%lu bytes)", (unsigned long)gotResp.length]);
+			return -1;
+		}
 		memcpy(*resp, gotResp.bytes, gotResp.length);
 		*resplen = (int)gotResp.length;
 		if (gotData.length > 0) {
+			if (gotData.length > INT_MAX) {
+				// The Go side copies the data phase with C.GoBytes (int length).
+				setErr(err, errlen, [NSString stringWithFormat:@"PTP data phase too large (%lu bytes)", (unsigned long)gotData.length]);
+				return -1;
+			}
 			*data = malloc(gotData.length);
+			if (*data == NULL) {
+				setErr(err, errlen, [NSString stringWithFormat:@"out of memory for the PTP data phase (%lu bytes)", (unsigned long)gotData.length]);
+				return -1;
+			}
 			memcpy(*data, gotData.bytes, gotData.length);
 			*datalen = (long long)gotData.length;
 		}
