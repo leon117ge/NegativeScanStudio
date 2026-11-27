@@ -17,7 +17,6 @@ import (
 	"gioui.org/op"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
-	"gioui.org/unit"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
 
@@ -427,27 +426,7 @@ func (u *UI) page(gtx layout.Context, p appstate.Page) layout.Dimensions {
 	case appstate.PageFocus:
 		return u.fp.layout(gtx)
 	}
-	return u.placeholder(gtx, p)
-}
-
-var pageTitles = map[appstate.Page]string{
-	appstate.PageLight: "Light", appstate.PageTri: "Trichrome", appstate.PageMono: "Mono trichrome",
-	appstate.PageFocus: "Focus check", appstate.PageCrop: "Crop", appstate.PageMerge: "Merge files",
-	appstate.PageHairs: "Remove hairs", appstate.PageBatch: "Batch RAW to TIFF",
-}
-
-func (u *UI) placeholder(gtx layout.Context, p appstate.Page) layout.Dimensions {
-	return layout.Inset{Left: 12, Top: 12, Right: 12}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return u.th.label(gtx, unit.Sp(14), cText, pageTitles[p], true, false)
-			}),
-			layout.Rigid(layout.Spacer{Height: 8}.Layout),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return u.th.hint(gtx, "This page is not on macOS yet; it is ported in a later increment. Use the Windows app for it for now.")
-			}),
-		)
-	})
+	return layout.Dimensions{} // every page is ported (appstate.Ported)
 }
 
 // layoutDialog draws the first pending message box over the window.
