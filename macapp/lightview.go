@@ -60,6 +60,7 @@ type lightPage struct {
 	resSeq                                    int
 	resText                                   string
 	noteTip                                   Tip
+	viewTip                                   Tip
 	// presets
 	presetCB                               Combo
 	loadBtn, delBtn, saveBtn, fsave, fload Button
@@ -465,7 +466,9 @@ func (p *lightPage) capturesCard(gtx layout.Context) layout.Dimensions {
 				return p.captures(gtx, image.Pt(w, h))
 			},
 			func(gtx layout.Context) layout.Dimensions {
-				return th.label(gtx, textBody, cGrey, l.ViewLbl, false, false)
+				return p.viewTip.Layout(gtx, th, l.ViewTip, func(gtx layout.Context) layout.Dimensions {
+					return th.label(gtx, textBody, cGrey, l.ViewLbl, false, false)
+				})
 			},
 		)
 	})

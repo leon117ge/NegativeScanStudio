@@ -424,7 +424,7 @@ func (p *monoPage) captureCard(gtx layout.Context) layout.Dimensions {
 				func(gtx layout.Context) layout.Dimensions {
 					gtx.Constraints.Min.X = gtx.Constraints.Max.X
 					gtx.Constraints.Max.Y = gtx.Dp(140)
-					return p.rep.Layout(gtx, th, m.RepText, m.RepSeq, 80)
+					return p.rep.LayoutTip(gtx, th, m.RepText, m.RepSeq, 80, monoRepTip)
 				},
 			)
 		})
