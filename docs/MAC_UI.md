@@ -17,7 +17,7 @@ the same titles, rows and control order. Ported so far:
 
 | Module | Sub-page | macOS |
 |---|---|---|
-| Camera & Light | Camera | ported (cards Camera and Meter the clear film base, live view, log) |
+| Camera & Light | Camera | ported (cards Camera and Meter the clear film base, live view, log; Chart calibration and the leveling-metadata switch since group f) |
 | Camera & Light | Light | ported (RGB Light Air, Channels, Auto film-base leveling, Scan config presets, Faults, last leveling captures, 500T illuminant, log) |
 | HDR Scan | White light scan | ported (live view, Capture and merge card) |
 | HDR Scan | Trichrome | ported (live view, Trichrome scan card, film-base metadata) |
@@ -26,10 +26,11 @@ the same titles, rows and control order. Ported so far:
 | Crop & Merge | Crop, Merge files, Remove hairs, Batch RAW to TIFF | ported (crop, merge, dust / hair removal, batch RAW to TIFF) |
 | Convert | | not part of the macOS app (user's decision); Windows keeps it |
 
-On the Camera card, Chart calibration, Record base, Save base to DB, Save last frame 0
-to DB, Manage and the leveling-metadata switch are shown but not active yet (later
-increments). The film stock list is read from the shared `film_base_db.json`; the
-Fixed frame 0 film-stock comparison is not on macOS yet.
+On the Camera page, Chart calibration and the switch "Film base for metadata: Last
+leveling (after profile)" work since group (f), slice 1. Record base, Save base to DB,
+Save last frame 0 to DB and Manage are shown but not active yet (group f, slice 2). The
+film stock list is read from the shared `film_base_db.json`; the Fixed frame 0
+film-stock comparison is not on macOS yet (slice 2).
 
 The camera list shows the Fujifilm cameras that ImageCaptureCore reports (W6
 transport: `camera.ListICC`, `camera.OpenICC`, `camera.OpenFuji`), then the simulated
@@ -76,9 +77,9 @@ Differences from Windows, and why:
   field (`monoScanExposureUS`, as on Windows), falling back to the best-quality scan
   preset only without that page; "Auto-meter each channel" is the page's check box. The
   exposure is a plain field in us instead of a spin box.
-- Leveling metadata (the Camera card switch "Film base for metadata: Last leveling") and
-  the film-stock comparison of frame 0 stay disabled until the film-base DB increment.
-  The leveling itself, its records and the handoff work.
+- The film-stock comparison of frame 0 stays off until the film-base DB slice (group f,
+  slice 2). The leveling metadata switch on the Camera page works since group (f), slice
+  1. The leveling itself, its records and the handoff work.
 - The 500T card is titled "500T illuminant" and has no "Send to Develop" button: on
   Windows that button only passes the cast to main.go's Develop / Convert hook, which
   shows a message and stores nothing (`castpage.go`, `main.go` `toDevelop`). Calculate
@@ -285,6 +286,70 @@ Differences from Windows, and why:
 - The zoomed loupe is drawn with nearest-neighbour scaling (as GDI
   StretchBlt does), Fit with linear filtering as the other Gio views.
 - The sharpness bar is drawn as a determinate bar (the Windows ProgressBar).
+
+## Chart calibration and leveling metadata (W9 group f, slice 1)
+
+Camera & Light > Camera > Chart calibration... is ported from the Windows
+dialog (`chartcal.go`) with the same title, rows, labels, tooltips and control
+order. The logic is `macapp/hdrctl/chartcal.go`; the layout is
+`macapp/chartcalview.go`.
+
+- Rows: Open chart TIFF... / Use last scan (the last Trichrome output of this
+  session) and the file line; Load reference (CGATS)... and the reference line
+  (with the D50 warning); the grid hint; the chart view with the 24 patch
+  boxes (green clean, red "CLIP") and the A1 / A6 / D6 / D1 markers, dragged
+  with the mouse (14 dp pick radius); Auto-detect, Rotate 180°, Reset grid,
+  Fit; the monospaced report; Profile name and Save as camera profile; Active
+  camera profile, Enable, Strength (0..1, two decimals), Delete profile and
+  Close.
+- The Windows code runs unchanged where it matters: `colorsci.DetectCamChart`,
+  `SampleCamChart`, `ClipStops`, `FitCamChart` and `ParseCGATS`; the report
+  lines, the profile record and `camera_profiles.json` (shared with Windows,
+  next to the other settings) are written the same way. `calTip` and
+  `cleanName` are verbatim copies checked by
+  `TestCopiedChartCalDeclsMatchWindows`.
+- Threading: loading the TIFF, the preview, grid detection, patch sampling
+  and the fit run on goroutines; results come back through `UI.Post`. A job
+  that ends after Close or after a newer job is dropped. Reading the small
+  CGATS file stays on the UI goroutine, as on Windows. File picks use the
+  native panels.
+- The Meter card switch "Film base for metadata: Last leveling (after
+  profile)" and its last-leveling line are live (`refreshLevelingUI`): the
+  switch writes `use_last_leveling` in `rgb_light.json` (shared with the
+  Light, Trichrome and Mono trichrome pages), and with the option on the Base
+  R / G / B readouts show the accepted leveling base (or "-" when the light
+  values differ), as on Windows. Windows' "Send base to Develop", which also
+  follows a matching leveling there, is not on the Mac page (see Layout).
+
+Tests (`hdrctl/chartcal_test.go`, `levelmeta_ui_test.go`,
+`chartcal_ui_test.go`): synthetic 16-bit charts (upright, rotated 180°, and one
+with a clipped patch) go through the page and through a replay of the Windows
+dialog (load, detect, sample, `solve`, `save`); the corners, the detect line,
+the whole fit report and `camera_profiles.json` must be equal (the profile time
+pinned). Logic tests cover Rotate, Reset grid, marker drags, Save with an
+invalid name and with Replace, Enable / Strength / Delete, the quiet reload of
+the last reference, and a late job after Close. A test checks that every
+user-visible string of the Windows dialog appears in the port. The leveling
+switch is compared with `refreshLevelingUI` for six states.
+
+Differences from Windows, and why:
+
+- The modal dialog is an in-window panel over the page (Gio has one window);
+  the page underneath does not take input while it is open, like a modal
+  dialog. Message boxes are the in-window dialogs.
+- Load, detect, sampling and Fit run in the background with a busy line next
+  to Fit, and the buttons that start a job are off meanwhile (Windows runs
+  them on the UI thread and the window stalls).
+- The patch clip overlay after a drag or Rotate appears when the background
+  sampling finishes (Windows samples before it repaints).
+- The open panels filter on the extensions (`tif`, `tiff`; `txt`, `it8`,
+  `cie`, `cgats`); the native panel has no "All files (*.*)" choice.
+- Strength is a text field with the NumberEdit range and decimals applied when
+  editing ends.
+
+Left for group (f), slice 2: Record base, Save base to DB, Save last frame 0
+to DB, Manage (film_base_db.json), and the Fixed frame 0 film-stock
+comparison.
 
 ## Known follow-ups
 
