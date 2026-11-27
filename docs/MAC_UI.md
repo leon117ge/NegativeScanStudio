@@ -158,7 +158,10 @@ Differences from Windows, and why:
   `make_tiff\`).
 - Yes/No walk dialogs are OK/Cancel in-window dialogs, as on the other Gio
   pages.
-- The `--dust` command-line tool is not ported.
+- `--dust light|strong <tiff> [...]` cleans TIFFs without the window as on
+  Windows (since the parity audit); the result lines go to standard output
+  only, without the Windows message box. `--crop <files or folders>` adds
+  them to the Crop page, as on Windows.
 
 ## Trichrome and Mono trichrome (W9 group c)
 
@@ -438,6 +441,13 @@ As on Windows, the capture line needs the merge's frame-0 base (`Base1F0`),
 which `hdrscan.ProcessN` measures only with colour options on; neither app's
 White light scan sets them, so a normal capture result has no stock line and
 Save last frame 0 to DB says the frame 0 cannot be used. Core unchanged.
+
+## Parity audit
+
+`docs/MAC_PARITY.md` lists every Windows control, message box, tooltip,
+command-line switch and window-level behaviour (except Convert / Develop)
+as ported, intentionally different or missing, with Windows and Mac file
+references, and the larger missing items for a decision.
 
 ## Known follow-ups
 

@@ -18,6 +18,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime/debug"
 	"time"
 
@@ -33,6 +34,10 @@ func main() {
 	crashlog.Install(appstate.AppVersion)
 	defer crashlog.Main()
 	debug.SetGCPercent(20) // as on Windows: large RAW buffers
+	// "NegativeScanStudio --dust light|strong <tiff> [...]" cleans TIFFs without the window
+	if len(os.Args) > 3 && os.Args[1] == "--dust" {
+		os.Exit(dustCLI(filepath.Base(os.Args[0]), os.Args[2], os.Args[3:], os.Stdout))
+	}
 	selftest := len(os.Args) > 1 && os.Args[1] == "-selftest-runloop"
 	if selftest {
 		go func() {
@@ -62,7 +67,7 @@ func run(w *app.Window, selftest bool) error {
 	if len(os.Args) > 1 {
 		args = os.Args[1:]
 	}
-	u.nav, _ = appstate.FromArgs(args)
+	u.applyArgs(args)
 	u.setNav()
 	u.hdr.Start()
 	var probe chan error
@@ -95,5 +100,15 @@ func run(w *app.Window, selftest bool) error {
 				}()
 			}
 		}
+	}
+}
+
+// applyArgs is the Windows command-line handling (main.go): the page
+// switches, and "--crop <files or folders>" adds those to the Crop page.
+func (u *UI) applyArgs(args []string) {
+	var files []string
+	u.nav, files = appstate.FromArgs(args)
+	if len(files) > 0 {
+		u.crop.AddFiles(files)
 	}
 }

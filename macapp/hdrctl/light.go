@@ -94,6 +94,7 @@ type Light struct {
 	ThumbTxt [3]string
 	ImgSeq   int
 	ViewLbl  string
+	ViewTip  string // the Windows viewLbl tooltip, set with the first captures
 
 	// 500T illuminant calculator (castpage.go)
 	CastIdx    int

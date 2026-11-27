@@ -458,6 +458,14 @@ func (th *Theme) readout(gtx layout.Context, s string, c color.NRGBA, big bool, 
 type LogBox struct {
 	ed  widget.Editor
 	seq int
+	tip Tip
+}
+
+// LayoutTip is Layout with the Windows TextEdit ToolTipText.
+func (l *LogBox) LayoutTip(gtx layout.Context, th *Theme, text string, seq int, minH unit.Dp, tip string) layout.Dimensions {
+	return l.tip.Layout(gtx, th, tip, func(gtx layout.Context) layout.Dimensions {
+		return l.Layout(gtx, th, text, seq, minH)
+	})
 }
 
 func (l *LogBox) Layout(gtx layout.Context, th *Theme, text string, seq int, minH unit.Dp) layout.Dimensions {
