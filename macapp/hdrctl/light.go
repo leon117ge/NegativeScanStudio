@@ -223,9 +223,9 @@ func (l *Light) Leveling() bool { return l.level }
 
 // LightButtons is updateButtons / updatePresetButtons.
 type LightButtons struct {
-	ConnText                                            string
-	Conn, Ports, Apply, Read, Off, Start, Stop, Copy    bool
-	PresetLoad, PresetDel, PresetSave, PresetFile, Cast bool
+	ConnText                                         string
+	Conn, Ports, Apply, Read, Off, Start, Stop, Copy bool
+	PresetLoad, PresetDel, PresetSave, PresetFile    bool
 }
 
 func (l *Light) Buttons() LightButtons {
@@ -240,7 +240,6 @@ func (l *Light) Buttons() LightButtons {
 	has := l.curPreset() != nil
 	b.PresetLoad, b.PresetDel = !l.busy && has, !l.busy && has
 	b.PresetSave, b.PresetFile = !l.busy, !l.busy
-	b.Cast = !l.busy && !l.hdr.Busy
 	return b
 }
 

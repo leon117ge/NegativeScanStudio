@@ -78,10 +78,10 @@ type lightPage struct {
 	ax, ay   float64
 	drag     lightlevel.Rect
 	// 500T
-	castCB           Combo
-	kelvinEd         Field
-	castCK           Check
-	calcBtn, sendBtn Button
+	castCB   Combo
+	kelvinEd Field
+	castCK   Check
+	calcBtn  Button
 
 	cards [8]Card
 	fseq  int
@@ -604,8 +604,7 @@ func (p *lightPage) capturesInput(gtx layout.Context) {
 
 func (p *lightPage) castCard(gtx layout.Context) layout.Dimensions {
 	th, l := p.u.th, p.u.hdr.Light
-	b := l.Buttons()
-	return p.cards[5].Layout(gtx, th, "500T illuminant — Develop preview", "", nil, "", func(gtx layout.Context) layout.Dimensions {
+	return p.cards[5].Layout(gtx, th, "500T illuminant", "", nil, "", func(gtx layout.Context) layout.Dimensions {
 		return vbox(gtx,
 			func(gtx layout.Context) layout.Dimensions {
 				return th.text(gtx, "500T is balanced for 3200K. Set the ORIGINAL scene light, not the scanning light.\nCamera WB and leveled light stay unchanged.")
@@ -627,9 +626,6 @@ func (p *lightPage) castCard(gtx layout.Context) layout.Dimensions {
 			func(gtx layout.Context) layout.Dimensions {
 				gtx.Constraints.Min.Y = gtx.Dp(72)
 				return th.text(gtx, l.CastText)
-			},
-			func(gtx layout.Context) layout.Dimensions {
-				return hbox(gtx, 4, p.btn(&p.sendBtn, "Send to Develop", btnOpts{disabled: !b.Cast}, l.CastToDevelop))
 			},
 		)
 	})

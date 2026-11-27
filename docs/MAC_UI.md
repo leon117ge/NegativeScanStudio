@@ -79,8 +79,10 @@ Differences from Windows, and why:
 - Leveling metadata (the Camera card switch "Film base for metadata: Last leveling") and
   the film-stock comparison of frame 0 stay disabled until the film-base DB increment.
   The leveling itself, its records and the handoff work.
-- "Send to Develop" on the 500T card shows the same explanation as Windows (Convert does
-  not use the Develop cast controls); nothing is sent.
+- The 500T card is titled "500T illuminant" and has no "Send to Develop" button: on
+  Windows that button only passes the cast to main.go's Develop / Convert hook, which
+  shows a message and stores nothing (`castpage.go`, `main.go` `toDevelop`). Calculate
+  and the result text are unchanged, without the closing "Send to Develop to apply".
 - Layout: the live view keeps 55 % of the left column and the cards below it (last
   leveling captures, 500T, log) scroll, so the preview stays usable at 1280x800. The
   right column is 480-520 dp as on Windows and never takes more than the page minus
@@ -167,7 +169,7 @@ layouts are `triview.go` and `monoview.go`.
 - Trichrome (X-T3 and the RGB Light Air): the shared live view, the status
   lines (camera, frame 0 lock, light now, scan values, output), Mode (one
   shot per channel or HDR bracket per channel), Bracket per channel, Capture
-  trichrome / Stop, Meter base, Send base to Develop, the Film base metadata
+  trichrome / Stop, Meter base, the Film base metadata
   check box with the last leveling line, a progress bar and the result box.
   A scan reads the light (20), switches R, G and B on one at a time with the
   leveling / Apply values (`rgblight.ChannelSwitch`), shoots each channel's
@@ -219,8 +221,11 @@ Differences from Windows, and why:
 - Number edits are text fields with the Windows ranges and decimals applied
   when editing ends.
 - The centre-mark arm lengths are in dp, so they scale on Retina screens.
-- Send base to Develop shows the same "Film base" message as Windows
-  (Convert does not take a scanned film-base reference).
+- "Send base to Develop" (Trichrome, and White light under Camera > Meter
+  the clear film base) is not on the Mac pages. On Windows its only consumer
+  is `hdrui.SendBase`, set in `main.go` to a message box; the base is not
+  saved and scan metadata is written by the capture, not by this button
+  (`tripage.go` `sendBase`, `hdrpage.go` `sendBase`).
 
 ## Focus check (W9 group d)
 
@@ -280,6 +285,23 @@ Differences from Windows, and why:
 - The zoomed loupe is drawn with nearest-neighbour scaling (as GDI
   StretchBlt does), Fit with linear filtering as the other Gio views.
 - The sharpness bar is drawn as a determinate bar (the Windows ProgressBar).
+
+## Known follow-ups
+
+These are not fixed in the Mac port because the fix would change the Windows
+program, which stays byte-identical until the final merge to main.
+
+1. Windows: going from Focus check to Mono trichrome may not restart the
+   Mono preview. The cause is that the restore's `StopSync` bumps the
+   Hikrobot generation, so the queued preview fails its generation check.
+   This is suspected from reading the code and has not been checked on
+   hardware. A Windows fix waits on a hardware check by the user. (The Mac
+   starts the preview after the restore: `Focus.LeaveThen`.)
+2. `camera/sim.go`: `OpenSim` anchors on the first 64 samples, which are
+   zeros on the CC0 X-T3 RAF fixture, so `TestSimMeterCaptureMerge` skips in
+   CI. The fix is to anchor on the first non-zero window. It is deferred to
+   the final merge-to-main version bump, to keep the Windows exe
+   byte-identical during the Mac port.
 
 ## Threading model
 
