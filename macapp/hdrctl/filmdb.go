@@ -498,3 +498,43 @@ func (c *Ctl) setLastF0(res *hdrscan.Result) {
 	}
 	c.lastF0 = f
 }
+
+// ---------- Fixed frame 0 film-stock comparison ----------
+
+// stockRecheck redoes the film stock line of a fixed lock when the stock is
+// changed after metering (QA L5), from the locked probe; nothing is reshot.
+func (c *Ctl) stockRecheck() {
+	if c.sess == nil || !c.Locked() || c.lockBase == "" {
+		return
+	}
+	s, e, base := c.sess, *c.lock, c.lockBase
+	ent, tol := c.stock(), c.tol()
+	if ent == nil {
+		c.BaseLbl = base + "\nFilm stock: None (no DB check)"
+		return
+	}
+	c.worker.do(func() {
+		var t string
+		if b1, _, err := s.ProbeBase(leakPct); err != nil {
+			t = ent.Name + ": no base to compare (" + err.Error() + ")"
+		} else {
+			t, _ = compareText(ent, b1, e, tol)
+		}
+		c.Host.Post(func() {
+			if c.sess == s && c.lockBase == base {
+				c.BaseLbl = base + "\n" + t
+			}
+		})
+	})
+}
+
+// captureCompare is the film-stock line of a capture result (process on
+// Windows): a clean Fixed frame 0 is compared with the selected stock.
+func (c *Ctl) captureCompare() string {
+	if f := c.lastF0; f != nil && f.Pure {
+		if t, _ := compareText(c.stock(), f.RGB, f.Exp, c.tol()); t != "" && appstate.Fixed(c.Cfg) {
+			return "\n" + t
+		}
+	}
+	return ""
+}

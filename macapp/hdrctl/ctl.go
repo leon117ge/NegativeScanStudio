@@ -103,6 +103,7 @@ type Ctl struct {
 	mergeCancel context.CancelFunc
 	camFn       float64
 	lockFn      float64 // f-number reported when frame 0 was locked (0 = lens reports none)
+	lockBase    string  // base status of a fixed lock without the film stock line
 
 	// film-base DB (filmdb.go)
 	DBSave     *DBSave
@@ -670,6 +671,7 @@ func (c *Ctl) showCamera(e camera.Exposure, fn float64) {
 
 func (c *Ctl) clearLocked() {
 	c.lock = nil
+	c.lockBase = ""
 	c.lockSrc, c.lockLight = "", nil
 	c.F0ISO, c.F0Sh, c.P2Sh, c.BaseLv, c.BaseR, c.BaseG, c.BaseB = "not locked", "", "", "", "", "", ""
 }
@@ -746,6 +748,7 @@ func (c *Ctl) meterSrc(ho *baseHandoff) {
 			lockLight = &v
 		}
 	}
+	ent, tol := c.stock(), c.tol()
 	s.Fixed = appstate.FixedShutter(c.Cfg)
 	if ho != nil {
 		s.Fixed = ho.Shutter
@@ -762,10 +765,22 @@ func (c *Ctl) meterSrc(ho *baseHandoff) {
 		var r hdrscan.Reading
 		var err error
 		var warns []string
+		var cmp string
+		cmpOK := true
 		if fixed {
 			e, r, warns, err = s.LockFixed(iso)
-			for _, w := range warns {
-				c.Log.Printf("Frame 0 fixed: WARNING: %s", w)
+			if err == nil {
+				for _, w := range warns {
+					c.Log.Printf("Frame 0 fixed: WARNING: %s", w)
+				}
+				if ent != nil {
+					if b1, _, berr := s.ProbeBase(leakPct); berr != nil {
+						cmp, cmpOK = ent.Name+": no base to compare ("+berr.Error()+")", false
+					} else {
+						cmp, cmpOK = compareText(ent, b1, e, tol)
+					}
+					c.Log.Printf("%s", cmp)
+				}
 			}
 		} else {
 			e, r, err = s.Meter()
@@ -829,9 +844,14 @@ func (c *Ctl) meterSrc(ho *baseHandoff) {
 				for _, w := range warns {
 					extra += "\nWARNING: " + w
 				}
-				extra += "\nFilm stock check: not on macOS yet"
+				c.lockBase = c.BaseLbl + extra
+				if cmp != "" {
+					extra += "\n" + cmp
+				} else if ent == nil {
+					extra += "\nFilm stock: None (no DB check)"
+				}
 				c.BaseLbl += extra
-				if len(warns) > 0 && ho == nil {
+				if (len(warns) > 0 || !cmpOK) && ho == nil {
 					c.Host.Message("Frame 0", strings.TrimPrefix(extra, "\n"))
 				}
 			} else {
@@ -1086,6 +1106,7 @@ func (c *Ctl) process(srcs []string, o hdrscan.ProcessOptions, merge bool) {
 			} else {
 				c.LastCap = res
 				c.setLastF0(res)
+				msg += c.captureCompare()
 			}
 			set(msg)
 			c.say(strings.ReplaceAll(msg, "\n", " | "))
@@ -1093,8 +1114,8 @@ func (c *Ctl) process(srcs []string, o hdrscan.ProcessOptions, merge bool) {
 	}()
 }
 
-// resultText is the result message of process() on Windows (the film-stock
-// compare of a capture is not on macOS yet).
+// resultText is the result message of process() on Windows; process adds
+// the film-stock compare of a Fixed frame 0 (captureCompare).
 func resultText(res *hdrscan.Result, md scanmeta.Metadata) string {
 	msg := fmt.Sprintf("Saved %s  (%d frames, %.1f s)", res.HDR, res.Frames, res.Elapsed.Seconds())
 	msg += "\n" + levelMetadataSummary(md)
@@ -1176,9 +1197,13 @@ func (c *Ctl) StockIndex() int {
 // SetStock selects stock i of StockItems.
 func (c *Ctl) SetStock(i int) {
 	items := c.StockItems()
+	prev := c.Cfg.Stock
 	c.Cfg.Stock = ""
 	if i > 0 && i < len(items) {
 		c.Cfg.Stock = items[i]
 	}
 	c.Save()
+	if prev != c.Cfg.Stock {
+		c.stockRecheck()
+	}
 }
