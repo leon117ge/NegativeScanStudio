@@ -339,6 +339,9 @@ func TestLevelingMatchesWindowsSequence(t *testing.T) {
 	if l.Comp == nil || l.Thumbs[0] == nil || l.ImgSeq == 0 {
 		t.Fatal("leveling captures not shown")
 	}
+	if l.ViewTip != "Composite of the three single-channel captures; the target level is shown as mid grey." {
+		t.Fatalf("captures tooltip %q", l.ViewTip)
+	}
 	t.Logf("levelled R %d G %d B %d in %d rounds, %d steps, %d serial bytes", got.Values[0], got.Values[1], got.Values[2], got.Rounds, len(got.Steps), len(sd.Received()))
 }
 

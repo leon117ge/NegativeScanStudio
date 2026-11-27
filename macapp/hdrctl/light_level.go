@@ -485,6 +485,7 @@ func (l *Light) setImages(im [3]*lightlevel.Image, target float64, res lightleve
 	}
 	if l.Comp != nil {
 		l.ViewLbl = "Top: the three captures combined (target = mid grey).\nMagenta = clipped. Drag to move the measure area."
+		l.ViewTip = "Composite of the three single-channel captures; the target level is shown as mid grey."
 	}
 	l.ImgSeq++
 }

@@ -579,7 +579,7 @@ func (p *hdrPages) captureCard(gtx layout.Context) layout.Dimensions {
 				}
 				gtx.Constraints.Min.X = gtx.Constraints.Max.X
 				gtx.Constraints.Max.Y = gtx.Dp(64)
-				return p.res.Layout(gtx, th, c.Res, p.resSeq, 44)
+				return p.res.LayoutTip(gtx, th, c.Res, p.resSeq, 44, hdrResTip)
 			},
 		)
 	})
