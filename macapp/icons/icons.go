@@ -16,7 +16,7 @@ type iconFunc func(z *vector.Rasterizer, s float32)
 
 // ByName maps the names used by appstate.Modules and the cards.
 var ByName = map[string]iconFunc{
-	"film": iconFilm, "wb": iconWB, "hdr": iconHDR, "crop": iconCrop, "convert": iconConvert,
+	"film": iconFilm, "wb": iconWB, "hdr": iconHDR, "crop": iconCrop,
 	"develop": iconDevelop, "light": iconLight, "tri": iconTri, "camera": iconCamera, "meter": iconMeter, "preset": iconPreset,
 }
 
@@ -115,8 +115,8 @@ func iconCrop(z *vector.Rasterizer, s float32) {
 }
 
 // develop: a negative frame with an arrow to a filled positive frame
-func iconConvert(z *vector.Rasterizer, s float32) { iconDevelop(z, s) }
-
+// (Windows' iconConvert alias is not copied: the macOS app has no Convert
+// module; the Crop Export card uses this icon)
 func iconDevelop(z *vector.Rasterizer, s float32) {
 	vRect(z, s, 2, 6, 10, 18, false)
 	vRect(z, s, 3.6, 7.6, 8.4, 16.4, true)

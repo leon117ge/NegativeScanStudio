@@ -11,7 +11,7 @@ func TestIconsMatchWindows(t *testing.T) {
 	ours := drift.Decls(t, "icons.go")
 	pages := drift.Decls(t, "../../pages.go")
 	card := drift.Decls(t, "../../card.go")
-	drift.Same(t, ours, pages, "vRect", "vArc", "iconFilm", "iconWB", "iconHDR", "iconCrop", "iconConvert", "iconDevelop", "iconLight", "iconTri")
+	drift.Same(t, ours, pages, "vRect", "vArc", "iconFilm", "iconWB", "iconHDR", "iconCrop", "iconDevelop", "iconLight", "iconTri")
 	drift.Same(t, ours, card, "iconCamera", "iconMeter", "iconPreset")
 }
 
