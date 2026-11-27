@@ -45,8 +45,7 @@ var pageIDs = [][]Page{
 	{PageCrop, PageMerge, PageHairs, PageBatch},
 }
 
-// Ported lists the pages that are real in the Gio UI; any other page would
-// show a placeholder (all pages are ported).
+// Ported lists the pages that are real in the Gio UI (all pages are ported).
 var Ported = map[Page]bool{PageCamera: true, PageLight: true, PageWhite: true, PageTri: true, PageMono: true, PageFocus: true, PageCrop: true, PageMerge: true, PageHairs: true, PageBatch: true}
 
 // AllPages is every leaf page in Windows tab order.
