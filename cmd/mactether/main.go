@@ -1,3 +1,5 @@
+//go:build !windows
+
 // mactether is the macOS hardware check for the X-T3 tether path (W6): the
 // same Fuji PTP logic as the app (camera/fuji.go) over Apple ImageCaptureCore
 // (camera/icc*.go) instead of Windows WPD.
@@ -146,7 +148,7 @@ func list(o options) error {
 		fmt.Printf("ImageCaptureCore access: control %s, contents %s\n", ctl, cnt)
 	}
 	if len(cams) == 0 {
-		fmt.Println("no cameras found (connect the X-T3 by USB, switch it on, CONNECTION MODE = USB TETHER SHOOTING AUTO)")
+		fmt.Println("no cameras found (connect the X-T3 by USB, switch it on, CONNECTION MODE = USB TETHER SHOOTING FIXED)")
 		return nil
 	}
 	fmt.Printf("%d camera(s):\n", len(cams))

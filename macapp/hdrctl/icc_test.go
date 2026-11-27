@@ -63,3 +63,81 @@ func TestICCListError(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// A lost ImageCaptureCore session (PTP timeout or camera gone) disconnects
+// the camera once and asks the user to reconnect; live view and the status
+// poll stop instead of retrying commands that now fail at once.
+func TestICCLostSessionDisconnects(t *testing.T) {
+	isolate(t)
+	h := newHost()
+	c := New(h)
+	var tr *camera.ICCTransport
+	c.ListDevices = func() ([]Device, error) {
+		return iccDevices(
+			func(time.Duration) ([]camera.ICCCamera, error) { return []camera.ICCCamera{camera.SimICCCamera}, nil },
+			func(string, time.Duration) (*camera.ICCTransport, camera.ICCCamera, error) {
+				tr = camera.OpenICCSim()
+				return tr, camera.SimICCCamera, nil
+			},
+			func(string) {})
+	}
+	c.Start()
+	h.pump(t, "device list", 5*time.Second, func() bool { return len(c.DeviceItems()) == 2 })
+	c.SetLiveVisible(true)
+	c.Connect()
+	h.pump(t, "connect", 10*time.Second, c.Connected)
+	h.pump(t, "live frames", 10*time.Second, func() bool { return c.FrameSeq >= 2 })
+	camera.SimICCLoseSession(tr)
+	h.pump(t, "lost-session disconnect", 10*time.Second, func() bool { return !c.Connected() && !c.LiveRunning() })
+	h.pump(t, "status poll stop", 5*time.Second, func() bool { return c.statStop == nil })
+	prompts := func() int {
+		n := 0
+		for _, m := range h.messages {
+			if strings.HasPrefix(m, "Camera not responding: ") {
+				n++
+			}
+		}
+		return n
+	}
+	if prompts() != 1 || c.CamLbl != "Not connected" {
+		t.Fatalf("%d reconnect prompts, label %q, messages %q", prompts(), c.CamLbl, h.messages)
+	}
+	// The camera worker is free again at once (commands on the lost session
+	// fail without waiting out another timeout), and the second report of the
+	// same loss (live view and status poll both hit it) stays quiet.
+	free := make(chan struct{})
+	c.worker.do(func() { close(free) })
+	select {
+	case <-free:
+	case <-time.After(2 * time.Second):
+		t.Fatal("camera worker still busy after the lost session")
+	}
+	h.drain()
+	if prompts() != 1 {
+		t.Fatalf("second reconnect prompt: %q", h.messages)
+	}
+}
+
+// A Hikrobot preview loop that does not release the camera in time is
+// reported, not silently shared with the leveling or the Mono live view.
+func TestHikStopPreviewTimeoutReported(t *testing.T) {
+	old := hikStopTimeout
+	hikStopTimeout = 50 * time.Millisecond
+	defer func() { hikStopTimeout = old }()
+	h := newHikCams()
+	if err := h.stopPreviewSync(); err != nil || h.previewRunning() {
+		t.Fatalf("no preview: %v", err)
+	}
+	stuck := make(chan struct{})
+	h.prevDone = stuck
+	if !h.previewRunning() {
+		t.Fatal("running preview not reported")
+	}
+	if err := h.stopPreviewSync(); !errors.Is(err, errPreviewStuck) {
+		t.Fatalf("stuck preview: %v", err)
+	}
+	close(stuck)
+	if err := h.stopPreviewSync(); err != nil || h.previewRunning() {
+		t.Fatalf("stopped preview: %v", err)
+	}
+}

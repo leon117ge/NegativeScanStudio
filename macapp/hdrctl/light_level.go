@@ -194,7 +194,15 @@ func (l *Light) StartLevel() {
 			}()
 		}
 		if hikSetup != nil {
-			hik.stopPreviewSync()
+			if serr := hik.stopPreviewSync(); serr != nil {
+				l.log("Leveling not started: %v", serr)
+				l.ui(func() {
+					l.busy, l.level, l.cancel = false, false, nil
+					l.ResText = "Leveling failed: " + serr.Error()
+					l.msg(title, "Cannot use the Hikrobot monochrome camera:\n\n"+serr.Error())
+				})
+				return
+			}
 			if hik.stopOther != nil {
 				hik.stopOther() // the Mono trichrome preview (MonoUI worker StopSync)
 			}

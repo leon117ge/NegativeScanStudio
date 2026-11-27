@@ -23,6 +23,10 @@ const ICCAvailable = true
 
 const iccErrLen = 512
 
+// iccSendLost is icc_send's ICC_SEND_LOST (icc_darwin.h) return code for a timeout or a removed camera:
+// the session is unusable afterwards (ICCTransport marks itself broken).
+const iccSendLost = -2
+
 func iccErr(buf []C.char) error {
 	s := C.GoString(&buf[0])
 	if s == "" {
@@ -84,7 +88,7 @@ func OpenICC(uuid string, timeout time.Duration) (*ICCTransport, ICCCamera, erro
 		if len(cams) > 0 {
 			return nil, ICCCamera{}, errors.New("cameras found, but none accepts PTP commands over ImageCaptureCore")
 		}
-		return nil, ICCCamera{}, errors.New("no camera found: connect the X-T3 by USB, switch it on, set CONNECTION MODE to USB TETHER SHOOTING AUTO, and close Image Capture, Photos and X Acquire")
+		return nil, ICCCamera{}, errors.New("no camera found: connect the X-T3 by USB, switch it on, set CONNECTION MODE to USB TETHER SHOOTING FIXED, and close Image Capture, Photos and X Acquire")
 	}
 	cu := C.CString(pick.UUID)
 	defer C.free(unsafe.Pointer(cu))
@@ -126,6 +130,9 @@ func (d *iccDarwin) SendPTP(cmd, out []byte) ([]byte, []byte, error) {
 		&resp, &respLen, &data, &dataLen, &errb[0], iccErrLen)
 	defer C.free(unsafe.Pointer(resp))
 	defer C.free(unsafe.Pointer(data))
+	if rc == iccSendLost {
+		return nil, nil, &iccLostError{msg: iccErr(errb).Error()}
+	}
 	if rc != 0 {
 		return nil, nil, iccErr(errb)
 	}

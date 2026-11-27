@@ -80,6 +80,7 @@ type Ctl struct {
 	lvDrawing atomic.Bool
 	camJob    atomic.Bool
 	statBusy  atomic.Bool
+	statStop  chan struct{} // closed to end the status poll (UI goroutine)
 	Busy      bool
 	Working   bool // merge running (Processing on Windows)
 	Progress  bool // the progress bar runs (marquee)
@@ -175,6 +176,7 @@ func (c *Ctl) Start() {
 // Shutdown runs when the window closes: the Light page's planned
 // disconnect (lightui.shutdown on Windows).
 func (c *Ctl) Shutdown() {
+	c.stopStatusPoll()
 	if c.Light != nil {
 		c.Light.Shutdown()
 	}
@@ -376,6 +378,7 @@ func (c *Ctl) Disconnect() {
 	c.LvWanted = false
 	c.clearLocked()
 	c.CamISO, c.CamSh, c.CamF = "", "", ""
+	c.stopStatusPoll()
 	d := c.dev
 	c.dev, c.sess = nil, nil
 	c.CamLbl, c.ExpLbl, c.BaseLbl = "Not connected", "", ""
@@ -476,6 +479,10 @@ func (c *Ctl) resumeLiveView() {
 // LiveRunning reports whether the live-view loop is alive (tests).
 func (c *Ctl) LiveRunning() bool { return c.lvRunning.Load() }
 
+// HikPreviewRunning reports whether the Light page's Hikrobot preview loop is
+// alive (tests).
+func (c *Ctl) HikPreviewRunning() bool { return c.Hik != nil && c.Hik.previewRunning() }
+
 func (c *Ctl) startLiveView() {
 	if c.dev == nil || !c.LvWanted || !c.lvVisible || c.camJob.Load() {
 		return
@@ -507,6 +514,10 @@ func (c *Ctl) startLiveView() {
 				close(done)
 			})
 			<-done
+			if c.camLost(d, err) {
+				c.lvOn.Store(false)
+				break
+			}
 			if err != nil {
 				fails++
 				if fails >= 5 {
@@ -556,34 +567,80 @@ func (c *Ctl) startLiveView() {
 	}()
 }
 
+// startStatusPoll keeps the "Camera now" readout current (every ~1.2 s,
+// quiet reads, skipped while a camera job runs). The loop ends when
+// stopStatusPoll closes its channel (Disconnect, a new connection, Shutdown);
+// it never waits on the UI goroutine, so it cannot hang once the window is gone.
 func (c *Ctl) startStatusPoll(d camera.Device) {
+	c.stopStatusPoll()
 	sr, ok := d.(camera.StatusReader)
 	if !ok {
 		return
 	}
+	stop := make(chan struct{})
+	c.statStop = stop
+	stopped := func() bool {
+		select {
+		case <-stop:
+			return true
+		default:
+			return false
+		}
+	}
 	go func() {
+		t := time.NewTicker(1200 * time.Millisecond)
+		defer t.Stop()
 		for {
-			alive := make(chan bool, 1)
-			c.Host.Post(func() { alive <- c.dev == d })
-			if !<-alive {
-				return
-			}
 			if !c.camJob.Load() && c.statBusy.CompareAndSwap(false, true) {
 				c.worker.do(func() {
 					defer c.statBusy.Store(false)
-					if c.camJob.Load() {
+					if c.camJob.Load() || stopped() {
 						return
 					}
 					e, fn, err := sr.Status()
 					if err != nil {
+						c.camLost(d, err)
 						return
 					}
 					c.Host.Post(func() { c.showCamera(e, fn) })
 				})
 			}
-			time.Sleep(1200 * time.Millisecond)
+			select {
+			case <-stop:
+				return
+			case <-t.C:
+			}
 		}
 	}()
+}
+
+// stopStatusPoll ends the status poll loop (UI goroutine).
+func (c *Ctl) stopStatusPoll() {
+	if c.statStop != nil {
+		close(c.statStop)
+		c.statStop = nil
+	}
+}
+
+// camLost handles camera.ErrCameraUnresponsive from any camera call (camera
+// worker or live-view goroutine): the ImageCaptureCore session timed out or
+// the camera went away, and every later command fails at once. It
+// disconnects d and asks the user to reconnect, once; other errors are left
+// to the caller.
+func (c *Ctl) camLost(d camera.Device, err error) bool {
+	if !errors.Is(err, camera.ErrCameraUnresponsive) {
+		return false
+	}
+	c.Host.Post(func() {
+		if c.dev != d {
+			return // already disconnected (or reconnected)
+		}
+		c.say("Camera stopped responding: " + err.Error())
+		c.Disconnect()
+		c.Host.Message("Camera not responding", "The camera stopped responding over USB and was disconnected:\n"+err.Error()+
+			"\n\nCheck the cable and that the camera is on, then press Connect. If it still does not answer, switch the camera off and on first.")
+	})
+	return true
 }
 
 func (c *Ctl) showCamera(e camera.Exposure, fn float64) {

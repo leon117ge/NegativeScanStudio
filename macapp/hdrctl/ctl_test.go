@@ -42,6 +42,18 @@ func (h *testHost) PickFile(title string, save bool, start string, exts []string
 }
 func (h *testHost) SetClipboard(text string) { h.clip = text }
 
+// drain runs every queued UI function.
+func (h *testHost) drain() {
+	for {
+		select {
+		case f := <-h.q:
+			f()
+		default:
+			return
+		}
+	}
+}
+
 func (h *testHost) pump(t *testing.T, what string, d time.Duration, ok func() bool) {
 	t.Helper()
 	end := time.Now().Add(d)
@@ -151,9 +163,12 @@ func TestMockConnectLiveViewDisconnect(t *testing.T) {
 	if !c.LvWanted {
 		t.Fatal("LvWanted cleared by a page switch")
 	}
+	// The loop has exited, so nothing may poll any more: run every queued UI
+	// function (a pending restart would be one) and check that no loop came
+	// back, instead of sleeping and hoping a poll would have happened by then.
 	n := m.lv.Load()
-	time.Sleep(200 * time.Millisecond)
-	if m.lv.Load() != n {
+	h.drain()
+	if c.LiveRunning() || m.lv.Load() != n {
 		t.Fatal("live view still polled while hidden")
 	}
 	c.SetLiveVisible(true)

@@ -630,7 +630,11 @@ func (m *Mono) StartPreview() {
 	h := m.hik
 	m.worker().Do(func() {
 		m.worker().StopSyncIfNeeded()
-		h.stopPreviewSync() // the Light page's preview of the same camera
+		if err := h.stopPreviewSync(); err != nil { // the Light page's preview of the same camera
+			msg := "Live view not started: " + err.Error()
+			m.ui(func() { m.say(msg) })
+			return
+		}
 		if m.worker().Gen() != gen || m.running.Load() || m.connBusy.Load() {
 			return
 		}

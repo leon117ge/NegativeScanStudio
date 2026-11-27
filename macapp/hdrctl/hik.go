@@ -121,18 +121,52 @@ func (h *hikCams) ensureHik(wantSim bool) (hikcam.Device, error) {
 	return d, nil
 }
 
-// stopPreview ends the preview loop and waits until it has released the
-// camera (the leveling then owns it). Not on the UI goroutine.
-func (h *hikCams) stopPreviewSync() {
+// hikStopTimeout is how long a caller waits for the Light page's preview
+// loop to release the camera.
+var hikStopTimeout = 10 * time.Second
+
+// errPreviewStuck is returned when the preview loop did not release the
+// camera in time: the caller must not use the camera alongside it.
+var errPreviewStuck = fmt.Errorf("the Hikrobot live preview did not stop within %s (the camera may be hung): reconnect it on HDR Scan > Mono trichrome", hikStopTimeout)
+
+// stopPreviewSync ends the preview loop and waits until it has released the
+// camera (the leveling then owns it). It returns errPreviewStuck when the
+// loop is still running after hikStopTimeout. Not on the UI goroutine.
+func (h *hikCams) stopPreviewSync() error {
 	h.prevGen.Add(1)
+	return h.waitPreviewDone()
+}
+
+// previewRunning reports whether a preview loop is running (it holds the
+// camera until it closes prevDone).
+func (h *hikCams) previewRunning() bool {
 	h.mu.Lock()
 	done := h.prevDone
 	h.mu.Unlock()
-	if done != nil {
-		select {
-		case <-done:
-		case <-time.After(10 * time.Second):
-		}
+	if done == nil {
+		return false
+	}
+	select {
+	case <-done:
+		return false
+	default:
+		return true
+	}
+}
+
+// waitPreviewDone waits for the running preview loop (if any) to finish.
+func (h *hikCams) waitPreviewDone() error {
+	h.mu.Lock()
+	done := h.prevDone
+	h.mu.Unlock()
+	if done == nil {
+		return nil
+	}
+	select {
+	case <-done:
+		return nil
+	case <-time.After(hikStopTimeout):
+		return errPreviewStuck
 	}
 }
 
@@ -142,7 +176,11 @@ func (h *hikCams) stopPreviewSync() {
 func (h *hikCams) startPreview(wantSim bool, logf func(string, ...any), show func(img image.Image, what string, done func()), alive func() bool) {
 	gen := h.prevGen.Add(1)
 	go func() {
-		h.stopWait(gen)
+		if err := h.waitPreviewDone(); err != nil {
+			// Do not start a second loop on a camera the old one still holds.
+			logf("Hikrobot preview not started: %v", err)
+			return
+		}
 		if h.prevGen.Load() != gen || !alive() {
 			return
 		}
@@ -201,17 +239,4 @@ func (h *hikCams) startPreview(wantSim bool, logf func(string, ...any), show fun
 			}
 		}
 	}()
-}
-
-// stopWait waits for an older preview loop to finish before a new one starts.
-func (h *hikCams) stopWait(gen int64) {
-	h.mu.Lock()
-	done := h.prevDone
-	h.mu.Unlock()
-	if done != nil {
-		select {
-		case <-done:
-		case <-time.After(10 * time.Second):
-		}
-	}
 }

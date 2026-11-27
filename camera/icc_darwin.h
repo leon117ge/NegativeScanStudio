@@ -18,8 +18,14 @@ int icc_list(icc_cam *out, int max, double timeout, char *err, int errlen);
 // icc_open opens a session on the camera with this UUID; NULL with err set on failure.
 void *icc_open(const char *uuid, double timeout, char *err, int errlen);
 
+// icc_send return code for a timeout or a removed camera: the session is out
+// of step or gone and must be closed (iccSendLost in icc_darwin.go).
+#define ICC_SEND_LOST (-2)
+
 // icc_send sends one PTP command container (plus data-out when hasOut) and
-// returns malloc'd copies of the response container and the data-in phase.
+// returns malloc'd copies of the response container and the data-in phase:
+// 0 on success, ICC_SEND_LOST when the session is unusable, -1 with err set
+// for an error of this command only.
 int icc_send(void *h, const unsigned char *cmd, int cmdlen, const unsigned char *out, long long outlen, int hasOut,
 	double timeout, unsigned char **resp, int *resplen, unsigned char **data, long long *datalen, char *err, int errlen);
 
