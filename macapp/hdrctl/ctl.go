@@ -91,18 +91,16 @@ type Ctl struct {
 	logLines                                                            []string
 	LogSeq                                                              int
 
-	scanCancel context.CancelFunc
-	sessFirst  time.Time
-	LastCap    *hdrscan.Result
-	LastMerge  *hdrscan.Result // Merge files (merge.go)
-	MF         MergeFiles
-	MRes       string // Merge files result box (mRes)
-	MResSeq    int
-	Hair       *Hair
-	// OpenInDevelop opens an HDR TIFF in Develop (main.go's hook).
-	OpenInDevelop func(path string)
-	mergeCancel   context.CancelFunc
-	camFn         float64
+	scanCancel  context.CancelFunc
+	sessFirst   time.Time
+	LastCap     *hdrscan.Result
+	LastMerge   *hdrscan.Result // Merge files (merge.go)
+	MF          MergeFiles
+	MRes        string // Merge files result box (mRes)
+	MResSeq     int
+	Hair        *Hair
+	mergeCancel context.CancelFunc
+	camFn       float64
 
 	// Light page link (v0.82 handoff, shared ISO / base shutter / rectangle)
 	Light       *Light

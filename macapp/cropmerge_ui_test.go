@@ -62,7 +62,7 @@ func testBracket(t *testing.T, dir string) []string {
 
 // TestCropMergePages lays out the four Crop & Merge pages at 1280x800
 // with real work done on each (crop detection and export, a merge with
-// dust removal, Open in Develop, a hair removal, batch rows); with
+// dust removal, a hair removal, batch rows); with
 // NSS_SHOTS=<dir> the frames are saved.
 func TestCropMergePages(t *testing.T) {
 	isolate(t)
@@ -142,19 +142,10 @@ func TestCropMergePages(t *testing.T) {
 	u.hdr.RunMerge()
 	s.save("05-merge-running.png")
 	s.pumpFor("merge", 120*time.Second, func() bool { return !u.hdr.MergeBusy() })
-	if !strings.HasPrefix(u.hdr.MRes, "Saved ") || !u.hdr.CanOpenMerge() {
+	if !strings.HasPrefix(u.hdr.MRes, "Saved ") || u.hdr.LastMerge == nil || u.hdr.LastMerge.HDR == "" {
 		t.Fatal(u.hdr.MRes)
 	}
 	s.save("06-merge-done.png")
-
-	// Open in Develop: Convert is not on macOS yet, so the page switches to
-	// Convert and says so (known gap)
-	u.hdr.OpenMergeInDevelop()
-	if u.nav.Page() != appstate.PageConvert || u.develop != u.hdr.LastMerge.HDR || len(u.dialogs) != 1 {
-		t.Fatalf("open in develop: page %v develop %q", u.nav.Page(), u.develop)
-	}
-	s.save("07-open-in-develop.png")
-	u.dialogs = nil
 
 	// Remove hairs on the merged HDR
 	open(2)

@@ -205,7 +205,7 @@ func TestMergeValidationAndDrop(t *testing.T) {
 	d := t.TempDir()
 	h := newHost()
 	c := New(h)
-	if c.MF.Comp != 1 || c.MF.Merge != appstate.MergeDefault || c.MRes != MergeResText || c.CanOpenMerge() {
+	if c.MF.Comp != 1 || c.MF.Merge != appstate.MergeDefault || c.MRes != MergeResText || c.LastMerge != nil {
 		t.Fatalf("defaults %+v", c.MF)
 	}
 	c.RunMerge()
@@ -245,7 +245,7 @@ func TestMergeValidationAndDrop(t *testing.T) {
 	c.MF.Paths = [3]string{a, b, ""}
 	c.RunMerge()
 	h.pump(t, "merge", 30*time.Second, func() bool { return !c.MergeBusy() })
-	if !strings.HasPrefix(c.MRes, "Merge failed: ") || c.CanOpenMerge() {
+	if !strings.HasPrefix(c.MRes, "Merge failed: ") || c.LastMerge != nil {
 		t.Fatalf("result %q", c.MRes)
 	}
 }
@@ -276,29 +276,6 @@ func TestMergeStop(t *testing.T) {
 			n = append(n, e.Name())
 		}
 		t.Fatalf("folder after Stop: %v", n)
-	}
-}
-
-func TestOpenMergeInDevelop(t *testing.T) {
-	isolate(t)
-	d := t.TempDir()
-	h := newHost()
-	c := New(h)
-	var got string
-	c.OpenInDevelop = func(p string) { got = p }
-	hdr := filepath.Join(d, "x_HDR.tiff")
-	c.LastMerge = &hdrscan.Result{HDR: hdr}
-	if !c.CanOpenMerge() {
-		t.Fatal("button disabled")
-	}
-	c.OpenMergeInDevelop()
-	if got != "" || len(h.messages) != 1 || h.messages[0] != "Open in Develop: The HDR TIFF is gone: "+hdr {
-		t.Fatalf("got %q messages %q", got, h.messages)
-	}
-	os.WriteFile(hdr, []byte("x"), 0644)
-	c.OpenMergeInDevelop()
-	if got != hdr {
-		t.Fatalf("handed %q", got)
 	}
 }
 

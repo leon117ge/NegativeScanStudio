@@ -1,7 +1,9 @@
 package hdrctl
 
-// Crop & Merge > Merge files (the merge TabPage of hdrpage.go, mergeFiles,
-// DropFiles and openInDevelop on Windows).
+// Crop & Merge > Merge files (the merge TabPage of hdrpage.go, mergeFiles
+// and DropFiles on Windows). Windows' "Open in Develop" button opens the
+// merged HDR in its Convert module, which the macOS app does not have, so
+// the button and openInDevelop are not ported.
 
 import (
 	"context"
@@ -41,9 +43,6 @@ func (c *Ctl) MergeBusy() bool { return c.Working }
 
 // MergeStoppable reports whether Stop applies (a Merge files merge runs).
 func (c *Ctl) MergeStoppable() bool { return c.mergeCancel != nil }
-
-// CanOpenMerge is the Open in Develop button's enabled state.
-func (c *Ctl) CanOpenMerge() bool { return c.LastMerge != nil && c.LastMerge.HDR != "" }
 
 // BrowseMerge is a frame's "Browse..." (k = 0, 1, 2).
 func (c *Ctl) BrowseMerge(k int) {
@@ -141,17 +140,4 @@ func (c *Ctl) StopMerge() {
 		c.MRes = "Stopping the merge ..."
 		c.MResSeq++
 	}
-}
-
-// OpenMergeInDevelop is "Open in Develop" (openInDevelop(u.lastMerge)).
-func (c *Ctl) OpenMergeInDevelop() {
-	r := c.LastMerge
-	if r == nil || r.HDR == "" || c.OpenInDevelop == nil {
-		return
-	}
-	if _, err := os.Stat(r.HDR); err != nil {
-		c.Host.Message("Open in Develop", "The HDR TIFF is gone: "+r.HDR)
-		return
-	}
-	c.OpenInDevelop(r.HDR)
 }

@@ -83,7 +83,7 @@ func TestNavMatchesWindows(t *testing.T) {
 			}
 		}
 	}
-	if len(AllPages()) != 11 {
+	if len(AllPages()) != 10 || len(Modules) != 3 {
 		t.Fatalf("%d pages", len(AllPages()))
 	}
 }
@@ -94,7 +94,7 @@ func TestLiveViewRouting(t *testing.T) {
 		page       Page
 	}{
 		{0, 0, 0, PageCamera}, {0, 1, 3, PageLight}, {1, 0, 1, PageWhite}, {1, 1, 2, PageTri},
-		{1, 2, -1, PageMono}, {1, 3, -1, PageFocus}, {2, 1, -1, PageMerge}, {3, 0, -1, PageConvert},
+		{1, 2, -1, PageMono}, {1, 3, -1, PageFocus}, {2, 1, -1, PageMerge}, {2, 3, -1, PageBatch},
 	}
 	for _, c := range cases {
 		var n Nav
@@ -123,9 +123,16 @@ func TestFromArgs(t *testing.T) {
 		t.Fatal(n.Page(), files)
 	}
 	for arg, p := range map[string]Page{"--light": PageLight, "--tri": PageTri, "--mono": PageMono, "--focus": PageFocus,
-		"--merge": PageMerge, "--hairs": PageHairs, "--batch": PageBatch, "--convert": PageConvert, "--white": PageWhite} {
+		"--merge": PageMerge, "--hairs": PageHairs, "--batch": PageBatch, "--white": PageWhite} {
 		if n, _ := FromArgs([]string{arg}); n.Page() != p {
 			t.Errorf("%s -> %s", arg, n.Page())
+		}
+	}
+	// Windows' --develop / --convert open its Convert module, which the
+	// macOS app does not have: ignored, files not taken
+	for _, arg := range []string{"--develop", "--convert"} {
+		if n, files := FromArgs([]string{arg, "a.tif"}); n != (Nav{}) || files != nil {
+			t.Errorf("%s -> %+v %v", arg, n, files)
 		}
 	}
 }

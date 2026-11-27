@@ -199,10 +199,14 @@ func TestNavClicksSwitchLiveView(t *testing.T) {
 	if u.nav.Page() != appstate.PageCamera || u.nav.LiveView() != 0 {
 		t.Fatal(u.nav)
 	}
-	u.nav.SetModule(3)
+	u.nav.SetModule(2)
 	u.setNav()
 	if u.nav.LiveView() != -1 {
-		t.Fatal("convert has no live view")
+		t.Fatal("crop & merge has no live view")
+	}
+	// no fourth module (Windows' Convert is not part of the macOS app)
+	if u.nav.SetModule(3) || len(u.navBtns) != len(appstate.Modules) {
+		t.Fatal("fourth module accepted")
 	}
 }
 

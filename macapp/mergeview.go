@@ -20,7 +20,7 @@ type mergePage struct {
 	browse                           [3]Button
 	seq                              int
 	alignCB, mergeCB, compCB, dustCB Combo
-	mergeBtn, openBtn, stopBtn       Button
+	mergeBtn, stopBtn                Button
 	res                              LogBox
 	list                             widget.List
 }
@@ -98,7 +98,6 @@ func (p *mergePage) layout(gtx layout.Context) layout.Dimensions {
 			busy := c.MergeBusy()
 			return hbox(gtx, 6,
 				layout.Rigid(hp.button(&p.mergeBtn, "Merge to HDR TIFF", btnOpts{primary: true, minW: 200, h: 32, disabled: busy}, func() { p.sync(); c.RunMerge() })),
-				layout.Rigid(hp.button(&p.openBtn, "Open in Develop", btnOpts{h: 32, disabled: !c.CanOpenMerge(), tip: "Open the merged HDR TIFF in Develop for preview."}, c.OpenMergeInDevelop)),
 				layout.Rigid(hp.button(&p.stopBtn, "Stop", btnOpts{h: 32, disabled: !c.MergeStoppable(),
 					tip: "Stop the merge at its next stage. Partial output is removed; the source files are never changed."}, c.StopMerge)),
 				layout.Flexed(1, layout.Spacer{}.Layout))

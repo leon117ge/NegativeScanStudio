@@ -11,7 +11,7 @@ used unchanged; full-resolution processing stays in Go on the CPU.
 ## Layout
 
 The window follows `main.go` of the Windows app: header (icon, title, subtitle, About),
-the four modules in a bottom page bar (Camera & Light, HDR Scan, Crop & Merge, Convert)
+the first three modules in a bottom page bar (Camera & Light, HDR Scan, Crop & Merge)
 with the same segmented sub-pages, the same dark colours and orange accent, cards with
 the same titles, rows and control order. Ported so far:
 
@@ -24,7 +24,7 @@ the same titles, rows and control order. Ported so far:
 | HDR Scan | Mono trichrome | ported (Hikrobot live view with centre marks, camera card, Mono trichrome capture card) |
 | HDR Scan | Focus check | ported (live loupe with zoom and pan, centre marks, green / white light, auto exposure, sharpness meter with peak hold) |
 | Crop & Merge | Crop, Merge files, Remove hairs, Batch RAW to TIFF | ported (crop, merge, dust / hair removal, batch RAW to TIFF) |
-| Convert | | placeholder |
+| Convert | | not part of the macOS app (user's decision); Windows keeps it |
 
 On the Camera card, Chart calibration, Record base, Save base to DB, Save last frame 0
 to DB, Manage and the leveling-metadata switch are shown but not active yet (later
@@ -108,8 +108,8 @@ in the existing `cropper`, `hdrscan` and `rawconv` packages, on CPU goroutines.
   merge method, compression and dust removal (Off / Light / Strong). Output is
   `<frame 0>_HDR.tiff` next to frame 0, with the same `hdrscan.ProcessOptions`
   as Windows (`MergeFilesOptions`). The source files are never changed or
-  deleted. "Open in Develop" first checks that the HDR TIFF is still there
-  (same message as Windows if it is gone).
+  deleted. Windows' "Open in Develop" button is not on the Mac page (see
+  below).
 - Remove hairs: open a 16-bit TIFF (Browse..., Last HDR, or a typed path),
   drag a box around a hair, heal with nearby film texture, Show mask, Undo,
   Save into `_HDR.tiff` (in place when the file is already an HDR output,
@@ -137,10 +137,12 @@ Differences from Windows, and why:
 - Drag and drop of files onto the pages is not wired: Gio does not receive
   file drops on macOS. The Windows hint texts that mention dropping files are
   kept verbatim; use Add files, Add folder or Browse... instead.
-- Convert (Develop) is not on macOS yet (later increment). "Open in Develop"
-  still switches to the Convert module, as Windows does, and shows the HDR
-  path in the window with a message that Convert is not ported. That is a
-  known gap.
+- Convert is not part of the macOS app, by the user's decision; the Windows
+  app keeps it. The Mac page bar has three modules, `--develop` /
+  `--convert` are ignored (the app opens on Camera & Light > Camera), and
+  the Merge files "Open in Develop" button is removed rather than disabled,
+  because on Windows it only opens the merged HDR in Convert. The merged
+  `_HDR.tiff` is saved next to frame 0 as before.
 - Merge files has a Stop button and a progress bar (Windows has no Stop on
   this page). Cancel is honoured between `ProcessN` stages; any partial
   output is removed and the sources are left unchanged. Dust removal itself
