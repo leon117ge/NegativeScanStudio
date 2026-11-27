@@ -27,7 +27,9 @@ import (
 	"basetool/macapp/icons"
 )
 
-const subtitle = "Camera and light control, tethered HDR scanning, RAW to linear TIFF, crop and Convert (RAW to film negative)"
+// subtitle is main.go's header line without Convert, which the macOS app
+// does not have.
+const subtitle = "Camera and light control, tethered HDR scanning, RAW to linear TIFF and crop"
 
 // UI is the whole window. All fields belong to the window goroutine.
 type UI struct {
@@ -38,9 +40,9 @@ type UI struct {
 
 	appIcon  paint.ImageOp
 	hasIcon  bool
-	navBtns  [4]widget.Clickable
+	navBtns  [3]widget.Clickable
 	navIcons map[string]paint.ImageOp
-	segBtns  [4][]widget.Clickable
+	segBtns  [3][]widget.Clickable
 	about    Button
 	scroll   widget.List
 
@@ -60,10 +62,6 @@ type UI struct {
 	tp   *triPage
 	mo   *monoPage
 	fp   *focusPage
-
-	// develop is the HDR TIFF "Open in Develop" handed to Convert, which is
-	// not on macOS yet (shown on the Convert placeholder).
-	develop string
 
 	clip    string
 	clipSet bool
@@ -95,7 +93,6 @@ func newUI(th *Theme, inval func()) *UI {
 	u.raw = cropctl.NewRaw(u)
 	u.cp, u.mp, u.hap, u.bp = newCropPage(u), newMergePage(u), newHairPage(u), newBatchPage(u)
 	u.tp, u.mo, u.fp = newTriPage(u), newMonoPage(u), newFocusPage(u)
-	u.hdr.OpenInDevelop = u.openInDevelop
 	return u
 }
 
@@ -158,17 +155,6 @@ func (u *UI) PickFiles(title, start string, exts []string, done func([]string, b
 // PickFolder is a native folder panel.
 func (u *UI) PickFolder(title, start string, done func(string, bool)) {
 	u.pick(title, pickFolder, start, nil, done)
-}
-
-// openInDevelop is main.go's hdrui.OpenInDevelop: Windows switches to
-// Convert and opens the file there. Convert is not on macOS yet, so the
-// page shows the file and a message says so.
-func (u *UI) openInDevelop(path string) {
-	u.develop = path
-	if u.nav.SetModule(3) {
-		u.setNav()
-	}
-	u.Message("Open in Develop", "Convert (Develop) is not on macOS yet; it is ported in a later increment.\n\nThe HDR TIFF to open is:\n"+path)
 }
 
 // SetClipboard puts text on the clipboard with the next frame.
@@ -285,8 +271,8 @@ func (u *UI) header(gtx layout.Context) layout.Dimensions {
 
 func aboutText() string {
 	return appstate.AppVersion + " for macOS (Apple Silicon), Gio user interface (work in progress).\n\n" +
-		"Camera and light control, tethered HDR scanning, RAW to linear TIFF, crop and Convert (RAW to film negative).\n" +
-		"Ported so far: Camera & Light > Camera and Light, HDR Scan > White light scan, Trichrome, Mono trichrome and Focus check, and Crop & Merge > Crop, Merge files, Remove hairs and Batch RAW to TIFF. The other pages are placeholders on macOS; use the Windows app for them.\n\n" +
+		"Camera and light control, tethered HDR scanning, RAW to linear TIFF and crop.\n" +
+		"Pages: Camera & Light > Camera and Light, HDR Scan > White light scan, Trichrome, Mono trichrome and Focus check, and Crop & Merge > Crop, Merge files, Remove hairs and Batch RAW to TIFF. The Windows Convert module (RAW to film negative) is not part of the macOS app.\n\n" +
 		"Settings: ~/Library/Application Support/NegativeScanStudio (same files as Windows)\nCrash log: ~/Library/Logs/NegativeScanStudio/crash_log.txt"
 }
 
@@ -441,7 +427,7 @@ func (u *UI) page(gtx layout.Context, p appstate.Page) layout.Dimensions {
 var pageTitles = map[appstate.Page]string{
 	appstate.PageLight: "Light", appstate.PageTri: "Trichrome", appstate.PageMono: "Mono trichrome",
 	appstate.PageFocus: "Focus check", appstate.PageCrop: "Crop", appstate.PageMerge: "Merge files",
-	appstate.PageHairs: "Remove hairs", appstate.PageBatch: "Batch RAW to TIFF", appstate.PageConvert: "Convert",
+	appstate.PageHairs: "Remove hairs", appstate.PageBatch: "Batch RAW to TIFF",
 }
 
 func (u *UI) placeholder(gtx layout.Context, p appstate.Page) layout.Dimensions {
@@ -453,14 +439,6 @@ func (u *UI) placeholder(gtx layout.Context, p appstate.Page) layout.Dimensions 
 			layout.Rigid(layout.Spacer{Height: 8}.Layout),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				return u.th.hint(gtx, "This page is not on macOS yet; it is ported in a later increment. Use the Windows app for it for now.")
-			}),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				if p != appstate.PageConvert || u.develop == "" {
-					return layout.Dimensions{}
-				}
-				return layout.Inset{Top: 8}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-					return u.th.text(gtx, "Open in Develop was asked for: "+u.develop)
-				})
 			}),
 		)
 	})
