@@ -126,6 +126,12 @@ func TestFilmDBPanels(t *testing.T) {
 	// lock frame 0, Save base to DB: update mode on the selected stock
 	c.Meter()
 	s.pumpFor("lock", 60*time.Second, func() bool { return !c.Busy && c.Locked() })
+	// the stock was recorded at ISO 250, frame 0 is locked at ISO 160: the
+	// film-stock check fails and the Frame 0 notice is up
+	if len(u.dialogs) != 1 || u.dialogs[0].title != "Frame 0" || !strings.Contains(u.dialogs[0].text, "ISO mismatch: frame 0 ISO 160, DB ISO 250") {
+		t.Fatalf("Frame 0 notice %+v", u.dialogs)
+	}
+	u.dialogs = nil
 	c.SaveBaseToDB()
 	s.pumpFor("probe", 60*time.Second, func() bool { return !c.Busy && c.DBSave.Shown })
 	s.save("06-save-base-update.png")

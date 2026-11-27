@@ -29,8 +29,8 @@ the same titles, rows and control order. Ported so far:
 On the Camera page, Chart calibration and the switch "Film base for metadata: Last
 leveling (after profile)" work since group (f), slice 1; Record base, Save base to DB,
 Save last frame 0 to DB, Manage and the Film stock / Tol. selectors since slice 2 (the
-shared `film_base_db.json`). The Fixed frame 0 film-stock comparison of a metering or a
-capture is not on macOS yet.
+shared `film_base_db.json`); the Fixed frame 0 film-stock comparison (Meter base, a stock
+change after the lock, the capture result) since slice 3.
 
 The camera list shows the Fujifilm cameras that ImageCaptureCore reports (W6
 transport: `camera.ListICC`, `camera.OpenICC`, `camera.OpenFuji`), then the simulated
@@ -77,10 +77,9 @@ Differences from Windows, and why:
   field (`monoScanExposureUS`, as on Windows), falling back to the best-quality scan
   preset only without that page; "Auto-meter each channel" is the page's check box. The
   exposure is a plain field in us instead of a spin box.
-- The Fixed frame 0 film-stock comparison after Meter base, after a stock change and in
-  the capture result stays off ("Film stock check: not on macOS yet"); Record base
-  already shows its comparison line. The leveling metadata switch on the Camera page
-  works since group (f), slice 1. The leveling itself, its records and the handoff work.
+- The leveling metadata switch on the Camera page works since group (f), slice 1, and
+  the Fixed frame 0 film-stock comparison since slice 3. The leveling itself, its
+  records and the handoff work.
 - The 500T card is titled "500T illuminant" and has no "Send to Develop" button: on
   Windows that button only passes the cast to main.go's Develop / Convert hook, which
   shows a message and stores nothing (`castpage.go`, `main.go` `toDevelop`). Calculate
@@ -405,6 +404,40 @@ Differences from Windows, and why:
   Save / Cancel (the walk DefaultButton / CancelButton); use the buttons.
 - Save base to DB reads the probe RAW off the UI goroutine with the controls
   off meanwhile (Windows reads it on the UI thread and the window stalls).
+
+## Fixed frame 0 film-stock comparison (W9 group f, slice 3)
+
+With Frame 0 = Fixed, frame 0's base is compared with the selected film stock
+(`filmdb.Compare` per channel in EV against Tol., plus ISO / shutter
+mismatches) in the same three places as on Windows (`hdrpage.go`):
+
+- Meter base: after the fixed lock the locked probe's base (`ProbeBase`, on
+  the camera worker) is compared; the line ("<stock>: Film base OK vs DB: ..."
+  or "<stock>: Film base WARNING vs DB (...): ...") is logged and added under
+  the base readout, "Film stock: None (no DB check)" without a stock, "<stock>:
+  no base to compare (...)" without a probe base. A failed check or a frame-0
+  warning shows the Windows "Frame 0" message as an in-window notice (not
+  for a light handoff lock).
+- A stock change after a fixed lock (`stockRecheck`) redoes the line from the
+  locked probe without a new shot; the base readout without the line is kept
+  (`lockBase`) and cleared with the lock.
+- Capture result: when the last frame 0 is a clean base (`setLastF0`) and
+  Frame 0 is Fixed, the comparison is the last line of the result.
+
+The "not on macOS yet" texts are gone (the film-stock line, the `resultText`
+note, and the unused page placeholder: every page is ported).
+
+Tests: `hdrctl/stockcmp_test.go` runs no stock, pass, fail (with the Frame 0
+notice) and a missing probe at Meter base and in the recheck on a real RAW
+(`NSS_TEST_RAF`), and pass, fail, no stock, Metered frame 0 and an unclean
+frame 0 for the capture line; the expected lines come from `compareText` on
+the shared `filmdb`. A test checks the Windows strings and calls are in the
+port. `stockcmp_ui_test.go` renders the card and the notice (`NSS_SHOTS`).
+
+As on Windows, the capture line needs the merge's frame-0 base (`Base1F0`),
+which `hdrscan.ProcessN` measures only with colour options on; neither app's
+White light scan sets them, so a normal capture result has no stock line and
+Save last frame 0 to DB says the frame 0 cannot be used. Core unchanged.
 
 ## Known follow-ups
 
