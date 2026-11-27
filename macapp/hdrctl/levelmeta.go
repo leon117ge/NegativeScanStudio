@@ -117,3 +117,44 @@ func (c *Ctl) reportPanic(where string, r any, stack string) {
 				"\n\nPlease send these files.")
 	})
 }
+
+// LevelingUI is what refreshLevelingUI shows on the Camera page's Meter
+// card: the "Film base for metadata: Last leveling (after profile)" check
+// box, the last leveling line and, with the option on, the Send base button
+// state (Windows only).
+type LevelingUI struct {
+	On, Enabled bool   // levelMetaCB checked / enabled
+	Text        string // levelMetaLbl
+	// SendSet / SendOK are Windows' Send base to Develop button state; the
+	// macOS app has no such button (only consumer: main.go's Develop /
+	// Convert hook), they are kept for the Windows comparison test.
+	SendSet bool // the option is on: Send base follows SendOK
+	SendOK  bool
+}
+
+// RefreshLevelingUI is refreshLevelingUI (called from updateButtons on
+// Windows). With the option on it also puts the matching leveling base (or
+// "-") into the Base R / G / B readouts, as Windows does.
+func (c *Ctl) RefreshLevelingUI() LevelingUI {
+	var r LevelingUI
+	if c.Light == nil {
+		return r
+	}
+	on := c.Light.cfg.UseLastLeveling
+	r.On, r.Enabled = on, !c.Busy && !c.Working
+	values := c.levelingValues()
+	r.Text = c.lastLevelingText(values)
+	if !on {
+		return r
+	}
+	l := c.metadataLeveling()
+	r.SendSet, r.SendOK = true, !c.Busy && !c.Working && l.Matches(values)
+	for i, s := range []*string{&c.BaseR, &c.BaseG, &c.BaseB} {
+		text := "-"
+		if l.Matches(values) {
+			text = fmt.Sprintf("%.5f", l.Base[i])
+		}
+		*s = text
+	}
+	return r
+}

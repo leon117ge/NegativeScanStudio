@@ -65,3 +65,9 @@ func TestCopiedTrichromeDeclsMatchWindows(t *testing.T) {
 		drift.Same(t, ours, drift.Decls(t, "../../"+file), names...)
 	}
 }
+
+func TestCopiedChartCalDeclsMatchWindows(t *testing.T) {
+	ours := drift.Decls(t, "copied_cal.go")
+	drift.Same(t, ours, drift.Decls(t, "../../chartcal.go"), "calTip")
+	drift.Same(t, ours, drift.Decls(t, "../../presets.go"), "cleanName")
+}
