@@ -47,7 +47,11 @@ Errors are printed as `error: ...` on stdout and the exit code is 1.
 
 ## Camera settings (X-T3)
 
-- SETUP > CONNECTION SETTING > CONNECTION MODE: **USB TETHER SHOOTING AUTO**.
+- SETUP > CONNECTION SETTING > CONNECTION MODE: **USB TETHER SHOOTING FIXED**, the setting the
+  Windows app and the macOS app ask for. USB TETHER SHOOTING AUTO gives the same USB control while
+  the cable is connected; FIXED also keeps the camera in tether mode across an accidental
+  disconnect, so it can be connected again without changing menus. With FIXED, pictures are not
+  recorded to the memory card at default settings (the program downloads them over USB).
 - Exposure mode **M** (shutter dial on T or a speed), so the shutter can be set over USB.
 - Focus selector **M** (or AF-S with RELEASE priority).
 - With an adapted or manual lens: SETUP > BUTTON/DIAL SETTING > **SHOOT WITHOUT LENS = ON**.
