@@ -495,7 +495,7 @@ func (p *cropPage) exportCard(gtx layout.Context) layout.Dimensions {
 				func(gtx layout.Context) layout.Dimensions {
 					gtx.Constraints.Max.Y = gtx.Dp(110)
 					gtx.Constraints.Min = gtx.Constraints.Max
-					return p.log.Layout(gtx, th, c.LogText, c.LogSeq, 50)
+					return p.log.LayoutTip(gtx, th, c.LogText, c.LogSeq, 50, cropLogTip)
 				},
 			)
 		})
