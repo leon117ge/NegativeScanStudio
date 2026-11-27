@@ -231,6 +231,9 @@ func csvRows(t *testing.T, path string) [][]string {
 // leveling_log.csv). Every step, reading, final value, serial byte and the
 // CSV row (except its time stamp) must be identical.
 func TestLevelingMatchesWindowsSequence(t *testing.T) {
+	if forked(t) {
+		return
+	}
 	h, c, l := newLightCtl(t)
 	connectSim(t, h, l)
 	sdMac := l.sim
@@ -373,6 +376,9 @@ func TestLevelingStop(t *testing.T) {
 // TestLevelingSimHikrobot: the simulated Hikrobot leveling camera with the
 // simulated light, including the mono trichrome TIFF check.
 func TestLevelingSimHikrobot(t *testing.T) {
+	if forked(t) {
+		return
+	}
 	h, c, l := newLightCtl(t)
 	connectSim(t, h, l)
 	l.Settings().CamSrc = camSrcHikSim
