@@ -299,6 +299,9 @@ func testRAF(t *testing.T) string {
 // Record base, Save base to DB and Save last frame 0 to DB on a camera
 // whose shots are a real RAW.
 func TestRecordAndSaveBaseOnCamera(t *testing.T) {
+	if forked(t) {
+		return
+	}
 	raf := testRAF(t)
 	h, c := dbNew(t)
 	h.scene = "x"
