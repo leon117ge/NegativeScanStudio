@@ -177,7 +177,7 @@ func (p *triPage) scanCard(gtx layout.Context) layout.Dimensions {
 				func(gtx layout.Context) layout.Dimensions {
 					gtx.Constraints.Min.X = gtx.Constraints.Max.X
 					gtx.Constraints.Max.Y = gtx.Dp(130)
-					return p.res.Layout(gtx, th, t.ResText, t.ResSeq, 90)
+					return p.res.LayoutTip(gtx, th, t.ResText, t.ResSeq, 90, triResTip)
 				},
 			)
 		})
