@@ -57,26 +57,11 @@ type iccLayer interface {
 	Close() error
 }
 
-// ErrCameraUnresponsive is returned once an ImageCaptureCore session is no
-// longer usable: a PTP command timed out (ImageCaptureCore may still complete
-// it later, so the camera's transaction is no longer in step with ours) or the
-// camera went away. Every later Exec fails at once with it, so no caller
-// waits out another timeout; the camera has to be disconnected and connected
-// again.
-var ErrCameraUnresponsive = errors.New("the camera stopped responding over USB: disconnect it and connect again (switch the camera off and on if that fails)")
-
-// iccLostError is an iccLayer error after which the session is unusable
-// (timeout or device removed), as opposed to an error for one command.
-type iccLostError struct{ msg string }
-
-func (e *iccLostError) Error() string { return e.msg }
-
 // ICCTransport implements Transport on top of an iccLayer.
 type ICCTransport struct {
-	l      iccLayer
-	mu     sync.Mutex
-	tid    uint32
-	broken error // set after an iccLostError; every later Exec returns it
+	l   iccLayer
+	mu  sync.Mutex
+	tid uint32
 	// DataOutHeader sends the data-out phase with a 12-byte PTP data
 	// container header. Off by default (ImageCaptureCore is documented to
 	// take the payload); mactether -outheader switches it on for a
@@ -165,9 +150,6 @@ func (t *ICCTransport) Exec(op uint16, params []uint32, dataOut []byte, wantData
 	if t.l == nil {
 		return 0, nil, nil, errors.New("device closed")
 	}
-	if t.broken != nil {
-		return 0, nil, nil, t.broken
-	}
 	t.tid++
 	if t.tid == 0 || t.tid == 0xFFFFFFFF {
 		t.tid = 1
@@ -182,11 +164,6 @@ func (t *ICCTransport) Exec(op uint16, params []uint32, dataOut []byte, wantData
 	}
 	resp, in, err := t.l.SendPTP(cmd, out)
 	if err != nil {
-		var lost *iccLostError
-		if errors.As(err, &lost) {
-			t.broken = fmt.Errorf("ImageCaptureCore: %s: %w", lost.msg, ErrCameraUnresponsive)
-			return 0, nil, nil, t.broken
-		}
 		return 0, nil, nil, fmt.Errorf("ImageCaptureCore: %w", err)
 	}
 	code, _, rp, err := parseResponse(resp)
