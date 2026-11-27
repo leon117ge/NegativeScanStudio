@@ -1,3 +1,5 @@
+//go:build !windows
+
 package camera
 
 // A simulated X-T3 behind the ImageCaptureCore pass-through: iccSimLayer

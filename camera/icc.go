@@ -1,3 +1,5 @@
+//go:build !windows
+
 package camera
 
 // Raw PTP over Apple ImageCaptureCore (macOS), the W6 Transport.
