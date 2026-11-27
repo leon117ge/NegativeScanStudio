@@ -194,12 +194,16 @@ func windowsChart(t *testing.T, tif, refPath string) (colorsci.ChartCorners, str
 }
 
 func TestChartCalMatchesWindows(t *testing.T) {
+	parallelParent(t)
 	for _, tc := range []struct {
 		name   string
 		scale  float64
 		rotate bool
 	}{{"clean", 1.0, false}, {"rotated", 1.0, true}, {"clipped", 1.9, false}} {
 		t.Run(tc.name, func(t *testing.T) {
+			if forked(t) {
+				return
+			}
 			h, c, k := newCal(t)
 			calNow = func() time.Time { return time.Date(2026, 11, 27, 10, 30, 0, 0, time.UTC) }
 			defer func() { calNow = time.Now }()

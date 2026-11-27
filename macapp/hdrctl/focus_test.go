@@ -213,6 +213,7 @@ func runMacFocusHik(t *testing.T, fc focusCase, viewW, viewH int) (focusRef, []s
 // steps and every camera call of the Mac page equal the Windows code path
 // on the same simulator frames, exactly.
 func TestFocusGoldenHikMatchesWindows(t *testing.T) {
+	parallelParent(t)
 	const vw, vh = 800, 560
 	for _, fc := range []focusCase{
 		{n: 1, zoomIdx: 0, cx: 0.5, cy: 0.5},
@@ -224,6 +225,9 @@ func TestFocusGoldenHikMatchesWindows(t *testing.T) {
 		{n: 6, zoomIdx: 3, cx: 0.97, cy: 0.03},
 	} {
 		t.Run(fmt.Sprintf("n%d_zoom%d_pan%.2f_%.2f", fc.n, fc.zoomIdx, fc.cx, fc.cy), func(t *testing.T) {
+			if forked(t) {
+				return
+			}
 			got, macCalls, saved, f := runMacFocusHik(t, fc, vw, vh)
 			ref := newRecHik(rgblight.NewSimDevice())
 			want := windowsFocusHik(t, ref, saved, fc.n, zoomVals[fc.zoomIdx], vw, vh, fc.cx, fc.cy)

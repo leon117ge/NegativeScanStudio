@@ -85,13 +85,24 @@ func probe(t *testing.T, c *Ctl) [3]float64 {
 
 func waitBase(t *testing.T, h *testHost, c *Ctl, want string) {
 	t.Helper()
-	h.pump(t, "base readout "+want, 30*time.Second, func() bool { return c.BaseLbl == want })
+	// The recheck re-probes the RAW base on the camera worker; under
+	// -race with the other forked tests running that can pass 30 s, so
+	// the wait matches meter's lock wait.
+	defer func() {
+		if t.Failed() {
+			t.Logf("base readout now %q", c.BaseLbl)
+		}
+	}()
+	h.pump(t, "base readout "+want, 60*time.Second, func() bool { return c.BaseLbl == want })
 }
 
 // Meter base (Fixed frame 0) and stockRecheck: no stock, a matching stock
 // (pass), a different stock (fail, with the Frame 0 notice), the stock
 // changed after the lock, and a probe that is gone.
 func TestFixedFrame0StockCompare(t *testing.T) {
+	if forked(t) {
+		return
+	}
 	h, c := fixedRig(t)
 
 	// no stock

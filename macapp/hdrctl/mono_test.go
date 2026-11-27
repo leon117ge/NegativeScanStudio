@@ -328,6 +328,7 @@ func windowsMonoScan(t *testing.T, c *Ctl, cam hikcam.Device) string {
 // name, the pixels (exact) and the TIFF bytes (only the creation time
 // masked).
 func TestMonoGoldenMatchesWindows(t *testing.T) {
+	parallelParent(t)
 	for _, tc := range []struct {
 		name   string
 		mode   int
@@ -345,6 +346,9 @@ func TestMonoGoldenMatchesWindows(t *testing.T) {
 		{"metered-slow-grab", 1, 0, "1", true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			if forked(t) {
+				return
+			}
 			h, c, l := newLightCtl(t)
 			connectSim(t, h, l)
 			m := c.Mono

@@ -99,7 +99,10 @@ func copyFiles(t *testing.T, srcs []string, dir string) []string {
 // Windows options on copies of the same frames, with dust removal off,
 // Light and Strong, and compares the HDR TIFFs byte for byte.
 func TestMergeGoldenMatchesWindows(t *testing.T) {
-	isolate(t)
+	// the parent only forks the subtests; each child isolates
+	if !parallelParent(t) {
+		isolate(t)
+	}
 	cases := []struct {
 		name                     string
 		frames                   int
@@ -112,6 +115,9 @@ func TestMergeGoldenMatchesWindows(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			if forked(t) {
+				return
+			}
 			src := bracket(t, t.TempDir(), "Roll_0001", 640, 420, tc.frames)
 			mac := copyFiles(t, src, t.TempDir())
 			win := copyFiles(t, src, t.TempDir())
@@ -253,6 +259,9 @@ func TestMergeValidationAndDrop(t *testing.T) {
 // TestMergeStop cancels a running merge: the partial output is removed and
 // the sources are kept.
 func TestMergeStop(t *testing.T) {
+	if forked(t) {
+		return
+	}
 	isolate(t)
 	d := t.TempDir()
 	src := bracket(t, d, "Big", 2400, 1600, 3)
@@ -346,10 +355,16 @@ func atoiT(s string) int {
 }
 
 func TestHairGoldenMatchesWindows(t *testing.T) {
-	isolate(t)
+	// the parent only forks the subtests; each child isolates
+	if !parallelParent(t) {
+		isolate(t)
+	}
 	box := image.Rect(80, 120, 320, 200)
 	for _, name := range []string{"Roll_0002_HDR.tiff", "scan.tif"} {
 		t.Run(name, func(t *testing.T) {
+			if forked(t) {
+				return
+			}
 			mac, win := t.TempDir(), t.TempDir()
 			pm := filepath.Join(mac, name)
 			hairTIFF(t, pm, "NegativeScan Studio test")
