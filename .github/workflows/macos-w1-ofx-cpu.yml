@@ -42,6 +42,34 @@ jobs:
           (cd ../base && x86_64-w64-mingw32-g++-posix -std=c++17 -E -P $INC ofx/src/plugin.cpp) | grep -v '^[[:space:]]*$' | grep -v -x '[[:space:]]*std::atomic<int> fault{kMetalFaultNone};' > /tmp/win_base.ii
           x86_64-w64-mingw32-g++-posix -std=c++17 -E -P $INC ofx/src/plugin.cpp | grep -v '^[[:space:]]*$' > /tmp/win_head.ii
           if cmp -s /tmp/win_base.ii /tmp/win_head.ii; then echo "PASS: Windows preprocessed plugin.cpp is identical to $WIN_BASE_REF (blank lines ignored)"; else diff /tmp/win_base.ii /tmp/win_head.ii | head -n 80; echo "FAIL: Windows source changed"; exit 1; fi
+      - name: Windows app exe is unchanged versus main
+        # The Go app exe depends on the build directory, so both builds use the same pinned
+        # worktree: the merge base with origin/main first, then HEAD. The exe must be identical.
+        env:
+          CGO_ENABLED: '1'
+          CC: x86_64-w64-mingw32-gcc-posix
+          CXX: x86_64-w64-mingw32-g++-posix
+          GOOS: windows
+          GOARCH: amd64
+        run: |
+          set -euo pipefail
+          BASE=$(git merge-base HEAD origin/main)
+          HEAD_SHA=$(git rev-parse HEAD)
+          DIR="$RUNNER_TEMP/nss-win-exe"
+          OUT="$RUNNER_TEMP/win-exe"
+          mkdir -p "$OUT"
+          git worktree add -q --detach "$DIR" "$BASE"
+          for c in "$BASE" "$HEAD_SHA"; do
+            git -C "$DIR" checkout -q --detach "$c"
+            (cd "$DIR" && go build -buildvcs=false -trimpath -ldflags "-H windowsgui -s -w" -o "$OUT/$c.exe" .)
+            echo "$c $(sha256sum "$OUT/$c.exe" | cut -d' ' -f1) $(stat -c %s "$OUT/$c.exe") bytes"
+          done
+          git worktree remove --force "$DIR"
+          if cmp -s "$OUT/$BASE.exe" "$OUT/$HEAD_SHA.exe"; then
+            echo "PASS: Windows app exe at HEAD is identical to origin/main (merge base $BASE)"
+          else
+            echo "FAIL: Windows app exe differs from origin/main (merge base $BASE)"; exit 1
+          fi
       - name: Windows plugin still builds (ofx/build.sh)
         run: CXX=x86_64-w64-mingw32-g++-posix bash ofx/build.sh build/win && ls -l build/win/NegativeScanStudio.ofx.bundle/Contents/Win64
       - name: Windows CPU parity renderer (release flags)
