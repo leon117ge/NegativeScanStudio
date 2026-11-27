@@ -1,3 +1,5 @@
+//go:build !windows
+
 package camera
 
 // A simulated X-T3 behind the ImageCaptureCore pass-through: iccSimLayer
@@ -44,6 +46,8 @@ type iccSimLayer struct {
 	lvServed     bool
 	ops          []uint16
 	closed       bool
+	loseNext     bool // the next command times out (session lost)
+	sent         int  // commands received
 }
 
 func newICCSimLayer(dataInHeader bool) *iccSimLayer {
@@ -57,6 +61,20 @@ func newICCSimLayer(dataInHeader bool) *iccSimLayer {
 
 // OpenICCSim returns a Transport over the simulated ICC layer.
 func OpenICCSim() *ICCTransport { return newICCTransport(newICCSimLayer(false)) }
+
+// SimICCLoseSession makes the next command on a simulated ICC transport time
+// out the way a hung camera does (tests of the reconnect path). It does
+// nothing on a real transport.
+func SimICCLoseSession(t *ICCTransport) {
+	t.mu.Lock()
+	l, ok := t.l.(*iccSimLayer)
+	t.mu.Unlock()
+	if ok {
+		l.mu.Lock()
+		l.loseNext = true
+		l.mu.Unlock()
+	}
+}
 
 var simCtlEnum = []int64{0x0104, 0x0200, 0x0004, 0x0304, 0x0500, 0x000C}
 
@@ -169,6 +187,10 @@ func (s *iccSimLayer) SendPTP(cmd, out []byte) ([]byte, []byte, error) {
 	defer s.mu.Unlock()
 	if s.closed {
 		return nil, nil, fmt.Errorf("session closed")
+	}
+	s.sent++
+	if s.loseNext {
+		return nil, nil, &iccLostError{msg: "PTP command timed out (simulated)"}
 	}
 	h, ok := parseHeader(cmd)
 	if !ok {
