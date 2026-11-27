@@ -22,14 +22,14 @@ type triPage struct {
 	log  LogBox
 	list widget.List
 
-	card              Card
-	modeCB, brCB      Combo
-	capBtn, stopBtn   Button
-	meterBtn, sendBtn Button
-	levelCK           Check
-	res               LogBox
-	tips              [6]Tip
-	resSeq            int
+	card            Card
+	modeCB, brCB    Combo
+	capBtn, stopBtn Button
+	meterBtn        Button
+	levelCK         Check
+	res             LogBox
+	tips            [6]Tip
+	resSeq          int
 }
 
 func newTriPage(u *UI) *triPage {
@@ -142,11 +142,9 @@ func (p *triPage) scanCard(gtx layout.Context) layout.Dimensions {
 								return hp.button(&p.meterBtn, "Meter base", btnOpts{h: 28, disabled: !b.Meter,
 									tip: "Optional: meter frame 0 by hand (as on Camera and Light > Camera). Not needed after leveling or preset load."}, t.Meter)(gtx)
 							}),
-							layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-								gtx.Constraints.Min.X = gtx.Constraints.Max.X
-								return hp.button(&p.sendBtn, "Send base to Develop", btnOpts{h: 28, disabled: !b.Send,
-									tip: "Film base R/G/B measured in the last RGB TIFF -> Develop > Density In for preview. TIFF pixels and metadata remain unchanged."}, t.SendBase)(gtx)
-							}),
+							// Windows' "Send base to Develop" is not ported: its only
+							// consumer is main.go's Develop / Convert hook
+							layout.Flexed(1, layout.Spacer{}.Layout),
 						)
 					})
 				},
